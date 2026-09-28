@@ -50,25 +50,34 @@ class LaneTracker:
         self.prev_right = None
         self.lost_frames = 0
 
+        # [임시 진단용] 노드에서 self.tracker.debug_log = self.get_logger().info 로 주입하면
+        # 인스턴스별로 왜 걸러졌는지(min_pixels/near_reach_ratio) 1초 간격으로 로그를 남김
+        self.debug_log = None
+
     # -----------------------------------------------------------
     # 단일 인스턴스 마스크 -> ROI 내 '최하단' x좌표 (정규화). 멀리 있는 차선이면 None
     # -----------------------------------------------------------
     def _instance_bottom_x(self, instance_mask: np.ndarray, roi_start: int, h: int, w: int):
+        """반환값: (x_또는_None, 진단_사유_문자열). 사유는 [임시 진단용] 로그에만 쓰인다."""
         roi = instance_mask[roi_start:, :]
         # np.nonzero: roi에서 0이 아닌(=마스크가 칠해진) 픽셀들의 좌표를 (y좌표 배열, x좌표 배열)로 반환
         ys, xs = np.nonzero(roi)
         if len(xs) < self.min_pixels:
-            return None
+            return None, f'거부(min_pixels): roi내 픽셀={len(xs)} < min_pixels={self.min_pixels}'
 
         # 마스크의 가장 아래 지점이 이미지 하단에서 너무 멀면 '멀리 있는 차선' -> 무시
         y_max = int(ys.max())
-        if (roi.shape[0] - 1 - y_max) > self.near_reach_ratio * h:
-            return None
+        gap_px = roi.shape[0] - 1 - y_max
+        limit_px = self.near_reach_ratio * h
+        if gap_px > limit_px:
+            return None, (f'거부(near_reach_ratio): 최하단이 화면 맨아래에서 {gap_px}px 떨어짐 '
+                           f'> 허용 {limit_px:.1f}px (near_reach_ratio={self.near_reach_ratio}, h={h})')
 
         # 가장 아래 지점 근처 띠(band)의 x평균 = 로봇에 가장 가까운 지점의 x
         band_px = max(1, int(h * self.bottom_band_ratio))
         near_xs = xs[ys >= y_max - band_px]
-        return float(near_xs.mean()) / w
+        x = float(near_xs.mean()) / w
+        return x, f'통과: roi내 픽셀={len(xs)}, gap={gap_px}px<=limit={limit_px:.1f}px, x={x:.3f}'
 
     # -----------------------------------------------------------
     # 단독으로 보이는 차선이 왼쪽인지 판정 (이전 프레임 위치와 가까운 쪽)
@@ -95,10 +104,20 @@ class LaneTracker:
         if instance_masks is not None and len(instance_masks) > 0:
             h, w = instance_masks.shape[1], instance_masks.shape[2]
             roi_start = int(h * (1 - self.roi_ratio))
-            for inst in instance_masks:
-                x = self._instance_bottom_x(inst, roi_start, h, w)
+            debug_lines = []
+            for i, inst in enumerate(instance_masks):
+                x, reason = self._instance_bottom_x(inst, roi_start, h, w)
+                debug_lines.append(f'#{i} {reason}')
                 if x is not None:
                     xs.append(x)
+
+            # [임시 진단용] 인스턴스별로 왜 통과/거부됐는지 1초 간격으로 출력
+            if self.debug_log is not None:
+                self.debug_log(
+                    f'[LaneTracker] h={h} w={w} roi_ratio={self.roi_ratio} '
+                    f'near_reach_ratio={self.near_reach_ratio} min_pixels={self.min_pixels} :: '
+                    + ' | '.join(debug_lines),
+                    throttle_duration_sec=1.0)
 
         if not xs:
             self.lost_frames += 1
@@ -168,18 +187,18 @@ class LaneDetectorNode(Node):
 
         # 파라미터 선언 (이름, 기본값)
         self.declare_parameter('model_path', '/home/jinho/dev_ws/pinky_slam_nav/pinky_camera/best.pt')
-        self.declare_parameter('imgsz', 640)
-        self.declare_parameter('conf', 0.5)
+        self.declare_parameter('imgsz', 640)                           # 추론 해상도. 클수록 정확하지만 느림
+        self.declare_parameter('conf', 0.35)                           # YOLO 검출 신뢰도 하한. 낮을수록 많이 잡고 오검출도 늘어남
         self.declare_parameter('device', 'cpu')
         self.declare_parameter('crossline_class_id', 0)
         self.declare_parameter('lane_class_id', 1)
-        self.declare_parameter('lane_roi_ratio', 0.2)
-        self.declare_parameter('min_lane_pixels', 15)
+        self.declare_parameter('lane_roi_ratio', 0.7)                  # 화면 하단 몇 %를 볼지
+        self.declare_parameter('min_lane_pixels', 15)                  # 이 픽셀 수보다 적은 마스크는 노이즈로 버림
         self.declare_parameter('assumed_half_lane_width_ratio', 0.35)  # 차선 폭 초기 가정값(절반). 이후 자동 학습
-        self.declare_parameter('near_reach_ratio', 0.1)         # 이 비율보다 멀리서 끝나는 차선은 무시
-        self.declare_parameter('bottom_band_ratio', 0.05)       # 최하단 x 계산용 띠 두께
-        self.declare_parameter('lane_width_alpha', 0.1)         # 차선 폭 학습 속도
-        self.declare_parameter('history_reset_frames', 15)      # 차선 소실 시 좌/우 이력 초기화까지 프레임 수
+        self.declare_parameter('near_reach_ratio', 0.3)                # 이 비율보다 멀리서 끝나는 차선은 무시
+        self.declare_parameter('bottom_band_ratio', 0.05)              # 최하단 x 계산용 띠 두께
+        self.declare_parameter('lane_width_alpha', 0.1)                # 차선 폭 학습 속도
+        self.declare_parameter('history_reset_frames', 15)             # 차선 소실 시 좌/우 이력 초기화까지 프레임 수
         self.declare_parameter('debug_image', True)
         self.declare_parameter('jpeg_quality', 80)
 
@@ -210,6 +229,9 @@ class LaneDetectorNode(Node):
             width_alpha=self.lane_width_alpha,
             history_reset_frames=self.history_reset_frames,
         )
+        # [임시 진단용] lane/detected가 계속 False로 나오는 원인(min_pixels vs near_reach_ratio)을
+        # 확인하기 위한 로그 콜백 주입. 원인 파악 후 제거할 것.
+        self.tracker.debug_log = self.get_logger().info
 
         # ultralytics(torch)는 import가 무거우므로 노드 생성 시점에 import
         from ultralytics import YOLO
