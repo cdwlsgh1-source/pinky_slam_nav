@@ -2,9 +2,20 @@ import sys
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool, Float32
+
+
+# max(최소값, min(최대값, x)): x를 [최소값, 최대값] 범위로 잘라내는(clamp) 관용 표현
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+# 현재값에서 목표값으로 가되, 한 스텝에 max_delta 이상 변하지 않게 제한 (가속도 제한)
+def slew(current, target, max_delta):
+    return current + clamp(target - current, -max_delta, max_delta)
 
 
 class LaneFollowerNode(Node):
@@ -17,9 +28,17 @@ class LaneFollowerNode(Node):
       (offset이 양수 = 차선 중심이 화면 오른쪽에 있음 -> 오른쪽으로 돌아야 하므로
        ROS 표준(양의 각속도 = 반시계/왼쪽 회전) 기준 angular.z는 음수 방향)
 
+    부드러운 주행을 위한 처리:
+      - offset과 D항에 저역통과(EMA) 필터를 적용한다.
+      - 콜백은 값만 저장하고, 고정 주기(control_rate) 타이머에서 cmd_vel을 계산/발행한다.
+      - 선속도/각속도에 가속도 제한(slew)을 걸어 cmd_vel이 계단식으로 튀지 않게 한다.
+
     안전장치:
-      - 차선을 잃어버리면(lane_detected=False) lost_count를 누적하고,
-        max_lost_frames를 넘기면 정지(linear.x=0)한다.
+      - 차선을 잃어버리면(lane_detected=False) 시간 기준으로 단계별 처리한다.
+          (1) lost_hold_time 동안: 마지막 조향을 유지하며 감속
+          (2) lost_stop_time 까지: 마지막으로 라인이 있던 방향으로 천천히 회전하며 탐색
+          (3) 그 이후: 정지(linear.x=0)
+        소실 중의 offset 값은 신뢰하지 않고 무시한다.
       - offset 토픽 자체가 일정 시간(watchdog_timeout) 이상 끊기면(카메라/추론 노드 다운)
         무조건 정지한다.
     """
@@ -30,31 +49,54 @@ class LaneFollowerNode(Node):
     def __init__(self):
         super().__init__('lane_follower_node')
 
-        self.declare_parameter('linear_speed', 0.15)            # 기본 직진 속도 (m/s)
-        self.declare_parameter('min_linear_speed', 0.05)        # 많이 꺾을 때 최저 속도
-        self.declare_parameter('kp', 1.2)                       # 비례 게인
-        self.declare_parameter('kd', 0.3)                       # 미분 게인
-        self.declare_parameter('max_angular_speed', 1.5)        # 각속도 제한 (rad/s)
-        self.declare_parameter('max_lost_frames', 10)           # 차선 미검출 허용 프레임 수
+        self.declare_parameter('linear_speed', 0.08)            # 기본 직진 속도 (m/s)
+        self.declare_parameter('min_linear_speed', 0.03)        # 많이 꺾을 때 최저 속도
+        self.declare_parameter('max_linear_accel', 0.15)        # 선속도 가속도 제한 (m/s^2)
+        self.declare_parameter('kp', 0.8)                       # 비례 게인
+        self.declare_parameter('kd', 0.1)                       # 미분 게인
+        self.declare_parameter('max_angular_speed', 0.8)        # 각속도 제한 (rad/s)
+        self.declare_parameter('max_angular_accel', 2.0)        # 각속도 가속도 제한 (rad/s^2)
+        self.declare_parameter('offset_alpha', 0.5)             # offset 필터 (0~1, 작을수록 부드러움)
+        self.declare_parameter('d_alpha', 0.3)                  # 미분값 필터 (0~1, 작을수록 부드러움)
+        self.declare_parameter('lost_hold_time', 0.3)           # 차선 소실 시 마지막 조향 유지 시간(s)
+        self.declare_parameter('lost_stop_time', 1.5)           # 차선 소실 후 완전 정지까지 시간(s)
+        self.declare_parameter('search_angular_speed', 0.3)     # 소실 후 탐색 회전 속도 (0이면 탐색 안 함)
+        self.declare_parameter('lost_speed_scale', 0.5)         # 소실 중 속도 배율
         self.declare_parameter('watchdog_timeout', 0.5)         # offset 미수신 시 정지까지 시간(s)
+        self.declare_parameter('control_rate', 20.0)            # 제어 루프 주기 (Hz)
         self.declare_parameter('stop_on_crossline', False)      # Crossline 검출 시 정지할지 여부
         self.declare_parameter('crossline_stop_duration', 2.0)  # 정지 유지 시간(s)
 
         self.linear_speed = self.get_parameter('linear_speed').value
         self.min_linear_speed = self.get_parameter('min_linear_speed').value
+        self.max_linear_accel = self.get_parameter('max_linear_accel').value
         self.kp = self.get_parameter('kp').value
         self.kd = self.get_parameter('kd').value
         self.max_angular_speed = self.get_parameter('max_angular_speed').value
-        self.max_lost_frames = self.get_parameter('max_lost_frames').value
+        self.max_angular_accel = self.get_parameter('max_angular_accel').value
+        self.offset_alpha = self.get_parameter('offset_alpha').value
+        self.d_alpha = self.get_parameter('d_alpha').value
+        self.lost_hold_time = self.get_parameter('lost_hold_time').value
+        self.lost_stop_time = self.get_parameter('lost_stop_time').value
+        self.search_angular_speed = self.get_parameter('search_angular_speed').value
+        self.lost_speed_scale = self.get_parameter('lost_speed_scale').value
         self.watchdog_timeout = self.get_parameter('watchdog_timeout').value
+        self.dt_ctrl = 1.0 / self.get_parameter('control_rate').value
         self.stop_on_crossline = self.get_parameter('stop_on_crossline').value
         self.crossline_stop_duration = self.get_parameter('crossline_stop_duration').value
 
-        self._prev_offset = 0.0
-        self._prev_time = self.get_clock().now()
-        self._lost_count = 0
-        self._last_msg_time = self.get_clock().now()
+        now = self.get_clock().now()
+        self._offset_f = 0.0            # 필터링된 offset
+        self._d_f = 0.0                 # 필터링된 미분값
+        self._prev_time = None          # D항 계산용 이전 수신 시각 (소실 시 None으로 리셋)
+        self._last_msg_time = now
+        self._last_valid_time = now     # 마지막으로 차선이 검출된 시각
+        self._last_side = 0.0           # 마지막으로 차선이 있던 방향 (offset 부호, 탐색 회전용)
         self._crossline_stop_until = None  # rclpy Time or None
+        self._lane_detected = False
+
+        self._cmd_lin = 0.0             # 현재 출력값 (가속도 제한 계산용)
+        self._cmd_ang = 0.0
 
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
 
@@ -64,22 +106,18 @@ class LaneFollowerNode(Node):
         self.create_subscription(Bool, 'lane/detected', self.detected_callback, qos)
         self.create_subscription(Bool, 'crossline/detected', self.crossline_callback, qos)
 
-        # offset 토픽이 끊기면(카메라/추론 노드 다운) 정지시키는 워치독 타이머
-        self.create_timer(0.1, self.watchdog_tick)
-
-        self._lane_detected = False
+        # 고정 주기 제어 루프 (내부에서 offset 토픽 끊김 워치독도 함께 확인)
+        self.create_timer(self.dt_ctrl, self.control_loop)
 
         self.get_logger().info('lane_follower_node 시작 (cmd_vel 발행)')
 
     # ===============================================================
-    # 콜백: 차선 검출 여부 수신 -> lost_count 갱신
+    # 콜백: 차선 검출 여부 수신 -> 마지막 검출 시각 갱신
     # ===============================================================
     def detected_callback(self, msg: Bool):
         self._lane_detected = msg.data
-        if not msg.data:
-            self._lost_count += 1
-        else:
-            self._lost_count = 0
+        if msg.data:
+            self._last_valid_time = self.get_clock().now()
 
     # ===============================================================
     # 콜백: Crossline 검출 시 정지 종료 시각(_crossline_stop_until) 설정
@@ -88,54 +126,111 @@ class LaneFollowerNode(Node):
         if self.stop_on_crossline and msg.data and self._crossline_stop_until is None:
             self.get_logger().info('Crossline 검출: 잠시 정지')
             # ROS 시간(Time)에 ROS 기간(Duration)을 더해 "몇 초 뒤 시각"을 구함
-            self._crossline_stop_until = self.get_clock().now() + rclpy.duration.Duration(
+            self._crossline_stop_until = self.get_clock().now() + Duration(
                 seconds=self.crossline_stop_duration)
 
     # ===============================================================
-    # 메인 콜백: offset 수신 -> PD 제어로 cmd_vel 계산 및 발행
+    # 콜백: offset 수신 -> 필터링 후 저장만 함 (cmd_vel 계산은 control_loop에서)
     # ===============================================================
     def offset_callback(self, msg: Float32):
         now = self.get_clock().now()
         self._last_msg_time = now
 
+        # 차선 소실 중의 offset은 신뢰할 수 없으므로 무시하고, D항 이력을 리셋
+        if not self._lane_detected:
+            self._prev_time = None
+            return
+
+        offset = clamp(float(msg.data), -1.0, 1.0)
+        prev_filtered = self._offset_f
+        # 저역통과(EMA) 필터: 갑작스러운 offset 변화를 완화
+        self._offset_f = self.offset_alpha * offset + (1.0 - self.offset_alpha) * prev_filtered
+
+        if self._prev_time is None:
+            # 소실 후 복귀한 첫 프레임: 미분 스파이크 방지를 위해 D항은 0
+            self._d_f = 0.0
+        else:
+            # (now - self._prev_time)는 ROS Duration 객체 -> .nanoseconds로 나노초를 꺼내 초 단위로 변환
+            dt = max((now - self._prev_time).nanoseconds / 1e9, 1e-3)
+            d_offset = (self._offset_f - prev_filtered) / dt
+            self._d_f = self.d_alpha * d_offset + (1.0 - self.d_alpha) * self._d_f
+        self._prev_time = now
+
+        if abs(self._offset_f) > 0.05:
+            self._last_side = 1.0 if self._offset_f > 0 else -1.0
+
+    # ===============================================================
+    # 메인 제어 루프: 고정 주기로 PD 제어 -> 가속도 제한 -> cmd_vel 발행
+    # ===============================================================
+    def control_loop(self):
+        now = self.get_clock().now()
+
+        # offset 수신이 오래 끊겼으면 강제 정지
+        if self.watchdog_tick():
+            return
+
         # Crossline 정지 구간이면 그대로 정지 유지
-        if self._crossline_stop_until is not None:     
+        if self._crossline_stop_until is not None:
             if now < self._crossline_stop_until:
-                self.publish_cmd(0.0, 0.0)
+                self._stop_now()
                 return
             self._crossline_stop_until = None
 
-        # 차선을 너무 오래 잃어버렸으면 정지 (그 자리에서 찾을 시간을 줌)
-        if self._lost_count >= self.max_lost_frames:   
-            self.publish_cmd(0.0, 0.0)
-            return
+        if self._lane_detected:
+            target_lin, target_ang = self.compute_tracking()
+        else:
+            # 차선 소실: 경과 시간에 따라 유지 -> 탐색 -> 정지
+            lost = (now - self._last_valid_time).nanoseconds / 1e9
+            if lost < self.lost_hold_time:
+                # 마지막 조향을 유지하며 감속
+                target_lin = self.min_linear_speed * self.lost_speed_scale
+                target_ang = self._cmd_ang
+            elif lost < self.lost_stop_time:
+                # 마지막으로 라인이 있던 방향으로 제자리 회전하며 탐색
+                target_lin = 0.0
+                target_ang = -self._last_side * self.search_angular_speed
+            else:
+                # 차선을 너무 오래 잃어버렸으면 정지
+                target_lin, target_ang = 0.0, 0.0
 
-        # (now - self._prev_time)는 ROS Duration 객체 -> .nanoseconds로 나노초를 꺼내 초 단위로 변환
-        offset = float(msg.data)  
-        dt = max((now - self._prev_time).nanoseconds / 1e9, 1e-3)
-        d_offset = (offset - self._prev_offset) / dt
+        # 가속도 제한을 거쳐 급격한 명령 변화를 방지
+        self._cmd_lin = slew(self._cmd_lin, target_lin, self.max_linear_accel * self.dt_ctrl)
+        self._cmd_ang = slew(self._cmd_ang, target_ang, self.max_angular_accel * self.dt_ctrl)
+        self.publish_cmd(self._cmd_lin, self._cmd_ang)
 
-        # max(최소값, min(최대값, x)): x를 [최소값, 최대값] 범위로 잘라내는(clamp) 관용 표현
-        angular_z = -(self.kp * offset + self.kd * d_offset)
-        angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
+    # ===============================================================
+    # 유틸: 필터링된 offset으로 PD 제어 목표 속도(linear, angular) 계산
+    # ===============================================================
+    def compute_tracking(self):
+        offset = self._offset_f
+
+        angular_z = -(self.kp * offset + self.kd * self._d_f)
+        angular_z = clamp(angular_z, -self.max_angular_speed, self.max_angular_speed)
 
         # 많이 꺾을수록(오프셋이 클수록) 속도를 줄여서 커브에서 안정적으로 돌게 함
         speed_scale = max(0.0, 1.0 - min(abs(offset), 1.0))
         linear_x = self.min_linear_speed + (self.linear_speed - self.min_linear_speed) * speed_scale
 
-        self.publish_cmd(linear_x, angular_z)
-
-        self._prev_offset = offset
-        self._prev_time = now
+        return linear_x, angular_z
 
     # ===============================================================
-    # 타이머: offset 수신이 오래 끊기면 강제 정지
+    # 워치독: offset 수신이 오래 끊기면 강제 정지 (정지했으면 True 반환)
     # ===============================================================
-    def watchdog_tick(self):          
+    def watchdog_tick(self):
         # 마지막 offset 수신 후 지금까지 흐른 시간(초)
         elapsed = (self.get_clock().now() - self._last_msg_time).nanoseconds / 1e9
         if elapsed > self.watchdog_timeout:
-            self.publish_cmd(0.0, 0.0)
+            self._stop_now()
+            return True
+        return False
+
+    # ===============================================================
+    # 유틸: 출력 상태까지 함께 0으로 만들고 정지 명령 발행
+    # ===============================================================
+    def _stop_now(self):
+        self._cmd_lin = 0.0
+        self._cmd_ang = 0.0
+        self.publish_cmd(0.0, 0.0)
 
     # ===============================================================
     # 유틸: Twist 메시지를 만들어 cmd_vel로 발행
