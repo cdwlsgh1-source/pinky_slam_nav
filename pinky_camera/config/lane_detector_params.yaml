@@ -10,6 +10,14 @@ lane_detector_node:
     device: cpu
     # Crossline 클래스 id (data.yaml 기준)
     crossline_class_id: 0
+    # 화면 하단 몇 %를 ROI로 볼지. 예전에 ros2 param set으로만 올렸다면 재시작 시
+    # 코드 기본값(0.4)으로 되돌아갔을 것이므로 여기 명시적으로 넣어 유지되게 함
+    lane_roi_ratio: 0.7
+    # 차선 마스크의 최하단이 화면 맨 아래 가장자리에서 이 비율(화면 높이 기준)보다
+    # 멀리 떨어져 있으면 '멀리 있는 차선'으로 보고 무시함. 카메라 각도상 차선이
+    # 화면 하단까지 바짝 닿지 않으면 기본값(0.1)에서는 계속 걸러져 lane/detected가
+    # False로만 나옴 -> 완화해서 테스트
+    near_reach_ratio: 0.3
     # 디버그 영상(lane/debug/compressed) 발행 여부. 구독자가 없으면 자동으로 생략됨
     debug_image: true
     # 디버그 영상 JPEG 압축 품질 (1~100)

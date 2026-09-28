@@ -3,5 +3,8 @@
 
   <node pkg="pinky_camera" exec="lane_follower_node" name="lane_follower_node" namespace="$(var namespace)" output="screen">
     <param from="$(find-pkg-share pinky_camera)/config/lane_follower_params.yaml"/>
+    <!-- 실제 모터 드라이버(pinky_bringup)는 네임스페이스 없는 /cmd_vel을 구독하므로
+         cmd_vel만 절대 경로로 리맵. lane/center_offset 등 나머지 토픽은 네임스페이스 유지 -->
+    <remap from="cmd_vel" to="/cmd_vel"/>
   </node>
 </launch>
