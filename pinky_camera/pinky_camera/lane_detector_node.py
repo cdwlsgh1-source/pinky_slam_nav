@@ -10,82 +10,142 @@ from std_msgs.msg import Bool, Float32
 
 
 # ===============================================================
-# 단일 인스턴스 마스크 -> ROI 내 x좌표 평균
+# 좌/우 차선 추적기 (프레임 간 상태를 유지하며 좌/우 판정 + 중심 오프셋 계산)
 # ===============================================================
-def _instance_centroid_x(instance_mask: np.ndarray, roi_start: int, min_pixels: int):
-    roi = instance_mask[roi_start:, :]
-    # np.nonzero: roi에서 0이 아닌(=마스크가 칠해진) 픽셀들의 좌표를 (y좌표 배열, x좌표 배열)로 반환
-    ys, xs = np.nonzero(roi)
-    if len(xs) < min_pixels:
-        return None
-    return float(xs.mean())
-
-
-# ===============================================================
-# 차선 인스턴스 마스크 -> 중심 오프셋 계산
-# ===============================================================
-def extract_center_offset(
-    instance_masks: np.ndarray,
-    roi_ratio: float = 0.2,
-    min_pixels: int = 15,
-    assumed_half_lane_width_ratio: float = 0.35,
-):
+class LaneTracker:
     """
-    instance_masks: (N, H, W) 크기의, Lane 클래스로 검출된 '개별 인스턴스' 마스크들
-                     (좌/우 차선이 각각 별도 인스턴스로 검출된다고 가정).
+    핵심 아이디어: 각 인스턴스의 '로봇에 가장 가까운 지점(마스크 최하단)'의 x를 구하고,
+    이전 프레임의 좌/우 차선 위치를 기억해서 "이 차선이 왼쪽인가 오른쪽인가"를 판정한다.
+    (이미지 중앙 기준 판정은 이력이 없을 때만 사용)
+    한쪽만 보일 때는 양쪽이 다 보일 때 학습해 둔 차선 폭으로 반대편 위치를 추정한다.
+
+    모든 x좌표는 마스크 폭으로 정규화(0.0~1.0)해서 다룬다 (해상도와 무관).
+
     roi_ratio: 화면 하단에서 몇 %를 관심영역(ROI)으로 볼지. 0.2 = 하단 20%.
     min_pixels: 인스턴스를 유효한 차선으로 인정할 최소 픽셀 수 (노이즈 제거용).
-    assumed_half_lane_width_ratio: 한쪽 차선만 보일 때, 반대편 차선까지의 거리를
-                     이미지 폭 대비 비율로 가정 (예: 0.35 = 이미지 폭의 35%).
-
-    반환값: (offset, detected)
-      offset   : -1.0(화면 완전 왼쪽) ~ 1.0(화면 완전 오른쪽), 0.0이 정중앙
-      detected : 좌/우 중 최소 한쪽 차선을 찾았는지 여부
-
-    핵심 아이디어: 모든 차선 픽셀을 하나로 합쳐 평균내지 않고, 각 인스턴스의
-    중심 x를 구한 뒤 이미지 중앙 기준 좌/우로 나눠서, "좌측 차선 중심"과
-    "우측 차선 중심"의 중간점을 실제 목표 중심으로 삼는다.
+    init_lane_width_ratio: 차선 폭(좌~우 차선 사이 거리)의 초기 가정값 (이미지 폭 대비 비율).
+                     양쪽이 다 보일 때마다 실측값으로 갱신된다.
+    near_reach_ratio: 인스턴스의 최하단이 이미지 하단에서 이 비율보다 멀리 떨어져 있으면
+                     '멀리 있는 차선'으로 보고 무시 (예: 0.1 = 하단 10% 안에 닿아야 인정).
+    bottom_band_ratio: 최하단 x를 구할 때 사용할 띠의 두께 (이미지 높이 대비 비율).
+    width_alpha: 차선 폭 이동평균 계수 (0~1, 작을수록 천천히 갱신).
+    history_reset_frames: 차선이 이 프레임 수 이상 연속으로 안 보이면 좌/우 이력을 초기화.
     """
-    if instance_masks is None or len(instance_masks) == 0:
-        return 0.0, False
 
-    h, w = instance_masks.shape[1], instance_masks.shape[2]
-    roi_start = int(h * (1 - roi_ratio))
-    image_center_x = w / 2.0
+    MIN_LANE_WIDTH = 0.3    # 학습되는 차선 폭의 하한 (이미지 폭 대비)
+    MAX_LANE_WIDTH = 0.95   # 학습되는 차선 폭의 상한
 
-    left_xs, right_xs = [], []
-    for inst in instance_masks:
-        cx = _instance_centroid_x(inst, roi_start, min_pixels)
-        if cx is None:
-            continue
-        if cx < image_center_x:
-            left_xs.append(cx)
+    def __init__(self, roi_ratio=0.2, min_pixels=15, init_lane_width_ratio=0.7,
+                 near_reach_ratio=0.1, bottom_band_ratio=0.05,
+                 width_alpha=0.1, history_reset_frames=15):
+        self.roi_ratio = roi_ratio
+        self.min_pixels = min_pixels
+        self.near_reach_ratio = near_reach_ratio
+        self.bottom_band_ratio = bottom_band_ratio
+        self.width_alpha = width_alpha
+        self.history_reset_frames = history_reset_frames
+
+        self.lane_width = init_lane_width_ratio  # 학습된 차선 폭 (정규화)
+        self.prev_left = None                    # 이전 프레임의 좌/우 차선 위치 (정규화)
+        self.prev_right = None
+        self.lost_frames = 0
+
+    # -----------------------------------------------------------
+    # 단일 인스턴스 마스크 -> ROI 내 '최하단' x좌표 (정규화). 멀리 있는 차선이면 None
+    # -----------------------------------------------------------
+    def _instance_bottom_x(self, instance_mask: np.ndarray, roi_start: int, h: int, w: int):
+        roi = instance_mask[roi_start:, :]
+        # np.nonzero: roi에서 0이 아닌(=마스크가 칠해진) 픽셀들의 좌표를 (y좌표 배열, x좌표 배열)로 반환
+        ys, xs = np.nonzero(roi)
+        if len(xs) < self.min_pixels:
+            return None
+
+        # 마스크의 가장 아래 지점이 이미지 하단에서 너무 멀면 '멀리 있는 차선' -> 무시
+        y_max = int(ys.max())
+        if (roi.shape[0] - 1 - y_max) > self.near_reach_ratio * h:
+            return None
+
+        # 가장 아래 지점 근처 띠(band)의 x평균 = 로봇에 가장 가까운 지점의 x
+        band_px = max(1, int(h * self.bottom_band_ratio))
+        near_xs = xs[ys >= y_max - band_px]
+        return float(near_xs.mean()) / w
+
+    # -----------------------------------------------------------
+    # 단독으로 보이는 차선이 왼쪽인지 판정 (이전 프레임 위치와 가까운 쪽)
+    # -----------------------------------------------------------
+    def _is_left(self, x: float) -> bool:
+        if self.prev_left is not None and self.prev_right is not None:
+            return abs(x - self.prev_left) <= abs(x - self.prev_right)
+        # 이력이 없으면 이미지 중앙 기준
+        return x < 0.5
+
+    # -----------------------------------------------------------
+    # 차선 인스턴스 마스크 -> (offset, detected, left_detected, right_detected)
+    # -----------------------------------------------------------
+    def update(self, instance_masks):
+        """
+        instance_masks: (N, H, W) 크기의, Lane 클래스로 검출된 '개별 인스턴스' 마스크들 (없으면 None).
+
+        반환값: (offset, detected, left_detected, right_detected)
+          offset   : -1.0(화면 완전 왼쪽) ~ 1.0(화면 완전 오른쪽), 0.0이 정중앙
+          detected : 좌/우 중 최소 한쪽 차선을 찾았는지 여부
+          left_detected / right_detected : 이번 프레임에 실제로 관측된 쪽 (추정한 쪽은 False)
+        """
+        xs = []
+        if instance_masks is not None and len(instance_masks) > 0:
+            h, w = instance_masks.shape[1], instance_masks.shape[2]
+            roi_start = int(h * (1 - self.roi_ratio))
+            for inst in instance_masks:
+                x = self._instance_bottom_x(inst, roi_start, h, w)
+                if x is not None:
+                    xs.append(x)
+
+        if not xs:
+            self.lost_frames += 1
+            if self.lost_frames >= self.history_reset_frames:
+                self.prev_left = None
+                self.prev_right = None
+            return 0.0, False, False, False
+        self.lost_frames = 0
+
+        # 여러 개로 쪼개져 검출된 경우(점선 등) 가까운 것끼리 묶어서 대표값 하나로 합침
+        # (같은 쪽 차선 조각들은 서로 차선 폭의 절반보다 가깝다고 가정)
+        xs.sort()
+        gap_threshold = 0.5 * self.lane_width
+        clusters = [[xs[0]]]
+        for x in xs[1:]:
+            if x - clusters[-1][-1] < gap_threshold:
+                clusters[-1].append(x)
+            else:
+                clusters.append([x])
+        means = [float(np.mean(c)) for c in clusters]
+
+        if len(means) >= 2:
+            # 양쪽 다 보임: 가장 왼쪽/가장 오른쪽 묶음을 좌/우 차선으로 보고 진짜 중간점 사용
+            left_x, right_x = means[0], means[-1]
+            measured = right_x - left_x
+            if self.MIN_LANE_WIDTH <= measured <= self.MAX_LANE_WIDTH:
+                # 차선 폭 이동평균 갱신 (한쪽만 보일 때 반대편 추정에 사용)
+                self.lane_width = (1.0 - self.width_alpha) * self.lane_width + self.width_alpha * measured
+            lane_center_x = (left_x + right_x) / 2.0
+            self.prev_left, self.prev_right = left_x, right_x
+            left_detected, right_detected = True, True
         else:
-            right_xs.append(cx)
+            x = means[0]
+            if self._is_left(x):
+                # 왼쪽만 보임: 오른쪽 차선이 학습된 차선 폭만큼 떨어져 있다고 가정
+                lane_center_x = x + self.lane_width / 2.0
+                self.prev_left, self.prev_right = x, x + self.lane_width
+                left_detected, right_detected = True, False
+            else:
+                lane_center_x = x - self.lane_width / 2.0
+                self.prev_left, self.prev_right = x - self.lane_width, x
+                left_detected, right_detected = False, True
 
-    # 여러 개로 쪼개져 검출된 경우(점선 등) 같은 쪽끼리는 평균으로 대표값 하나로 합침
-    # "X if 조건 else Y" 는 조건이 참이면 X, 거짓이면 Y (리스트가 비어있으면 None)
-    left_x = float(np.mean(left_xs)) if left_xs else None
-    right_x = float(np.mean(right_xs)) if right_xs else None
-
-    half_lane_px = assumed_half_lane_width_ratio * w
-
-    if left_x is not None and right_x is not None:
-        # 양쪽 다 보임: 진짜 중간점
-        lane_center_x = (left_x + right_x) / 2.0
-    elif left_x is not None:
-        # 왼쪽만 보임: 오른쪽 차선이 half_lane_px*2 만큼 떨어져 있다고 가정하고
-        # 그 중간점(왼쪽 차선 + half_lane_px)을 목표 중심으로 삼는다.
-        lane_center_x = left_x + half_lane_px
-    elif right_x is not None:
-        lane_center_x = right_x - half_lane_px
-    else:
-        return 0.0, False
-
-    offset = (lane_center_x - image_center_x) / image_center_x
-    # np.clip(값, 최소, 최대): 값이 범위를 벗어나면 최소/최대로 잘라냄 (여기선 -1.0~1.0로 제한)
-    offset = float(np.clip(offset, -1.0, 1.0))
-    return offset, True
+        offset = (lane_center_x - 0.5) / 0.5
+        # np.clip(값, 최소, 최대): 값이 범위를 벗어나면 최소/최대로 잘라냄 (여기선 -1.0~1.0로 제한)
+        offset = float(np.clip(offset, -1.0, 1.0))
+        return offset, True, left_detected, right_detected
 
 
 class LaneDetectorNode(Node):
@@ -96,6 +156,8 @@ class LaneDetectorNode(Node):
       - <namespace>/crossline/detected     : Crossline 검출 여부 (std_msgs/Bool)
       - <namespace>/lane/center_offset     : 차선 중심 오프셋 -1.0~1.0 (std_msgs/Float32)
       - <namespace>/lane/detected          : 이번 프레임에서 차선을 찾았는지 여부 (std_msgs/Bool)
+      - <namespace>/lane/left_detected     : 왼쪽 차선이 실제로 관측됐는지 (std_msgs/Bool)
+      - <namespace>/lane/right_detected    : 오른쪽 차선이 실제로 관측됐는지 (std_msgs/Bool)
     """
 
     # ===============================================================
@@ -113,7 +175,11 @@ class LaneDetectorNode(Node):
         self.declare_parameter('lane_class_id', 1)
         self.declare_parameter('lane_roi_ratio', 0.2)
         self.declare_parameter('min_lane_pixels', 15)
-        self.declare_parameter('assumed_half_lane_width_ratio', 0.35)
+        self.declare_parameter('assumed_half_lane_width_ratio', 0.35)  # 차선 폭 초기 가정값(절반). 이후 자동 학습
+        self.declare_parameter('near_reach_ratio', 0.1)         # 이 비율보다 멀리서 끝나는 차선은 무시
+        self.declare_parameter('bottom_band_ratio', 0.05)       # 최하단 x 계산용 띠 두께
+        self.declare_parameter('lane_width_alpha', 0.1)         # 차선 폭 학습 속도
+        self.declare_parameter('history_reset_frames', 15)      # 차선 소실 시 좌/우 이력 초기화까지 프레임 수
         self.declare_parameter('debug_image', True)
         self.declare_parameter('jpeg_quality', 80)
 
@@ -127,8 +193,23 @@ class LaneDetectorNode(Node):
         self.lane_roi_ratio = self.get_parameter('lane_roi_ratio').value
         self.min_lane_pixels = self.get_parameter('min_lane_pixels').value
         self.assumed_half_lane_width_ratio = self.get_parameter('assumed_half_lane_width_ratio').value
+        self.near_reach_ratio = self.get_parameter('near_reach_ratio').value
+        self.bottom_band_ratio = self.get_parameter('bottom_band_ratio').value
+        self.lane_width_alpha = self.get_parameter('lane_width_alpha').value
+        self.history_reset_frames = self.get_parameter('history_reset_frames').value
         self.debug_image = self.get_parameter('debug_image').value
         self.jpeg_quality = self.get_parameter('jpeg_quality').value
+
+        # 좌/우 차선 추적기 (프레임 간 좌/우 위치와 차선 폭을 기억)
+        self.tracker = LaneTracker(
+            roi_ratio=self.lane_roi_ratio,
+            min_pixels=self.min_lane_pixels,
+            init_lane_width_ratio=2.0 * self.assumed_half_lane_width_ratio,
+            near_reach_ratio=self.near_reach_ratio,
+            bottom_band_ratio=self.bottom_band_ratio,
+            width_alpha=self.lane_width_alpha,
+            history_reset_frames=self.history_reset_frames,
+        )
 
         # ultralytics(torch)는 import가 무거우므로 노드 생성 시점에 import
         from ultralytics import YOLO
@@ -145,6 +226,8 @@ class LaneDetectorNode(Node):
         self.crossline_pub = self.create_publisher(Bool, 'crossline/detected', 10)
         self.offset_pub = self.create_publisher(Float32, 'lane/center_offset', 10)
         self.lane_detected_pub = self.create_publisher(Bool, 'lane/detected', 10)
+        self.left_detected_pub = self.create_publisher(Bool, 'lane/left_detected', 10)
+        self.right_detected_pub = self.create_publisher(Bool, 'lane/right_detected', 10)
 
         self.get_logger().info(
             f'모델 로드 완료: {self.model_path} (task={self.model.task}, '
@@ -179,20 +262,23 @@ class LaneDetectorNode(Node):
         crossline_detected = self.crossline_class_id in detected_classes
         self.crossline_pub.publish(Bool(data=crossline_detected))
 
-        # 4. Lane 중심 오프셋 계산 및 발행
-        offset, lane_detected = self.compute_lane_offset(result)
+        # 4. Lane 중심 오프셋 계산 및 발행 (좌/우 개별 검출 여부도 함께 발행)
+        offset, lane_detected, left_detected, right_detected = self.compute_lane_offset(result)
         self.offset_pub.publish(Float32(data=offset))
         self.lane_detected_pub.publish(Bool(data=lane_detected))
+        self.left_detected_pub.publish(Bool(data=left_detected))
+        self.right_detected_pub.publish(Bool(data=right_detected))
 
         # 5. 디버그 영상 발행
         self.publish_debug_image(msg, result)
 
     # ===============================================================
-    # Lane 인스턴스 좌/우 분리 -> 중간점 오프셋 계산
+    # Lane 인스턴스 좌/우 분리(추적) -> 중간점 오프셋 계산
     # ===============================================================
     def compute_lane_offset(self, result):
+        # 차선이 없는 경우도 tracker.update(None)로 넘겨 소실 프레임 수를 세게 함
         if result.masks is None or result.boxes is None:
-            return 0.0, False
+            return self.tracker.update(None)
 
         cls_ids = result.boxes.cls.cpu().numpy().astype(int)
         masks_np = result.masks.data.cpu().numpy()  # (N, H, W), 모델에 따라 원본과 크기가 다를 수 있음
@@ -200,20 +286,15 @@ class LaneDetectorNode(Node):
         # np.where(조건)[0]: cls_ids 중 조건(lane 클래스)을 만족하는 원소들의 인덱스만 배열로 반환
         lane_indices = np.where(cls_ids == self.lane_class_id)[0]
         if len(lane_indices) == 0:
-            return 0.0, False
+            return self.tracker.update(None)
 
         # 인스턴스를 합치지 않고 그대로 넘긴다 (좌/우 차선을 분리해서 보기 위함)
         # masks_np[lane_indices]: lane 인스턴스들만 골라냄 -> 0.5 초과 여부로 0/1 이진 마스크로 변환
         lane_instance_masks = (masks_np[lane_indices] > 0.5).astype(np.uint8)
 
         # 마스크 해상도가 원본 프레임과 다르면 정규화된 offset 계산에는 영향 없음
-        # (extract_center_offset은 mask 자체의 W를 기준으로 정규화하기 때문)
-        return extract_center_offset(
-            lane_instance_masks,
-            self.lane_roi_ratio,
-            self.min_lane_pixels,
-            self.assumed_half_lane_width_ratio,
-        )
+        # (tracker는 mask 자체의 W, H를 기준으로 정규화하기 때문)
+        return self.tracker.update(lane_instance_masks)
 
     # ===============================================================
     # 디버그 영상 발행 (검출 결과를 그린 이미지를 JPEG로 인코딩해 publish)
