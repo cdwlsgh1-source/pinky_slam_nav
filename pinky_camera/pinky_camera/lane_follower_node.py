@@ -22,6 +22,7 @@ class LaneFollowerNode(Node):
     """
     lane_detector_node가 발행하는 lane/center_offset, lane/detected(, crossline/detected)를
     구독해서 실제로 cmd_vel(Twist)을 publish하는 주행 노드.
+    (한쪽 차선 처리를 위해 lane/left_detected, lane/right_detected도 함께 구독한다.)
 
     제어 방식: offset(-1.0 ~ 1.0, 0이 정중앙)에 대한 P(비례) + D(미분) 제어.
       angular.z = -(kp * offset + kd * d_offset/dt)
@@ -33,7 +34,12 @@ class LaneFollowerNode(Node):
       - 콜백은 값만 저장하고, 고정 주기(control_rate) 타이머에서 cmd_vel을 계산/발행한다.
       - 선속도/각속도에 가속도 제한(slew)을 걸어 cmd_vel이 계단식으로 튀지 않게 한다.
 
+    한쪽 차선만 보일 때:
+      - offset이 추정값이므로 속도를 줄이고(single_side_speed_scale),
+        보이는 차선에서 멀어지는 쪽(안 보이는 차선 쪽)으로 회전을 추가한다(single_side_turn_bias).
+
     안전장치:
+      - 검출이 detect_grace_time 이내로 잠깐 끊긴 것은 소실로 보지 않고 계속 추종한다.
       - 차선을 잃어버리면(lane_detected=False) 시간 기준으로 단계별 처리한다.
           (1) lost_hold_time 동안: 마지막 조향을 유지하며 감속
           (2) lost_stop_time 까지: 마지막으로 라인이 있던 방향으로 천천히 회전하며 탐색
@@ -49,7 +55,7 @@ class LaneFollowerNode(Node):
     def __init__(self):
         super().__init__('lane_follower_node')
 
-        self.declare_parameter('linear_speed', 0.08)            # 기본 직진 속도 (m/s)
+        self.declare_parameter('linear_speed', 0.05)            # 기본 직진 속도 (m/s)
         self.declare_parameter('min_linear_speed', 0.03)        # 많이 꺾을 때 최저 속도
         self.declare_parameter('max_linear_accel', 0.15)        # 선속도 가속도 제한 (m/s^2)
         self.declare_parameter('kp', 0.8)                       # 비례 게인
@@ -58,7 +64,10 @@ class LaneFollowerNode(Node):
         self.declare_parameter('max_angular_accel', 2.0)        # 각속도 가속도 제한 (rad/s^2)
         self.declare_parameter('offset_alpha', 0.5)             # offset 필터 (0~1, 작을수록 부드러움)
         self.declare_parameter('d_alpha', 0.3)                  # 미분값 필터 (0~1, 작을수록 부드러움)
-        self.declare_parameter('lost_hold_time', 0.3)           # 차선 소실 시 마지막 조향 유지 시간(s)
+        self.declare_parameter('single_side_speed_scale', 0.6)  # 한쪽 차선만 보일 때 속도 배율
+        self.declare_parameter('single_side_turn_bias', 0.15)   # 한쪽 차선만 보일 때 추가 회전 각속도 (rad/s, 0이면 회전 추가 안 함)
+        self.declare_parameter('detect_grace_time', 0.2)        # 검출이 이 시간 이내로 끊기면 소실로 보지 않고 계속 추종(s)
+        self.declare_parameter('lost_hold_time', 0.5)           # 차선 소실 시 마지막 조향 유지 시간(s, grace 시간 포함)
         self.declare_parameter('lost_stop_time', 1.5)           # 차선 소실 후 완전 정지까지 시간(s)
         self.declare_parameter('search_angular_speed', 0.3)     # 소실 후 탐색 회전 속도 (0이면 탐색 안 함)
         self.declare_parameter('lost_speed_scale', 0.5)         # 소실 중 속도 배율
@@ -76,6 +85,9 @@ class LaneFollowerNode(Node):
         self.max_angular_accel = self.get_parameter('max_angular_accel').value
         self.offset_alpha = self.get_parameter('offset_alpha').value
         self.d_alpha = self.get_parameter('d_alpha').value
+        self.single_side_speed_scale = self.get_parameter('single_side_speed_scale').value
+        self.single_side_turn_bias = self.get_parameter('single_side_turn_bias').value
+        self.detect_grace_time = self.get_parameter('detect_grace_time').value
         self.lost_hold_time = self.get_parameter('lost_hold_time').value
         self.lost_stop_time = self.get_parameter('lost_stop_time').value
         self.search_angular_speed = self.get_parameter('search_angular_speed').value
@@ -94,6 +106,8 @@ class LaneFollowerNode(Node):
         self._last_side = 0.0           # 마지막으로 차선이 있던 방향 (offset 부호, 탐색 회전용)
         self._crossline_stop_until = None  # rclpy Time or None
         self._lane_detected = False
+        self._left_detected = False     # 좌/우 차선이 이번 프레임에 실제로 관측됐는지
+        self._right_detected = False
 
         self._cmd_lin = 0.0             # 현재 출력값 (가속도 제한 계산용)
         self._cmd_ang = 0.0
@@ -104,6 +118,8 @@ class LaneFollowerNode(Node):
 
         self.create_subscription(Float32, 'lane/center_offset', self.offset_callback, qos)
         self.create_subscription(Bool, 'lane/detected', self.detected_callback, qos)
+        self.create_subscription(Bool, 'lane/left_detected', self.left_callback, qos)
+        self.create_subscription(Bool, 'lane/right_detected', self.right_callback, qos)
         self.create_subscription(Bool, 'crossline/detected', self.crossline_callback, qos)
 
         # 고정 주기 제어 루프 (내부에서 offset 토픽 끊김 워치독도 함께 확인)
@@ -118,6 +134,15 @@ class LaneFollowerNode(Node):
         self._lane_detected = msg.data
         if msg.data:
             self._last_valid_time = self.get_clock().now()
+
+    # ===============================================================
+    # 콜백: 좌/우 차선 개별 검출 여부 수신 (한쪽만 보일 때 감속/회전용)
+    # ===============================================================
+    def left_callback(self, msg: Bool):
+        self._left_detected = msg.data
+
+    def right_callback(self, msg: Bool):
+        self._right_detected = msg.data
 
     # ===============================================================
     # 콜백: Crossline 검출 시 정지 종료 시각(_crossline_stop_until) 설정
@@ -176,11 +201,14 @@ class LaneFollowerNode(Node):
                 return
             self._crossline_stop_until = None
 
-        if self._lane_detected:
+        # 마지막으로 차선이 검출된 후 지금까지 흐른 시간(초)
+        lost = (now - self._last_valid_time).nanoseconds / 1e9
+
+        # 검출이 잠깐(detect_grace_time 이내) 끊긴 것은 소실로 보지 않고 마지막 offset으로 계속 추종
+        if self._lane_detected or lost < self.detect_grace_time:
             target_lin, target_ang = self.compute_tracking()
         else:
             # 차선 소실: 경과 시간에 따라 유지 -> 탐색 -> 정지
-            lost = (now - self._last_valid_time).nanoseconds / 1e9
             if lost < self.lost_hold_time:
                 # 마지막 조향을 유지하며 감속
                 target_lin = self.min_linear_speed * self.lost_speed_scale
@@ -205,11 +233,24 @@ class LaneFollowerNode(Node):
         offset = self._offset_f
 
         angular_z = -(self.kp * offset + self.kd * self._d_f)
-        angular_z = clamp(angular_z, -self.max_angular_speed, self.max_angular_speed)
 
         # 많이 꺾을수록(오프셋이 클수록) 속도를 줄여서 커브에서 안정적으로 돌게 함
         speed_scale = max(0.0, 1.0 - min(abs(offset), 1.0))
         linear_x = self.min_linear_speed + (self.linear_speed - self.min_linear_speed) * speed_scale
+
+        # 한쪽 차선만 보이면 offset이 추정값이므로 감속하고,
+        # 보이는 차선에서 멀어지는 쪽(안 보이는 차선 쪽)으로 회전을 추가
+        if self._left_detected != self._right_detected:
+            linear_x *= self.single_side_speed_scale
+            # ROS 표준: 양의 각속도 = 왼쪽 회전, 음수 = 오른쪽 회전
+            # 왼쪽 차선만 보임 -> 오른쪽으로(음수), 오른쪽 차선만 보임 -> 왼쪽으로(양수)
+            if self._left_detected:
+                angular_z -= self.single_side_turn_bias
+            else:
+                angular_z += self.single_side_turn_bias
+
+        # 회전을 더한 뒤에도 최대 각속도를 넘지 않게 제한
+        angular_z = clamp(angular_z, -self.max_angular_speed, self.max_angular_speed)
 
         return linear_x, angular_z
 
