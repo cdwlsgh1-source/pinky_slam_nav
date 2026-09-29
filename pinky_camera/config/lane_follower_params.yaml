@@ -4,16 +4,42 @@ lane_follower_node:
     linear_speed: 0.15
     # 많이 꺾을 때(오프셋이 클 때)의 최저 속도
     min_linear_speed: 0.05
+    # 선속도 가속도 제한 (m/s^2)
+    max_linear_accel: 0.15
     # 비례 게인. 진동(좌우로 크게 흔들림)하면 낮출 것
     kp: 1.2
     # 미분 게인. 반응이 너무 느리면 올리고, 떨림이 심하면 낮출 것
     kd: 0.3
     # 각속도 제한 (rad/s)
     max_angular_speed: 1.5
-    # 차선 미검출을 몇 프레임까지 허용할지 (그 이상이면 정지)
-    max_lost_frames: 10
+    # 각속도 가속도 제한 (rad/s^2)
+    max_angular_accel: 2.0
+    # offset 저역통과 필터 계수 (0~1, 작을수록 부드러움)
+    offset_alpha: 0.5
+    # 미분값(D항) 저역통과 필터 계수 (0~1, 작을수록 부드러움)
+    d_alpha: 0.3
+    # 한쪽 차선만 보일 때 속도 배율
+    single_side_speed_scale: 0.6
+    # 한쪽 차선만 보일 때 추가 회전 각속도 (rad/s, 0이면 회전 추가 안 함)
+    single_side_turn_bias: 0.3
+    # trend(코너 추세) feed-forward 게인. 0이면 미사용, 0보다 크면 코너 진입을 미리 시작
+    kd_trend: 1.0
+    # 이 값을 넘는 trend만 탐색 회전 방향(_last_side)에 반영
+    trend_side_threshold: 0.05
+    # 검출이 이 시간(s) 이내로 끊기면 소실로 보지 않고 마지막 offset으로 계속 추종
+    detect_grace_time: 0.2
+    # 차선 소실 시 마지막 조향을 유지하며 감속하는 시간(s, grace 시간 포함)
+    lost_hold_time: 0.5
+    # 차선 소실 후 완전 정지까지 걸리는 시간(s). 그 전까지는 마지막 추세 방향으로 탐색 회전
+    lost_stop_time: 1.5
+    # 소실 후 탐색 회전 속도 (rad/s, 0이면 탐색 안 함)
+    search_angular_speed: 0.3
+    # 소실 중(hold 단계) 속도 배율
+    lost_speed_scale: 0.5
     # lane/center_offset 토픽이 이 시간(s) 이상 끊기면 무조건 정지 (워치독)
     watchdog_timeout: 0.5
+    # 제어 루프 주기 (Hz)
+    control_rate: 20.0
     # Crossline 검출 시 정지할지 여부
     stop_on_crossline: false
     # Crossline에서 정지할 경우 정지 유지 시간(s)
