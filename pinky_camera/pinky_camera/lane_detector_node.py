@@ -10,24 +10,31 @@ from std_msgs.msg import Bool, Float32
 
 
 # ===============================================================
-# 좌/우 차선 추적기 (프레임 간 상태를 유지하며 좌/우 판정 + 중심 오프셋 계산)
+# 좌/우 차선 추적기 (회귀로 각 차선의 위치+추세를 구하고, 좌/우 판정 + 중심 오프셋 계산)
 # ===============================================================
 class LaneTracker:
     """
-    핵심 아이디어: 각 인스턴스의 '로봇에 가장 가까운 지점(마스크 최하단)'의 x를 구하고,
-    이전 프레임의 좌/우 차선 위치를 기억해서 "이 차선이 왼쪽인가 오른쪽인가"를 판정한다.
-    (이미지 중앙 기준 판정은 이력이 없을 때만 사용)
-    한쪽만 보일 때는 양쪽이 다 보일 때 학습해 둔 차선 폭으로 반대편 위치를 추정한다.
+    핵심 아이디어: 차선은 좌/우 두 줄이고, 로봇은 그 사이(도로 중앙)로 가야 한다.
+    각 인스턴스 마스크를 x = a*y + b 형태로 1차 회귀 피팅해서:
+      - 화면 맨 아래(로봇에 가장 가까운 지점)로 외삽한 x = 그 차선의 근접 위치
+      - 기울기 a = 그 차선이 멀어질수록(위로 갈수록) 어느 쪽으로 휘는지 (trend)
+    를 구한다. 회귀로 외삽하므로 코너에서 마스크가 화면 맨 아래까지 안 닿아도 위치를 낼 수 있다.
 
-    모든 x좌표는 마스크 폭으로 정규화(0.0~1.0)해서 다룬다 (해상도와 무관).
+    근접 위치가 가까운 인스턴스끼리는 같은 차선의 조각(점선 등)으로 보고 하나로 묶는다.
+    묶음이 2개 이상이면 가장 왼쪽/오른쪽을 좌/우 차선으로 보고 실측 중간점을 쓰고,
+    1개면 이전 프레임 위치와 비교해 좌/우를 판정한 뒤 학습된 차선 폭으로 반대편을 추정한다.
+
+    모든 x/y좌표는 마스크 크기로 정규화(0.0~1.0)해서 다룬다 (해상도와 무관).
 
     roi_ratio: 화면 하단에서 몇 %를 관심영역(ROI)으로 볼지. 0.2 = 하단 20%.
-    min_pixels: 인스턴스를 유효한 차선으로 인정할 최소 픽셀 수 (노이즈 제거용).
+    min_pixels: 인스턴스를 유효한 차선 조각으로 인정할 최소 픽셀 수 (노이즈 제거용).
     init_lane_width_ratio: 차선 폭(좌~우 차선 사이 거리)의 초기 가정값 (이미지 폭 대비 비율).
                      양쪽이 다 보일 때마다 실측값으로 갱신된다.
-    near_reach_ratio: 인스턴스의 최하단이 이미지 하단에서 이 비율보다 멀리 떨어져 있으면
-                     '멀리 있는 차선'으로 보고 무시 (예: 0.1 = 하단 10% 안에 닿아야 인정).
-    bottom_band_ratio: 최하단 x를 구할 때 사용할 띠의 두께 (이미지 높이 대비 비율).
+    near_reach_ratio: 인스턴스의 실측 최하단이 이미지 하단에서 이 비율보다 멀리 떨어져 있으면
+                     'detected'(바로 추종하기엔 불확실)에서 제외. 클러스터링/trend 계산에는
+                     여전히 포함된다 (코너에서 끊기기 직전까지 신호를 주기 위함).
+    min_y_span_ratio: 회귀가 의미 있으려면 필요한 최소 y 분산(이미지 높이 대비 비율).
+                     이보다 좁으면(거의 점 하나) 기울기가 노이즈이므로 그 인스턴스의 trend는 0.
     width_alpha: 차선 폭 이동평균 계수 (0~1, 작을수록 천천히 갱신).
     history_reset_frames: 차선이 이 프레임 수 이상 연속으로 안 보이면 좌/우 이력을 초기화.
     """
@@ -36,12 +43,12 @@ class LaneTracker:
     MAX_LANE_WIDTH = 0.95   # 학습되는 차선 폭의 상한
 
     def __init__(self, roi_ratio=0.2, min_pixels=15, init_lane_width_ratio=0.7,
-                 near_reach_ratio=0.1, bottom_band_ratio=0.05,
+                 near_reach_ratio=0.1, min_y_span_ratio=0.05,
                  width_alpha=0.1, history_reset_frames=15):
         self.roi_ratio = roi_ratio
         self.min_pixels = min_pixels
         self.near_reach_ratio = near_reach_ratio
-        self.bottom_band_ratio = bottom_band_ratio
+        self.min_y_span_ratio = min_y_span_ratio
         self.width_alpha = width_alpha
         self.history_reset_frames = history_reset_frames
 
@@ -50,34 +57,45 @@ class LaneTracker:
         self.prev_right = None
         self.lost_frames = 0
 
-        # [임시 진단용] 노드에서 self.tracker.debug_log = self.get_logger().info 로 주입하면
-        # 인스턴스별로 왜 걸러졌는지(min_pixels/near_reach_ratio) 1초 간격으로 로그를 남김
-        self.debug_log = None
-
     # -----------------------------------------------------------
-    # 단일 인스턴스 마스크 -> ROI 내 '최하단' x좌표 (정규화). 멀리 있는 차선이면 None
+    # 단일 인스턴스 마스크 -> (근접 x, 추세, 실측 최하단이 화면 하단 근처인지) 또는 None(픽셀 부족)
     # -----------------------------------------------------------
-    def _instance_bottom_x(self, instance_mask: np.ndarray, roi_start: int, h: int, w: int):
-        """반환값: (x_또는_None, 진단_사유_문자열). 사유는 [임시 진단용] 로그에만 쓰인다."""
+    def _fit_instance(self, instance_mask: np.ndarray, roi_start: int, h: int, w: int):
         roi = instance_mask[roi_start:, :]
         # np.nonzero: roi에서 0이 아닌(=마스크가 칠해진) 픽셀들의 좌표를 (y좌표 배열, x좌표 배열)로 반환
         ys, xs = np.nonzero(roi)
         if len(xs) < self.min_pixels:
-            return None, f'거부(min_pixels): roi내 픽셀={len(xs)} < min_pixels={self.min_pixels}'
+            return None
 
-        # 마스크의 가장 아래 지점이 이미지 하단에서 너무 멀면 '멀리 있는 차선' -> 무시
-        y_max = int(ys.max())
-        gap_px = roi.shape[0] - 1 - y_max
+        # 정규화 좌표로 변환 (y=0: 이미지 맨 위/먼 곳, y=1: 이미지 맨 아래/로봇과 가장 가까운 곳)
+        ys_norm = (ys + roi_start) / float(h)
+        xs_norm = xs / float(w)
+
+        y_span = float(ys_norm.max() - ys_norm.min())
+        if y_span >= self.min_y_span_ratio:
+            a, b = np.polyfit(ys_norm, xs_norm, 1)
+            trend = float(a)
+            near_x = float(a * 1.0 + b)  # 화면 맨 아래(y_norm=1.0)로 외삽
+        else:
+            trend = 0.0
+            near_x = float(xs_norm.mean())
+        near_x = float(np.clip(near_x, 0.0, 1.0))
+
+        # 실측(외삽 아님) 최하단이 이미지 하단에서 너무 멀면 '바로 추종하기엔 불확실'
+        y_max_px = int(ys.max())
+        gap_px = roi.shape[0] - 1 - y_max_px
         limit_px = self.near_reach_ratio * h
-        if gap_px > limit_px:
-            return None, (f'거부(near_reach_ratio): 최하단이 화면 맨아래에서 {gap_px}px 떨어짐 '
-                           f'> 허용 {limit_px:.1f}px (near_reach_ratio={self.near_reach_ratio}, h={h})')
+        # 대각선 차선이 화면 좌/우 가장자리로 빠져나가며 끊기는 경우도 '도달'로 인정
+        edge_margin = int(0.02 * w)
+        touches_side = int(xs.min()) <= edge_margin or int(xs.max()) >= w - 1 - edge_margin
+        reaches_bottom = (gap_px <= limit_px) or touches_side
 
-        # 가장 아래 지점 근처 띠(band)의 x평균 = 로봇에 가장 가까운 지점의 x
-        band_px = max(1, int(h * self.bottom_band_ratio))
-        near_xs = xs[ys >= y_max - band_px]
-        x = float(near_xs.mean()) / w
-        return x, f'통과: roi내 픽셀={len(xs)}, gap={gap_px}px<=limit={limit_px:.1f}px, x={x:.3f}'
+        # 디버그: 어느 조건에서 detected가 False가 되는지 확인용
+        print(f'[fit] gap_px={gap_px} limit_px={limit_px:.1f} '
+              f'xmin={int(xs.min())} xmax={int(xs.max())} '
+              f'near_x={near_x:.3f} trend={trend:.3f} reach={reaches_bottom}', flush=True)
+
+        return near_x, trend, reaches_bottom
 
     # -----------------------------------------------------------
     # 단독으로 보이는 차선이 왼쪽인지 판정 (이전 프레임 위치와 가까운 쪽)
@@ -89,82 +107,84 @@ class LaneTracker:
         return x < 0.5
 
     # -----------------------------------------------------------
-    # 차선 인스턴스 마스크 -> (offset, detected, left_detected, right_detected)
+    # 차선 인스턴스 마스크 -> (offset, detected, left_detected, right_detected, trend)
     # -----------------------------------------------------------
     def update(self, instance_masks):
         """
         instance_masks: (N, H, W) 크기의, Lane 클래스로 검출된 '개별 인스턴스' 마스크들 (없으면 None).
 
-        반환값: (offset, detected, left_detected, right_detected)
-          offset   : -1.0(화면 완전 왼쪽) ~ 1.0(화면 완전 오른쪽), 0.0이 정중앙
-          detected : 좌/우 중 최소 한쪽 차선을 찾았는지 여부
-          left_detected / right_detected : 이번 프레임에 실제로 관측된 쪽 (추정한 쪽은 False)
+        반환값: (offset, detected, left_detected, right_detected, trend)
+          offset   : -1.0(화면 완전 왼쪽) ~ 1.0(화면 완전 오른쪽), 0.0이 정중앙(도로 한가운데)
+          detected : 좌/우 중 최소 한쪽 차선을 신뢰 가능하게(near_reach_ratio 이내) 찾았는지 여부
+          left_detected / right_detected : 이번 프레임에 그쪽 차선이 화면 하단 근처까지 실측됐는지
+          trend    : 보이는 차선이 멀어질수록 오른쪽(+)/왼쪽(-)으로 휘는 정도 (양쪽 다 보이면 평균).
+                     detected가 False여도(코너에서 막 놓친 프레임 포함) 픽셀이 있으면 계산된다.
         """
-        xs = []
+        fits = []
         if instance_masks is not None and len(instance_masks) > 0:
             h, w = instance_masks.shape[1], instance_masks.shape[2]
             roi_start = int(h * (1 - self.roi_ratio))
-            debug_lines = []
-            for i, inst in enumerate(instance_masks):
-                x, reason = self._instance_bottom_x(inst, roi_start, h, w)
-                debug_lines.append(f'#{i} {reason}')
-                if x is not None:
-                    xs.append(x)
+            for inst in instance_masks:
+                r = self._fit_instance(inst, roi_start, h, w)
+                if r is not None:
+                    fits.append(r)  # (near_x, trend, reaches_bottom)
 
-            # [임시 진단용] 인스턴스별로 왜 통과/거부됐는지 1초 간격으로 출력
-            if self.debug_log is not None:
-                self.debug_log(
-                    f'[LaneTracker] h={h} w={w} roi_ratio={self.roi_ratio} '
-                    f'near_reach_ratio={self.near_reach_ratio} min_pixels={self.min_pixels} :: '
-                    + ' | '.join(debug_lines),
-                    throttle_duration_sec=1.0)
-
-        if not xs:
+        if not fits:
             self.lost_frames += 1
             if self.lost_frames >= self.history_reset_frames:
                 self.prev_left = None
                 self.prev_right = None
-            return 0.0, False, False, False
+            return 0.0, False, False, False, 0.0
         self.lost_frames = 0
 
         # 여러 개로 쪼개져 검출된 경우(점선 등) 가까운 것끼리 묶어서 대표값 하나로 합침
         # (같은 쪽 차선 조각들은 서로 차선 폭의 절반보다 가깝다고 가정)
-        xs.sort()
+        fits.sort(key=lambda f: f[0])
         gap_threshold = 0.5 * self.lane_width
-        clusters = [[xs[0]]]
-        for x in xs[1:]:
-            if x - clusters[-1][-1] < gap_threshold:
-                clusters[-1].append(x)
+        clusters = [[fits[0]]]
+        for f in fits[1:]:
+            if f[0] - clusters[-1][-1][0] < gap_threshold:
+                clusters[-1].append(f)
             else:
-                clusters.append([x])
-        means = [float(np.mean(c)) for c in clusters]
+                clusters.append([f])
 
-        if len(means) >= 2:
+        def summarize(cluster):
+            near_xs = [f[0] for f in cluster]
+            trends = [f[1] for f in cluster]
+            reaches = any(f[2] for f in cluster)
+            return float(np.mean(near_xs)), float(np.mean(trends)), reaches
+
+        summaries = [summarize(c) for c in clusters]
+
+        if len(summaries) >= 2:
             # 양쪽 다 보임: 가장 왼쪽/가장 오른쪽 묶음을 좌/우 차선으로 보고 진짜 중간점 사용
-            left_x, right_x = means[0], means[-1]
+            left_x, left_trend, left_reach = summaries[0]
+            right_x, right_trend, right_reach = summaries[-1]
             measured = right_x - left_x
             if self.MIN_LANE_WIDTH <= measured <= self.MAX_LANE_WIDTH:
                 # 차선 폭 이동평균 갱신 (한쪽만 보일 때 반대편 추정에 사용)
                 self.lane_width = (1.0 - self.width_alpha) * self.lane_width + self.width_alpha * measured
             lane_center_x = (left_x + right_x) / 2.0
             self.prev_left, self.prev_right = left_x, right_x
-            left_detected, right_detected = True, True
+            left_detected, right_detected = left_reach, right_reach
+            trend = (left_trend + right_trend) / 2.0
         else:
-            x = means[0]
+            x, trend, reach = summaries[0]
             if self._is_left(x):
                 # 왼쪽만 보임: 오른쪽 차선이 학습된 차선 폭만큼 떨어져 있다고 가정
                 lane_center_x = x + self.lane_width / 2.0
                 self.prev_left, self.prev_right = x, x + self.lane_width
-                left_detected, right_detected = True, False
+                left_detected, right_detected = reach, False
             else:
                 lane_center_x = x - self.lane_width / 2.0
                 self.prev_left, self.prev_right = x - self.lane_width, x
-                left_detected, right_detected = False, True
+                left_detected, right_detected = False, reach
 
         offset = (lane_center_x - 0.5) / 0.5
         # np.clip(값, 최소, 최대): 값이 범위를 벗어나면 최소/최대로 잘라냄 (여기선 -1.0~1.0로 제한)
         offset = float(np.clip(offset, -1.0, 1.0))
-        return offset, True, left_detected, right_detected
+        detected = left_detected or right_detected
+        return offset, detected, left_detected, right_detected, trend
 
 
 class LaneDetectorNode(Node):
@@ -174,9 +194,10 @@ class LaneDetectorNode(Node):
       - <namespace>/lane/debug/compressed  : 마스크/박스를 그린 디버그 영상 (구독자가 있을 때만)
       - <namespace>/crossline/detected     : Crossline 검출 여부 (std_msgs/Bool)
       - <namespace>/lane/center_offset     : 차선 중심 오프셋 -1.0~1.0 (std_msgs/Float32)
-      - <namespace>/lane/detected          : 이번 프레임에서 차선을 찾았는지 여부 (std_msgs/Bool)
-      - <namespace>/lane/left_detected     : 왼쪽 차선이 실제로 관측됐는지 (std_msgs/Bool)
-      - <namespace>/lane/right_detected    : 오른쪽 차선이 실제로 관측됐는지 (std_msgs/Bool)
+      - <namespace>/lane/detected          : offset을 바로 신뢰해도 되는지 여부 (std_msgs/Bool)
+      - <namespace>/lane/left_detected     : 왼쪽 차선이 화면 하단 근처까지 실측됐는지 (std_msgs/Bool)
+      - <namespace>/lane/right_detected    : 오른쪽 차선이 화면 하단 근처까지 실측됐는지 (std_msgs/Bool)
+      - <namespace>/lane/offset_trend      : 보이는 차선이 멀어질수록 휘는 방향/정도 (std_msgs/Float32)
     """
 
     # ===============================================================
@@ -186,7 +207,9 @@ class LaneDetectorNode(Node):
         super().__init__('lane_detector_node')
 
         # 파라미터 선언 (이름, 기본값)
-        self.declare_parameter('model_path', '/home/jinho/dev_ws/pinky_slam_nav/pinky_camera/best.pt')
+        
+        # (모델변경) self.declare_parameter('model_path', '/home/jinho/dev_ws/pinky_slam_nav/pinky_camera/best.pt')
+        self.declare_parameter('model_path', '/home/jinho/dev_ws/pinky_slam_nav/pinky_camera/lane_seg_best.pt')
         self.declare_parameter('imgsz', 640)                           # 추론 해상도. 클수록 정확하지만 느림
         self.declare_parameter('conf', 0.35)                           # YOLO 검출 신뢰도 하한. 낮을수록 많이 잡고 오검출도 늘어남
         self.declare_parameter('device', 'cpu')
@@ -195,8 +218,8 @@ class LaneDetectorNode(Node):
         self.declare_parameter('lane_roi_ratio', 0.7)                  # 화면 하단 몇 %를 볼지
         self.declare_parameter('min_lane_pixels', 15)                  # 이 픽셀 수보다 적은 마스크는 노이즈로 버림
         self.declare_parameter('assumed_half_lane_width_ratio', 0.35)  # 차선 폭 초기 가정값(절반). 이후 자동 학습
-        self.declare_parameter('near_reach_ratio', 0.3)                # 이 비율보다 멀리서 끝나는 차선은 무시
-        self.declare_parameter('bottom_band_ratio', 0.05)              # 최하단 x 계산용 띠 두께
+        self.declare_parameter('near_reach_ratio', 0.3)                # 이 비율보다 멀리서 끝나는 차선은 detected=False
+        self.declare_parameter('min_y_span_ratio', 0.05)               # 회귀 기울기(trend)를 신뢰할 최소 y분산
         self.declare_parameter('lane_width_alpha', 0.1)                # 차선 폭 학습 속도
         self.declare_parameter('history_reset_frames', 15)             # 차선 소실 시 좌/우 이력 초기화까지 프레임 수
         self.declare_parameter('debug_image', True)
@@ -213,25 +236,22 @@ class LaneDetectorNode(Node):
         self.min_lane_pixels = self.get_parameter('min_lane_pixels').value
         self.assumed_half_lane_width_ratio = self.get_parameter('assumed_half_lane_width_ratio').value
         self.near_reach_ratio = self.get_parameter('near_reach_ratio').value
-        self.bottom_band_ratio = self.get_parameter('bottom_band_ratio').value
+        self.min_y_span_ratio = self.get_parameter('min_y_span_ratio').value
         self.lane_width_alpha = self.get_parameter('lane_width_alpha').value
         self.history_reset_frames = self.get_parameter('history_reset_frames').value
         self.debug_image = self.get_parameter('debug_image').value
         self.jpeg_quality = self.get_parameter('jpeg_quality').value
 
-        # 좌/우 차선 추적기 (프레임 간 좌/우 위치와 차선 폭을 기억)
+        # 좌/우 차선 추적기 (프레임 간 좌/우 위치와 차선 폭을 기억, 회귀로 offset/trend 계산)
         self.tracker = LaneTracker(
             roi_ratio=self.lane_roi_ratio,
             min_pixels=self.min_lane_pixels,
             init_lane_width_ratio=2.0 * self.assumed_half_lane_width_ratio,
             near_reach_ratio=self.near_reach_ratio,
-            bottom_band_ratio=self.bottom_band_ratio,
+            min_y_span_ratio=self.min_y_span_ratio,
             width_alpha=self.lane_width_alpha,
             history_reset_frames=self.history_reset_frames,
         )
-        # [임시 진단용] lane/detected가 계속 False로 나오는 원인(min_pixels vs near_reach_ratio)을
-        # 확인하기 위한 로그 콜백 주입. 원인 파악 후 제거할 것.
-        self.tracker.debug_log = self.get_logger().info
 
         # ultralytics(torch)는 import가 무거우므로 노드 생성 시점에 import
         from ultralytics import YOLO
@@ -250,6 +270,7 @@ class LaneDetectorNode(Node):
         self.lane_detected_pub = self.create_publisher(Bool, 'lane/detected', 10)
         self.left_detected_pub = self.create_publisher(Bool, 'lane/left_detected', 10)
         self.right_detected_pub = self.create_publisher(Bool, 'lane/right_detected', 10)
+        self.trend_pub = self.create_publisher(Float32, 'lane/offset_trend', 10)
 
         self.get_logger().info(
             f'모델 로드 완료: {self.model_path} (task={self.model.task}, '
@@ -284,12 +305,13 @@ class LaneDetectorNode(Node):
         crossline_detected = self.crossline_class_id in detected_classes
         self.crossline_pub.publish(Bool(data=crossline_detected))
 
-        # 4. Lane 중심 오프셋 계산 및 발행 (좌/우 개별 검출 여부도 함께 발행)
-        offset, lane_detected, left_detected, right_detected = self.compute_lane_offset(result)
+        # 4. Lane 중심 오프셋 계산 및 발행 (좌/우 개별 검출 여부 + 추세도 함께 발행)
+        offset, lane_detected, left_detected, right_detected, trend = self.compute_lane_offset(result)
         self.offset_pub.publish(Float32(data=offset))
         self.lane_detected_pub.publish(Bool(data=lane_detected))
         self.left_detected_pub.publish(Bool(data=left_detected))
         self.right_detected_pub.publish(Bool(data=right_detected))
+        self.trend_pub.publish(Float32(data=trend))
 
         # 5. 디버그 영상 발행
         self.publish_debug_image(msg, result)
