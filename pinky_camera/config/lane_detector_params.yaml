@@ -32,6 +32,8 @@ lane_detector_node:
     wide_mask_ratio: 0.6
     # 위 경우에 쓰는 최하단 띠 높이 (화면 높이 대비 비율)
     bottom_band_ratio: 0.10
+    # 마스크 x폭이 y폭의 이 배수를 넘는 가로로 누운 인스턴스(전방 수평선)는 좌/우 차선 후보에서 제외
+    horiz_aspect: 2.5
     # 디버그 영상(lane/debug/compressed) 발행 여부. 구독자가 없으면 자동으로 생략됨
     debug_image: true
     # 디버그 영상 JPEG 압축 품질 (1~100)

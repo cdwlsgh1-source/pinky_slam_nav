@@ -46,7 +46,9 @@ class LaneTracker:
     def __init__(self, roi_ratio=0.2, min_pixels=15, init_lane_width_ratio=0.7,
                  near_reach_ratio=0.1, min_y_span_ratio=0.05,
                  width_alpha=0.1, history_reset_frames=15,
-                 wide_mask_ratio=0.6, bottom_band_ratio=0.10):
+                 wide_mask_ratio=0.6, bottom_band_ratio=0.10, horiz_aspect=2.5):
+        self.horiz_aspect = horiz_aspect
+        self.corner_ahead = False                # 이번 프레임에 전방 수평선(ㄱ자 코너)이 보였는지
         self.wide_mask_ratio = wide_mask_ratio
         self.bottom_band_ratio = bottom_band_ratio
         self.roi_ratio = roi_ratio
@@ -101,12 +103,17 @@ class LaneTracker:
         touches_side = int(xs.min()) <= edge_margin or int(xs.max()) >= w - 1 - edge_margin
         reaches_bottom = (gap_px <= limit_px) or touches_side
 
+        # 가로로 누운 인스턴스(전방 수평선)는 좌/우 차선 후보에서 제외. 합쳐진 넓은 마스크는 제외하지 않음
+        # (매우 넓어도 y폭이 얇으면 세로 차선과 합쳐진 게 아니라 수평선 단독이므로 제외 대상)
+        is_horizontal = (x_span > max(y_span, 1e-3) * self.horiz_aspect
+                         and (x_span <= self.wide_mask_ratio or y_span < 0.15))
+
         # 디버그: 어느 조건에서 detected가 False가 되는지 확인용
         print(f'[fit] gap_px={gap_px} limit_px={limit_px:.1f} '
               f'xmin={int(xs.min())} xmax={int(xs.max())} '
-              f'near_x={near_x:.3f} trend={trend:.3f} reach={reaches_bottom}', flush=True)
+              f'near_x={near_x:.3f} trend={trend:.3f} reach={reaches_bottom} horiz={is_horizontal}', flush=True)
 
-        return near_x, trend, reaches_bottom
+        return near_x, trend, reaches_bottom, is_horizontal
 
     # -----------------------------------------------------------
     # 단독으로 보이는 차선이 왼쪽인지 판정 (이전 프레임 위치와 가까운 쪽)
@@ -132,13 +139,18 @@ class LaneTracker:
                      detected가 False여도(코너에서 막 놓친 프레임 포함) 픽셀이 있으면 계산된다.
         """
         fits = []
+        self.corner_ahead = False
         if instance_masks is not None and len(instance_masks) > 0:
             h, w = instance_masks.shape[1], instance_masks.shape[2]
             roi_start = int(h * (1 - self.roi_ratio))
             for inst in instance_masks:
                 r = self._fit_instance(inst, roi_start, h, w)
                 if r is not None:
-                    fits.append(r)  # (near_x, trend, reaches_bottom)
+                    fits.append(r)  # (near_x, trend, reaches_bottom, is_horizontal)
+
+        # 수평선 인스턴스는 좌/우 판정에서 빼고 corner_ahead 신호로만 기록
+        self.corner_ahead = any(f[3] for f in fits)
+        fits = [f[:3] for f in fits if not f[3]]
 
         if not fits:
             self.lost_frames += 1
@@ -209,6 +221,7 @@ class LaneDetectorNode(Node):
       - <namespace>/lane/left_detected     : 왼쪽 차선이 화면 하단 근처까지 실측됐는지 (std_msgs/Bool)
       - <namespace>/lane/right_detected    : 오른쪽 차선이 화면 하단 근처까지 실측됐는지 (std_msgs/Bool)
       - <namespace>/lane/offset_trend      : 보이는 차선이 멀어질수록 휘는 방향/정도 (std_msgs/Float32)
+      - <namespace>/lane/corner_ahead      : 전방 수평선(ㄱ자 코너)이 보이는지 (std_msgs/Bool)
     """
 
     # ===============================================================
@@ -235,6 +248,7 @@ class LaneDetectorNode(Node):
         self.declare_parameter('history_reset_frames', 15)             # 차선 소실 시 좌/우 이력 초기화까지 프레임 수
         self.declare_parameter('wide_mask_ratio', 0.6)                 # 마스크 x 폭이 화면 폭 대비 이 비율을 넘으면 '수평선 합쳐진 마스크'로 봄
         self.declare_parameter('bottom_band_ratio', 0.10)              # 넓은 마스크는 최하단 이 비율(화면 높이 기준) 띠의 x 평균으로 위치 계산
+        self.declare_parameter('horiz_aspect', 2.5)                    # 마스크 x폭이 y폭의 이 배수를 넘으면 수평선으로 보고 좌/우 차선에서 제외
         self.declare_parameter('debug_image', True)
         self.declare_parameter('jpeg_quality', 80)
 
@@ -254,6 +268,7 @@ class LaneDetectorNode(Node):
         self.history_reset_frames = self.get_parameter('history_reset_frames').value
         self.wide_mask_ratio = self.get_parameter('wide_mask_ratio').value
         self.bottom_band_ratio = self.get_parameter('bottom_band_ratio').value
+        self.horiz_aspect = self.get_parameter('horiz_aspect').value
         self.debug_image = self.get_parameter('debug_image').value
         self.jpeg_quality = self.get_parameter('jpeg_quality').value
 
@@ -268,6 +283,7 @@ class LaneDetectorNode(Node):
             history_reset_frames=self.history_reset_frames,
             wide_mask_ratio=self.wide_mask_ratio,
             bottom_band_ratio=self.bottom_band_ratio,
+            horiz_aspect=self.horiz_aspect,
         )
 
         # ultralytics(torch)는 import가 무거우므로 노드 생성 시점에 import
@@ -288,6 +304,7 @@ class LaneDetectorNode(Node):
         self.left_detected_pub = self.create_publisher(Bool, 'lane/left_detected', 10)
         self.right_detected_pub = self.create_publisher(Bool, 'lane/right_detected', 10)
         self.trend_pub = self.create_publisher(Float32, 'lane/offset_trend', 10)
+        self.corner_pub = self.create_publisher(Bool, 'lane/corner_ahead', 10)
 
         # 실행 중 파라미터 변경(rqt, ros2 param set)을 즉시 반영 (model_path, device는 제외)
         self.add_on_set_parameters_callback(self._on_params)
@@ -318,11 +335,13 @@ class LaneDetectorNode(Node):
         'history_reset_frames': 'history_reset_frames',
         'wide_mask_ratio': 'wide_mask_ratio',
         'bottom_band_ratio': 'bottom_band_ratio',
+        'horiz_aspect': 'horiz_aspect',
     }
     # 0 초과 1 이하여야 하는 비율 파라미터 (범위를 벗어난 값은 거부)
     _RATIO_PARAMS = {'lane_roi_ratio', 'near_reach_ratio', 'wide_mask_ratio',
                      'bottom_band_ratio', 'lane_width_alpha',
                      'assumed_half_lane_width_ratio', 'conf'}
+    _POSITIVE_PARAMS = {'horiz_aspect'}
 
     def _on_params(self, params):
         # 1) 먼저 전부 검증 (하나라도 잘못되면 아무것도 반영하지 않음)
@@ -330,6 +349,9 @@ class LaneDetectorNode(Node):
             if p.name in self._RATIO_PARAMS and not (0.0 < float(p.value) <= 1.0):
                 return SetParametersResult(
                     successful=False, reason=f'{p.name}는 0 초과 1 이하여야 합니다: {p.value}')
+            if p.name in self._POSITIVE_PARAMS and not float(p.value) > 0.0:
+                return SetParametersResult(
+                    successful=False, reason=f'{p.name}는 0보다 커야 합니다: {p.value}')
         # 2) 검증 통과 후 반영
         for p in params:
             if p.name in self._NODE_PARAMS:
@@ -385,6 +407,7 @@ class LaneDetectorNode(Node):
         self.left_detected_pub.publish(Bool(data=left_detected))
         self.right_detected_pub.publish(Bool(data=right_detected))
         self.trend_pub.publish(Float32(data=trend))
+        self.corner_pub.publish(Bool(data=self.tracker.corner_ahead))
 
         # 5. 디버그 영상 발행
         self.publish_debug_image(msg, result)

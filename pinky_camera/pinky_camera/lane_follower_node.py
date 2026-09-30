@@ -1,4 +1,6 @@
+import math
 import sys
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -6,6 +8,7 @@ from rclpy.duration import Duration
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rcl_interfaces.msg import SetParametersResult
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float32
 
 
@@ -83,6 +86,30 @@ class LaneFollowerNode(Node):
         self.declare_parameter('search_angular_speed', 0.3)     # 소실 후 탐색 회전 속도 (0이면 탐색 안 함)
         self.declare_parameter('lost_speed_scale', 0.5)         # 소실 중 속도 배율
         self.declare_parameter('watchdog_timeout', 0.5)         # offset 미수신 시 정지까지 시간(s)
+        self.declare_parameter('side_history_time', 3.0)        # 한쪽 차선 단독 검출 기록을 다수결에 쓰는 최근 시간(s)
+        self.declare_parameter('record_max_angular', 0.2)       # 기록은 |현재 각속도 명령|이 이 값 미만(직진 중)일 때만 남김 (rad/s)
+        self.declare_parameter('record_max_offset', 0.5)        # 기록은 |offset|이 이 값 미만일 때만 남김
+        self.declare_parameter('side_confirm_time', 0.5)        # 같은 쪽 단독 검출이 이 시간(s) 이상 이어져야 기록으로 인정
+        self.declare_parameter('side_min_ratio', 0.6)           # 다수결에서 한쪽이 이 비율 이상이어야 방향으로 인정 (0이면 단순 다수결)
+        self.declare_parameter('corner_lock_release_time', 2.0) # 수평선이 이 시간(s) 이상 안 보이면(코너 모드 아님) 확정한 회전 방향을 해제
+        self.declare_parameter('corner_default_side', 'L')      # 기록으로 방향을 못 정했을 때의 기본 방향: 'L'(왼쪽 차선 기준=우회전) | 'R'(좌회전) | 'none'(정지)
+        self.declare_parameter('side_hold_time', 10.0)          # 다수결 표본이 없을 때 마지막 확정 기록을 유지하는 최대 시간(s)
+        self.declare_parameter('corner_latch_time', 0.5)        # 수평선이 사라진 뒤에도 이 시간(s) 동안은 '수평선 있음'으로 간주
+        self.declare_parameter('corner_turn_speed', 0.5)        # 코너 모드 회전 각속도 크기 (rad/s)
+        self.declare_parameter('corner_turn_time', 2.0)         # 기록 반대쪽 회전 제한 시간(s)
+        self.declare_parameter('corner_turn_angle_deg', 90.0)   # 코너 모드 목표 회전각(deg, odom yaw 기준). 0이면 시간 기반
+        self.declare_parameter('corner_angle_tol_deg', 3.0)     # 목표 각도 도달 허용 오차(deg)
+        self.declare_parameter('corner_min_turn_speed', 0.15)   # 목표 각도 근처에서 감속할 때의 최저 회전 속도 (rad/s)
+        self.declare_parameter('corner_yaw_gain', 1.5)          # 남은 각도(rad) -> 회전 속도 비례 게인
+        self.declare_parameter('corner_angle_timeout', 8.0)     # 각도 회전이 이 시간(s) 안에 안 끝나면 중단
+        self.declare_parameter('corner_forward_distance', 0.10) # 코너 회전 전에 모서리까지 직진할 고정 거리 (m, 0이면 바로 회전)
+        self.declare_parameter('corner_forward_speed', 0.05)    # 위 직진 속도 (m/s)
+        self.declare_parameter('recover_wait_time', 0.5)        # 회전 후 차선이 안 보이면 정지한 채 기다리는 시간(s)
+        self.declare_parameter('recover_forward_distance', 0.15) # 대기 후에도 없으면 저속 직진할 거리 (m, 0이면 직진 안 함)
+        self.declare_parameter('recover_forward_speed', 0.05)   # 위 직진 속도 (m/s)
+        self.declare_parameter('corner_scan_time', 3.0)         # 실패 시 반대쪽으로 스캔하는 시간(s)
+        self.declare_parameter('corner_creep_speed', 0.0)       # 코너 모드 중 전진 속도 (m/s, 0이면 제자리 회전)
+        self.declare_parameter('corner_slow_scale', 0.7)        # 수평선이 보이지만 차선이 아직 검출될 때 속도 배율
         self.declare_parameter('control_rate', 20.0)            # 제어 루프 주기 (Hz)
         self.declare_parameter('stop_on_crossline', False)      # Crossline 검출 시 정지할지 여부
         self.declare_parameter('crossline_stop_duration', 2.0)  # 정지 유지 시간(s)
@@ -106,6 +133,30 @@ class LaneFollowerNode(Node):
         self.search_angular_speed = self.get_parameter('search_angular_speed').value
         self.lost_speed_scale = self.get_parameter('lost_speed_scale').value
         self.watchdog_timeout = self.get_parameter('watchdog_timeout').value
+        self.side_history_time = self.get_parameter('side_history_time').value
+        self.record_max_angular = self.get_parameter('record_max_angular').value
+        self.record_max_offset = self.get_parameter('record_max_offset').value
+        self.side_confirm_time = self.get_parameter('side_confirm_time').value
+        self.side_min_ratio = self.get_parameter('side_min_ratio').value
+        self.corner_lock_release_time = self.get_parameter('corner_lock_release_time').value
+        self.corner_default_side = self.get_parameter('corner_default_side').value
+        self.side_hold_time = self.get_parameter('side_hold_time').value
+        self.corner_latch_time = self.get_parameter('corner_latch_time').value
+        self.corner_turn_speed = self.get_parameter('corner_turn_speed').value
+        self.corner_turn_time = self.get_parameter('corner_turn_time').value
+        self.corner_scan_time = self.get_parameter('corner_scan_time').value
+        self.corner_forward_distance = self.get_parameter('corner_forward_distance').value
+        self.corner_forward_speed = self.get_parameter('corner_forward_speed').value
+        self.recover_wait_time = self.get_parameter('recover_wait_time').value
+        self.recover_forward_distance = self.get_parameter('recover_forward_distance').value
+        self.recover_forward_speed = self.get_parameter('recover_forward_speed').value
+        self.corner_turn_angle_deg = self.get_parameter('corner_turn_angle_deg').value
+        self.corner_angle_tol_deg = self.get_parameter('corner_angle_tol_deg').value
+        self.corner_min_turn_speed = self.get_parameter('corner_min_turn_speed').value
+        self.corner_yaw_gain = self.get_parameter('corner_yaw_gain').value
+        self.corner_angle_timeout = self.get_parameter('corner_angle_timeout').value
+        self.corner_creep_speed = self.get_parameter('corner_creep_speed').value
+        self.corner_slow_scale = self.get_parameter('corner_slow_scale').value
         self.dt_ctrl = 1.0 / self.get_parameter('control_rate').value
         self.stop_on_crossline = self.get_parameter('stop_on_crossline').value
         self.crossline_stop_duration = self.get_parameter('crossline_stop_duration').value
@@ -123,6 +174,32 @@ class LaneFollowerNode(Node):
         self._left_detected = False        # 좌/우 차선이 이번 프레임에 실제로 관측됐는지
         self._right_detected = False
 
+        self._corner_ahead = False         # 전방 수평선(ㄱ자 코너) 검출 여부
+        self._corner_seen_time = None      # 수평선이 마지막으로 보인 시각
+        self._side_hist = deque()          # (시각, 'L'|'R'): 한쪽 차선만 보였던 기록
+        self._cand_side = None             # 현재 이어지고 있는 단독 검출 쪽 ('L'|'R')과 시작 시각
+        self._cand_start = None
+        self._confirmed_side = None        # 마지막으로 확정된 기록과 그 시각
+        self._confirmed_time = None
+        self._lock_last_seen = None
+        self._locked_side = None           # 수평선을 처음 본 순간 과거 기록으로 확정한 방향 ('L'|'R')
+        self._corner_mode = False          # 코너 모드(기록 반대쪽 회전 -> 스캔) 진행 중인지
+        self._corner_start = None
+        self._yaw = None                   # odom yaw(rad)와 수신 시각 (각도 기반 회전용)
+        self._yaw_time = None
+        self._pos = None                   # odom 위치 (x, y)
+        self._phase = 'forward'            # 코너 모드 단계: 'forward'(모서리까지 직진) -> 'turn'(90도 회전)
+        self._phase_start = None           # 현재 단계 시작 시각과 시작 위치
+        self._phase_pos = None
+        self._recover_active = False       # 회전 후 재탐색(대기 -> 저속 직진) 중인지
+        self._recover_start = None
+        self._recover_pos = None
+        self._recover_fwd_started = False
+        self._recover_fwd_start = None
+        self._turned = 0.0                 # 코너 모드 시작 후 누적 회전각(rad, 왼쪽이 +)
+        self._corner_armed = True          # 각도 회전 완료 후 차선이 다시 검출되기 전에는 코너 모드 재진입 금지
+        self._corner_dir = 0.0             # 1단계 회전 방향 (+1 = 왼쪽, -1 = 오른쪽)
+
         self._cmd_lin = 0.0                # 현재 출력값 (가속도 제한 계산용)
         self._cmd_ang = 0.0
 
@@ -136,6 +213,8 @@ class LaneFollowerNode(Node):
         self.create_subscription(Bool, 'lane/right_detected', self.right_callback, qos)
         self.create_subscription(Float32, 'lane/offset_trend', self.trend_callback, qos)
         self.create_subscription(Bool, 'crossline/detected', self.crossline_callback, qos)
+        self.create_subscription(Bool, 'lane/corner_ahead', self.corner_callback, qos)
+        self.create_subscription(Odometry, 'odom', self.odom_callback, qos)
 
         # 고정 주기 제어 루프 (내부에서 offset 토픽 끊김 워치독도 함께 확인)
         self.create_timer(self.dt_ctrl, self.control_loop)
@@ -156,6 +235,13 @@ class LaneFollowerNode(Node):
         'trend_side_threshold', 'detect_grace_time', 'lost_hold_time',
         'lost_stop_time', 'search_angular_speed', 'lost_speed_scale',
         'watchdog_timeout', 'stop_on_crossline', 'crossline_stop_duration',
+        'side_history_time', 'record_max_angular', 'record_max_offset', 'side_confirm_time',
+        'side_hold_time', 'side_min_ratio', 'corner_default_side', 'corner_lock_release_time', 'corner_forward_distance', 'corner_forward_speed',
+        'recover_wait_time', 'recover_forward_distance', 'recover_forward_speed',
+        'corner_turn_angle_deg', 'corner_angle_tol_deg',
+        'corner_min_turn_speed', 'corner_yaw_gain', 'corner_angle_timeout',
+        'corner_latch_time', 'corner_turn_speed', 'corner_turn_time',
+        'corner_scan_time', 'corner_creep_speed', 'corner_slow_scale',
     )
     # 0~1 범위여야 하는 필터 계수 (범위를 벗어난 값은 거부)
     _UNIT_PARAMS = ('offset_alpha', 'd_alpha')
@@ -163,6 +249,9 @@ class LaneFollowerNode(Node):
     def _on_params(self, params):
         # 1) 먼저 전부 검증 (하나라도 잘못되면 아무것도 반영하지 않음)
         for p in params:
+            if p.name == 'corner_default_side' and p.value not in ('L', 'R', 'none'):
+                return SetParametersResult(
+                    successful=False, reason=f"corner_default_side는 'L', 'R', 'none' 중 하나여야 합니다: {p.value}")
             if p.name in self._UNIT_PARAMS and not (0.0 <= float(p.value) <= 1.0):
                 return SetParametersResult(
                     successful=False, reason=f'{p.name}는 0~1 사이여야 합니다: {p.value}')
@@ -203,6 +292,91 @@ class LaneFollowerNode(Node):
         #  움직인다는 뜻이므로 _last_side도 음수가 되어야 탐색 시 왼쪽으로 돈다)
         if abs(self._trend) > self.trend_side_threshold:
             self._last_side = -1.0 if self._trend > 0 else 1.0
+
+    # ===============================================================
+    # 콜백: 전방 수평선(ㄱ자 코너) 검출 여부 수신
+    # ===============================================================
+    def corner_callback(self, msg: Bool):
+        self._corner_ahead = msg.data
+        if msg.data:
+            self._corner_seen_time = self.get_clock().now()
+
+    # ===============================================================
+    # 콜백: odom 수신 -> yaw 갱신, 코너 모드 중이면 누적 회전각에 더함
+    # ===============================================================
+    def odom_callback(self, msg: Odometry):
+        q = msg.pose.pose.orientation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        if self._yaw is not None and self._corner_mode and self._phase == 'turn':
+            d = yaw - self._yaw
+            self._turned += math.atan2(math.sin(d), math.cos(d))   # -pi~pi로 정규화
+        self._yaw = yaw
+        self._yaw_time = self.get_clock().now()
+        self._pos = (msg.pose.pose.position.x, msg.pose.pose.position.y)
+
+    # 각도 기반 회전을 쓸 수 있는지 (목표각 > 0 이고 odom이 최근 0.5초 이내로 들어옴)
+    def _angle_mode(self, now):
+        return (self.corner_turn_angle_deg > 0.0 and self._yaw_time is not None
+                and (now - self._yaw_time).nanoseconds / 1e9 < 0.5)
+
+    # ===============================================================
+    # 한쪽 차선 단독 검출 기록: 최근 side_history_time 동안의 다수결 ('L'/'R'/None)
+    # ===============================================================
+    def _record_side(self, now):
+        single = self._left_detected != self._right_detected
+        side = ('L' if self._left_detected else 'R') if single else None
+        if side is not None:
+            # 같은 쪽 단독 검출이 side_confirm_time 이상 이어져야 기록으로 인정 (순간 오검출/깜빡임 제외)
+            if side != self._cand_side:
+                self._cand_side = side
+                self._cand_start = now
+            confirmed = (now - self._cand_start).nanoseconds / 1e9 >= self.side_confirm_time
+            # 좌우로 헤딩을 바꾸는 중(각속도/offset이 큼)의 프레임은 도로 방향이 아닌 자세를 반영하므로 제외
+            steady = (abs(self._cmd_ang) < self.record_max_angular
+                      and abs(self._offset_f) < self.record_max_offset)
+            if confirmed and steady:
+                self._side_hist.append((now, side))
+                self._confirmed_side = side
+                self._confirmed_time = now
+        elif self._left_detected and self._right_detected:
+            self._cand_side = None       # 양쪽이 다 보이면 연속 기록 초기화(차선 미검출은 유지)
+        limit = self.side_history_time
+        while self._side_hist and (now - self._side_hist[0][0]).nanoseconds / 1e9 > limit:
+            self._side_hist.popleft()
+
+    # 수평선을 처음 보는 순간(아직 차선이 보이며 접근 중) 과거 기록으로 방향을 확정해 잠금.
+    # 이후 헤딩 변화나 차선 소실로 기록이 흐려져도 이 방향을 그대로 씀
+    def _update_lock(self, now):
+        if self._corner_mode:
+            return
+        if self._corner_ahead:
+            self._lock_last_seen = now
+            if self._locked_side is None:
+                side = self._history_side()
+                if side is not None:
+                    self._locked_side = side
+                    self.get_logger().info(f'수평선 감지: 방향 확정 기록={side}')
+        elif self._locked_side is not None and self._lock_last_seen is not None and \
+                (now - self._lock_last_seen).nanoseconds / 1e9 > self.corner_lock_release_time:
+            self._locked_side = None   # 오검출(수평선이 곧 사라짐)이면 확정 해제
+
+    def _history_side(self):
+        n_left = sum(1 for _, s in self._side_hist if s == 'L')
+        n_right = len(self._side_hist) - n_left
+        if not self._side_hist:
+            # 최근 표본이 없으면 마지막 확정 기록을 side_hold_time 동안 유지
+            if (self._confirmed_time is not None and
+                    (self.get_clock().now() - self._confirmed_time).nanoseconds / 1e9
+                    <= self.side_hold_time):
+                return self._confirmed_side
+            return None
+        if n_left == n_right:
+            return None
+        major = max(n_left, n_right)
+        # 누가 봐도 한쪽이 많을 때만 방향으로 인정 (애매하면 None -> 기존 소실 처리)
+        if major / float(len(self._side_hist)) < self.side_min_ratio:
+            return None
+        return 'L' if n_left > n_right else 'R'
 
     # ===============================================================
     # 콜백: Crossline 검출 시 정지 종료 시각(_crossline_stop_until) 설정
@@ -261,8 +435,45 @@ class LaneFollowerNode(Node):
         # 마지막으로 차선이 검출된 후 지금까지 흐른 시간(초)
         lost = (now - self._last_valid_time).nanoseconds / 1e9
 
+        # 한쪽 차선만 보이는 동안의 좌/우 기록 갱신 (코너 모드 방향 결정용)
+        self._record_side(now)
+        self._update_lock(now)
+
+        # 차선이 다시 검출되면 코너 모드 종료 -> 기존 PD 추종으로 복귀
+        # (각도 기반 회전 중에는 목표 각도에 도달할 때까지 차선이 보여도 회전을 유지해 직각을 만듦)
+        if self._lane_detected:
+            self._recover_active = False
+        if self._lane_detected and not self._corner_mode:
+            self._corner_armed = True
+        if self._lane_detected and not (self._corner_mode and self._angle_mode(now)):
+            self._corner_mode = False
+        # 코너 모드 진입: 차선 소실 + 수평선(최근 포함) + 방향 기록 있음 (각도 회전 완료 후 차선이 다시 검출되기 전에는 재진입 금지)
+        elif (not self._corner_mode and not self._lane_detected and self._corner_recent(now)
+              and self._corner_armed):
+            # 수평선을 처음 봤을 때 확정한 방향 우선, 없으면 지금 기록으로 결정
+            side = self._locked_side or self._history_side()
+            if side is None and self.corner_default_side in ('L', 'R'):
+                # 기록으로 못 정했으면 기본 방향(기본값 'L' = 왼쪽 차선 기준 우회전)
+                side = self.corner_default_side
+                self.get_logger().info(f'기록 부족: 기본 방향 사용 기록={side}')
+            if side is not None:
+                self._corner_mode = True
+                self._corner_start = now
+                self._phase = 'forward'
+                self._phase_start = now
+                self._phase_pos = self._pos
+                self._turned = 0.0
+                # 왼쪽 차선만 보였으면 우회전(-1), 오른쪽만 보였으면 좌회전(+1)
+                self._corner_dir = -1.0 if side == 'L' else 1.0
+                self.get_logger().info(
+                    f'코너 모드 시작: 기록={side}, 회전 방향={"우" if self._corner_dir < 0 else "좌"}')
+
+        if self._corner_mode:
+            target_lin, target_ang = self.compute_corner(now)
+        elif self._recover_active:
+            target_lin, target_ang = self.compute_recover(now)
         # 검출이 잠깐(detect_grace_time 이내) 끊긴 것은 소실로 보지 않고 마지막 offset으로 계속 추종
-        if self._lane_detected or lost < self.detect_grace_time:
+        elif self._lane_detected or lost < self.detect_grace_time:
             target_lin, target_ang = self.compute_tracking()
         else:
             # 차선 소실: 경과 시간에 따라 유지 -> 탐색 -> 정지
@@ -282,6 +493,90 @@ class LaneFollowerNode(Node):
         self._cmd_lin = slew(self._cmd_lin, target_lin, self.max_linear_accel * self.dt_ctrl)
         self._cmd_ang = slew(self._cmd_ang, target_ang, self.max_angular_accel * self.dt_ctrl)
         self.publish_cmd(self._cmd_lin, self._cmd_ang)
+
+    # ===============================================================
+    # 수평선이 지금 보이거나 corner_latch_time 이내에 보였는지
+    # ===============================================================
+    def _corner_recent(self, now):
+        if self._corner_ahead:
+            return True
+        if self._corner_seen_time is None:
+            return False
+        return (now - self._corner_seen_time).nanoseconds / 1e9 <= self.corner_latch_time
+
+    # ===============================================================
+    # 코너 모드: 기록 반대쪽 회전(corner_turn_time) -> 반대 방향 스캔(corner_scan_time) -> 정지
+    # ===============================================================
+    def compute_corner(self, now):
+        # 1단계: 모서리까지 고정 거리 직진 (odom 거리, 없으면 시간으로 대체)
+        if self._phase == 'forward':
+            if self.corner_forward_distance > 0.0 and not self._moved_enough(
+                    now, self._phase_start, self._phase_pos,
+                    self.corner_forward_distance, self.corner_forward_speed):
+                return self.corner_forward_speed, 0.0
+            # 직진 끝: 회전 단계로 전환 (회전 시간/각도는 지금부터 측정)
+            self._phase = 'turn'
+            self._corner_start = now
+            self._turned = 0.0
+        t = (now - self._corner_start).nanoseconds / 1e9
+        if self._angle_mode(now):
+            # odom yaw로 목표 각도(기본 90도)까지 회전. 남은 각도에 비례해 감속하며 정확히 멈춤
+            progress = self._corner_dir * self._turned
+            remaining = math.radians(self.corner_turn_angle_deg) - progress
+            if remaining <= math.radians(self.corner_angle_tol_deg):
+                self._finish_corner(now, f'회전 완료: {math.degrees(progress):.0f}도')
+                return 0.0, 0.0
+            if t > self.corner_angle_timeout:
+                self._finish_corner(now, f'회전 시간 초과: {math.degrees(progress):.0f}도까지 회전')
+                return 0.0, 0.0
+            speed = clamp(self.corner_yaw_gain * remaining,
+                          self.corner_min_turn_speed, self.corner_turn_speed)
+            return self.corner_creep_speed, self._corner_dir * speed
+        if t < self.corner_turn_time:
+            return self.corner_creep_speed, self._corner_dir * self.corner_turn_speed
+        if t < self.corner_turn_time + self.corner_scan_time:
+            return self.corner_creep_speed, -self._corner_dir * self.corner_turn_speed
+        return 0.0, 0.0
+
+    # 시작 위치에서 distance(m) 이상 움직였는지 (odom이 없으면 distance/speed 시간이 지났는지)
+    def _moved_enough(self, now, start_time, start_pos, distance, speed):
+        if self._pos is not None and start_pos is not None and self._yaw_time is not None \
+                and (now - self._yaw_time).nanoseconds / 1e9 < 0.5:
+            return math.hypot(self._pos[0] - start_pos[0], self._pos[1] - start_pos[1]) >= distance
+        return (now - start_time).nanoseconds / 1e9 >= distance / max(speed, 1e-3)
+
+    # 회전 후 재탐색: recover_wait_time 동안 정지 -> recover_forward_distance만큼 저속 직진 -> 끝(기존 소실 처리로)
+    def compute_recover(self, now):
+        t = (now - self._recover_start).nanoseconds / 1e9
+        if t < self.recover_wait_time:
+            return 0.0, 0.0
+        if self.recover_forward_distance > 0.0:
+            if not self._recover_fwd_started:
+                self._recover_fwd_started = True
+                self._recover_pos = self._pos
+                self._recover_fwd_start = now
+            if not self._moved_enough(now, self._recover_fwd_start, self._recover_pos,
+                                      self.recover_forward_distance, self.recover_forward_speed):
+                return self.recover_forward_speed, 0.0
+        self._recover_active = False
+        self.get_logger().info('재탐색 종료: 차선 미검출')
+        return 0.0, 0.0
+
+    # 코너 회전 종료: 코너 모드 해제, 재진입 금지, 오래된 방향 기록 초기화
+    def _finish_corner(self, now, reason):
+        self._corner_mode = False
+        self._corner_armed = False
+        self._locked_side = None
+        self._recover_active = True
+        self._recover_start = now
+        self._recover_pos = None
+        self._recover_fwd_started = False
+        self._recover_fwd_start = now
+        self._side_hist.clear()
+        self._confirmed_side = None
+        self._confirmed_time = None
+        self._cand_side = None
+        self.get_logger().info(f'코너 모드 종료: {reason}')
 
     # ===============================================================
     # 유틸: 필터링된 offset으로 PD 제어 목표 속도(linear, angular) 계산
@@ -308,6 +603,10 @@ class LaneFollowerNode(Node):
                 angular_z -= self.single_side_turn_bias
             else:
                 angular_z += self.single_side_turn_bias
+
+        # 수평선이 보이면(아직 차선이 검출되는 중) 감속만 함
+        if self._corner_ahead:
+            linear_x *= self.corner_slow_scale
 
         # 회전을 더한 뒤에도 최대 각속도를 넘지 않게 제한
         angular_z = clamp(angular_z, -self.max_angular_speed, self.max_angular_speed)

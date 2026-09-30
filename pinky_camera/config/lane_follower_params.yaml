@@ -11,7 +11,7 @@ lane_follower_node:
     # 미분 게인. 반응이 너무 느리면 올리고, 떨림이 심하면 낮출 것
     kd: 0.3
     # 각속도 제한 (rad/s)
-    max_angular_speed: 1.5
+    max_angular_speed: 1.0
     # 각속도 가속도 제한 (rad/s^2)
     max_angular_accel: 2.0
     # offset 저역통과 필터 계수 (0~1, 작을수록 부드러움)
@@ -21,7 +21,7 @@ lane_follower_node:
     # 한쪽 차선만 보일 때 속도 배율
     single_side_speed_scale: 0.6
     # 한쪽 차선만 보일 때 추가 회전 각속도 (rad/s, 0이면 회전 추가 안 함)
-    single_side_turn_bias: 0.3
+    single_side_turn_bias: 0.15
     # trend(코너 추세) feed-forward 게인. 0이면 미사용, 0보다 크면 코너 진입을 미리 시작
     kd_trend: 0.0
     # 이 값을 넘는 trend만 탐색 회전 방향(_last_side)에 반영
@@ -33,11 +33,59 @@ lane_follower_node:
     # 차선 소실 후 완전 정지까지 걸리는 시간(s). 그 전까지는 마지막 추세 방향으로 탐색 회전
     lost_stop_time: 1.5
     # 소실 후 탐색 회전 속도 (rad/s, 0이면 탐색 안 함)
-    search_angular_speed: 0.3
+    search_angular_speed: 0.0
     # 소실 중(hold 단계) 속도 배율
     lost_speed_scale: 0.5
     # lane/center_offset 토픽이 이 시간(s) 이상 끊기면 무조건 정지 (워치독)
     watchdog_timeout: 0.5
+    # 한쪽 차선만 보였던 기록을 다수결에 쓰는 최근 시간(s). 코너 모드 회전 방향 결정에 사용
+    side_history_time: 8.0
+    # 기록은 |현재 각속도 명령|이 이 값(rad/s) 미만인 직진 중일 때만 남김(헤딩 변경 중 프레임 제외)
+    record_max_angular: 0.2
+    # 기록은 |offset|이 이 값 미만일 때만 남김
+    record_max_offset: 0.5
+    # 같은 쪽 단독 검출이 이 시간(s) 이상 이어져야 기록으로 인정
+    side_confirm_time: 0.5
+    # 다수결에서 한쪽이 이 비율 이상일 때만 방향으로 인정 (0이면 단순 다수결)
+    side_min_ratio: 0.6
+    # 수평선을 처음 본 순간 확정한 회전 방향은 수평선이 이 시간(s) 이상 안 보이면 해제(오검출 대비)
+    corner_lock_release_time: 2.0
+    # 기록으로 방향을 못 정했을 때(동률/비율 미달/기록 없음)의 기본 방향. 'L'=왼쪽 차선 기준 우회전, 'R'=좌회전, 'none'=정지
+    corner_default_side: 'L'
+    # 다수결 표본이 없을 때 마지막 확정 기록을 유지하는 최대 시간(s)
+    side_hold_time: 15.0
+    # 수평선이 사라진 뒤에도 이 시간(s) 동안은 '수평선 있음'으로 간주
+    corner_latch_time: 0.5
+    # 코너 모드(수평선 + 차선 소실): 기록 반대쪽(왼쪽 차선만 보였으면 우회전)으로 도는 각속도 크기 (rad/s)
+    corner_turn_speed: 0.5
+    # 기록 반대쪽으로 회전하며 차선을 찾는 제한 시간(s)
+    corner_turn_time: 2.0
+    # 위에서 못 찾으면 반대 방향으로 스캔하는 시간(s). 이후에도 없으면 정지
+    corner_scan_time: 0.0
+    # 코너 모드 시작 후 회전 전에 모서리까지 직진할 고정 거리(m, odom 기준). 0이면 바로 회전
+    corner_forward_distance: 0.10
+    # 위 직진 속도 (m/s)
+    corner_forward_speed: 0.05
+    # 회전 후 차선이 안 보이면 이 시간(s) 동안 정지한 채 기다림
+    recover_wait_time: 0.5
+    # 대기 후에도 안 보이면 저속으로 직진할 거리(m). 0이면 직진 안 함. 끝나도 없으면 정지
+    recover_forward_distance: 0.15
+    # 위 직진 속도 (m/s)
+    recover_forward_speed: 0.05
+    # 코너 모드 목표 회전각(deg, odom yaw 기준). 이 각도까지 회전한 뒤 종료. 0이면 아래 시간 기반, odom이 없어도 시간 기반으로 폴백
+    corner_turn_angle_deg: 90.0
+    # 목표 각도 도달 허용 오차(deg)
+    corner_angle_tol_deg: 3.0
+    # 목표 각도 근처에서 감속할 때의 최저 회전 속도 (rad/s)
+    corner_min_turn_speed: 0.15
+    # 남은 각도(rad)에 비례해 회전 속도를 정하는 게인 (corner_turn_speed가 상한)
+    corner_yaw_gain: 1.5
+    # 각도 회전이 이 시간(s) 안에 안 끝나면 중단
+    corner_angle_timeout: 8.0
+    # 코너 모드 중 전진 속도 (m/s, 0이면 제자리 회전)
+    corner_creep_speed: 0.0
+    # 수평선이 보이지만 차선이 아직 검출될 때 속도 배율
+    corner_slow_scale: 0.7
     # 제어 루프 주기 (Hz)
     control_rate: 20.0
     # Crossline 검출 시 정지할지 여부
