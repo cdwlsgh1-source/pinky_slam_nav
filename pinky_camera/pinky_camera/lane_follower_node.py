@@ -4,6 +4,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rcl_interfaces.msg import SetParametersResult
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool, Float32
 
@@ -139,7 +140,40 @@ class LaneFollowerNode(Node):
         # 고정 주기 제어 루프 (내부에서 offset 토픽 끊김 워치독도 함께 확인)
         self.create_timer(self.dt_ctrl, self.control_loop)
 
+        # 실행 중 파라미터 변경(rqt, ros2 param set)을 즉시 반영 (control_rate는 제외)
+        self.add_on_set_parameters_callback(self._on_params)
+
         self.get_logger().info('lane_follower_node 시작 (cmd_vel 발행)')
+
+    # ===============================================================
+    # 파라미터 변경 콜백: 같은 이름의 노드 속성에 새 값을 바로 반영
+    # ===============================================================
+    # 실시간 반영 대상 (파라미터 이름 == self 속성 이름)
+    _RUNTIME_PARAMS = (
+        'linear_speed', 'min_linear_speed', 'max_linear_accel', 'kp', 'kd',
+        'max_angular_speed', 'max_angular_accel', 'offset_alpha', 'd_alpha',
+        'single_side_speed_scale', 'single_side_turn_bias', 'kd_trend',
+        'trend_side_threshold', 'detect_grace_time', 'lost_hold_time',
+        'lost_stop_time', 'search_angular_speed', 'lost_speed_scale',
+        'watchdog_timeout', 'stop_on_crossline', 'crossline_stop_duration',
+    )
+    # 0~1 범위여야 하는 필터 계수 (범위를 벗어난 값은 거부)
+    _UNIT_PARAMS = ('offset_alpha', 'd_alpha')
+
+    def _on_params(self, params):
+        # 1) 먼저 전부 검증 (하나라도 잘못되면 아무것도 반영하지 않음)
+        for p in params:
+            if p.name in self._UNIT_PARAMS and not (0.0 <= float(p.value) <= 1.0):
+                return SetParametersResult(
+                    successful=False, reason=f'{p.name}는 0~1 사이여야 합니다: {p.value}')
+        # 2) 검증 통과 후 반영
+        for p in params:
+            if p.name in self._RUNTIME_PARAMS:
+                setattr(self, p.name, p.value)
+                self.get_logger().info(f'파라미터 반영: {p.name} = {p.value}')
+            elif p.name == 'control_rate':
+                self.get_logger().warn('control_rate는 실행 중 변경이 반영되지 않습니다(재시작 필요)')
+        return SetParametersResult(successful=True)
 
     # ===============================================================
     # 콜백: 차선 검출 여부 수신 -> 마지막 검출 시각 갱신

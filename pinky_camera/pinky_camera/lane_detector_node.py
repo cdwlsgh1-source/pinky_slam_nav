@@ -5,6 +5,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rcl_interfaces.msg import SetParametersResult
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Bool, Float32
 
@@ -44,7 +45,10 @@ class LaneTracker:
 
     def __init__(self, roi_ratio=0.2, min_pixels=15, init_lane_width_ratio=0.7,
                  near_reach_ratio=0.1, min_y_span_ratio=0.05,
-                 width_alpha=0.1, history_reset_frames=15):
+                 width_alpha=0.1, history_reset_frames=15,
+                 wide_mask_ratio=0.6, bottom_band_ratio=0.10):
+        self.wide_mask_ratio = wide_mask_ratio
+        self.bottom_band_ratio = bottom_band_ratio
         self.roi_ratio = roi_ratio
         self.min_pixels = min_pixels
         self.near_reach_ratio = near_reach_ratio
@@ -72,7 +76,14 @@ class LaneTracker:
         xs_norm = xs / float(w)
 
         y_span = float(ys_norm.max() - ys_norm.min())
-        if y_span >= self.min_y_span_ratio:
+        x_span = float(xs_norm.max() - xs_norm.min())
+        if x_span > self.wide_mask_ratio:
+            # 세로 차선과 전방 수평선이 합쳐진 넓은 마스크: 회귀가 성립하지 않으므로
+            # 마스크 최하단 띠(bottom_band_ratio)의 x 평균만 위치로 쓰고 trend는 무시
+            band = ys_norm >= ys_norm.max() - self.bottom_band_ratio
+            trend = 0.0
+            near_x = float(xs_norm[band].mean())
+        elif y_span >= self.min_y_span_ratio:
             a, b = np.polyfit(ys_norm, xs_norm, 1)
             trend = float(a)
             near_x = float(a * 1.0 + b)  # 화면 맨 아래(y_norm=1.0)로 외삽
@@ -215,13 +226,15 @@ class LaneDetectorNode(Node):
         self.declare_parameter('device', 'cpu')
         self.declare_parameter('crossline_class_id', 0)
         self.declare_parameter('lane_class_id', 1)
-        self.declare_parameter('lane_roi_ratio', 0.7)                  # 화면 하단 몇 %를 볼지
+        self.declare_parameter('lane_roi_ratio', 0.4)                  # 화면 하단 몇 %를 볼지
         self.declare_parameter('min_lane_pixels', 15)                  # 이 픽셀 수보다 적은 마스크는 노이즈로 버림
         self.declare_parameter('assumed_half_lane_width_ratio', 0.35)  # 차선 폭 초기 가정값(절반). 이후 자동 학습
         self.declare_parameter('near_reach_ratio', 0.3)                # 이 비율보다 멀리서 끝나는 차선은 detected=False
         self.declare_parameter('min_y_span_ratio', 0.05)               # 회귀 기울기(trend)를 신뢰할 최소 y분산
         self.declare_parameter('lane_width_alpha', 0.1)                # 차선 폭 학습 속도
         self.declare_parameter('history_reset_frames', 15)             # 차선 소실 시 좌/우 이력 초기화까지 프레임 수
+        self.declare_parameter('wide_mask_ratio', 0.6)                 # 마스크 x 폭이 화면 폭 대비 이 비율을 넘으면 '수평선 합쳐진 마스크'로 봄
+        self.declare_parameter('bottom_band_ratio', 0.10)              # 넓은 마스크는 최하단 이 비율(화면 높이 기준) 띠의 x 평균으로 위치 계산
         self.declare_parameter('debug_image', True)
         self.declare_parameter('jpeg_quality', 80)
 
@@ -239,6 +252,8 @@ class LaneDetectorNode(Node):
         self.min_y_span_ratio = self.get_parameter('min_y_span_ratio').value
         self.lane_width_alpha = self.get_parameter('lane_width_alpha').value
         self.history_reset_frames = self.get_parameter('history_reset_frames').value
+        self.wide_mask_ratio = self.get_parameter('wide_mask_ratio').value
+        self.bottom_band_ratio = self.get_parameter('bottom_band_ratio').value
         self.debug_image = self.get_parameter('debug_image').value
         self.jpeg_quality = self.get_parameter('jpeg_quality').value
 
@@ -251,6 +266,8 @@ class LaneDetectorNode(Node):
             min_y_span_ratio=self.min_y_span_ratio,
             width_alpha=self.lane_width_alpha,
             history_reset_frames=self.history_reset_frames,
+            wide_mask_ratio=self.wide_mask_ratio,
+            bottom_band_ratio=self.bottom_band_ratio,
         )
 
         # ultralytics(torch)는 import가 무거우므로 노드 생성 시점에 import
@@ -272,9 +289,65 @@ class LaneDetectorNode(Node):
         self.right_detected_pub = self.create_publisher(Bool, 'lane/right_detected', 10)
         self.trend_pub = self.create_publisher(Float32, 'lane/offset_trend', 10)
 
+        # 실행 중 파라미터 변경(rqt, ros2 param set)을 즉시 반영 (model_path, device는 제외)
+        self.add_on_set_parameters_callback(self._on_params)
+
         self.get_logger().info(
             f'모델 로드 완료: {self.model_path} (task={self.model.task}, '
             f'classes={self.model.names}) {self.sub.topic_name} 구독 중')
+
+    # ===============================================================
+    # 파라미터 변경 콜백: 노드 속성 / LaneTracker 속성에 새 값을 바로 반영
+    # ===============================================================
+    # 파라미터 이름 -> 노드(self) 속성 이름
+    _NODE_PARAMS = {
+        'imgsz': 'imgsz',
+        'conf': 'conf',
+        'crossline_class_id': 'crossline_class_id',
+        'lane_class_id': 'lane_class_id',
+        'debug_image': 'debug_image',
+        'jpeg_quality': 'jpeg_quality',
+    }
+    # 파라미터 이름 -> LaneTracker 속성 이름
+    _TRACKER_PARAMS = {
+        'lane_roi_ratio': 'roi_ratio',
+        'min_lane_pixels': 'min_pixels',
+        'near_reach_ratio': 'near_reach_ratio',
+        'min_y_span_ratio': 'min_y_span_ratio',
+        'lane_width_alpha': 'width_alpha',
+        'history_reset_frames': 'history_reset_frames',
+        'wide_mask_ratio': 'wide_mask_ratio',
+        'bottom_band_ratio': 'bottom_band_ratio',
+    }
+    # 0 초과 1 이하여야 하는 비율 파라미터 (범위를 벗어난 값은 거부)
+    _RATIO_PARAMS = {'lane_roi_ratio', 'near_reach_ratio', 'wide_mask_ratio',
+                     'bottom_band_ratio', 'lane_width_alpha',
+                     'assumed_half_lane_width_ratio', 'conf'}
+
+    def _on_params(self, params):
+        # 1) 먼저 전부 검증 (하나라도 잘못되면 아무것도 반영하지 않음)
+        for p in params:
+            if p.name in self._RATIO_PARAMS and not (0.0 < float(p.value) <= 1.0):
+                return SetParametersResult(
+                    successful=False, reason=f'{p.name}는 0 초과 1 이하여야 합니다: {p.value}')
+        # 2) 검증 통과 후 반영
+        for p in params:
+            if p.name in self._NODE_PARAMS:
+                setattr(self, self._NODE_PARAMS[p.name], p.value)
+            elif p.name in self._TRACKER_PARAMS:
+                setattr(self.tracker, self._TRACKER_PARAMS[p.name], p.value)
+                setattr(self, p.name, p.value)
+            elif p.name == 'assumed_half_lane_width_ratio':
+                # 학습된 차선 폭을 새 가정값으로 다시 시작
+                self.tracker.lane_width = 2.0 * float(p.value)
+                self.assumed_half_lane_width_ratio = p.value
+            elif p.name in ('model_path', 'device'):
+                self.get_logger().warn(f'{p.name}는 실행 중 변경이 반영되지 않습니다(재시작 필요)')
+                continue
+            else:
+                continue
+            self.get_logger().info(f'파라미터 반영: {p.name} = {p.value}')
+        return SetParametersResult(successful=True)
 
     # ===============================================================
     # 메인 콜백 (이미지 수신 -> YOLO 추론 -> crossline/offset/디버그영상 발행)

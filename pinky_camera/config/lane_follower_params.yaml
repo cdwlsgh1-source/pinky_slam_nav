@@ -23,7 +23,7 @@ lane_follower_node:
     # 한쪽 차선만 보일 때 추가 회전 각속도 (rad/s, 0이면 회전 추가 안 함)
     single_side_turn_bias: 0.3
     # trend(코너 추세) feed-forward 게인. 0이면 미사용, 0보다 크면 코너 진입을 미리 시작
-    kd_trend: 1.0
+    kd_trend: 0.0
     # 이 값을 넘는 trend만 탐색 회전 방향(_last_side)에 반영
     trend_side_threshold: 0.05
     # 검출이 이 시간(s) 이내로 끊기면 소실로 보지 않고 마지막 offset으로 계속 추종

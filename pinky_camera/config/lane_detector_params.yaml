@@ -12,7 +12,7 @@ lane_detector_node:
     crossline_class_id: 0
     # 화면 하단 몇 %를 ROI로 볼지. 예전에 ros2 param set으로만 올렸다면 재시작 시
     # 코드 기본값(0.4)으로 되돌아갔을 것이므로 여기 명시적으로 넣어 유지되게 함
-    lane_roi_ratio: 0.7
+    lane_roi_ratio: 0.4
     # 차선 폭(좌~우 차선 사이 거리)의 초기 가정값(절반, 이미지 폭 대비). 양쪽이 다 보일 때마다 자동 학습됨
     assumed_half_lane_width_ratio: 0.35
     # 인스턴스의 실측 최하단이 화면 맨 아래 가장자리에서 이 비율(화면 높이 기준)보다
@@ -27,6 +27,11 @@ lane_detector_node:
     lane_width_alpha: 0.1
     # 차선이 이 프레임 수 이상 연속으로 안 보이면 좌/우 이력(폭 추정 기준점)을 초기화
     history_reset_frames: 15
+    # 마스크 x 폭이 화면 폭 대비 이 비율을 넘으면(세로 차선+전방 수평선이 합쳐진 경우)
+    # 회귀 대신 최하단 띠의 x 평균으로 위치를 계산하고 trend는 0으로 무시
+    wide_mask_ratio: 0.6
+    # 위 경우에 쓰는 최하단 띠 높이 (화면 높이 대비 비율)
+    bottom_band_ratio: 0.10
     # 디버그 영상(lane/debug/compressed) 발행 여부. 구독자가 없으면 자동으로 생략됨
     debug_image: true
     # 디버그 영상 JPEG 압축 품질 (1~100)
