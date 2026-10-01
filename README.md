@@ -111,7 +111,7 @@ python3 pinky_control_client_v2.py pinky1 stop      # 순찰 중지
 | `zone_manager_node.py` | 관제 PC (1대만) | 점유 상태·대기열 관리, `max_hold_sec` 초과 시 강제 해제 |
 | `zone_gate_client.py` | 각 로봇 (patrol 노드가 import) | `wait_for_entry()`로 진입 허가 대기, `notify_exit()`로 이탈 통보 |
 | `config/zone_params.yaml` | - | `robot_ids`, `max_hold_sec`(기본 120초) |
-| `launch/zone_manager.launch.py` | - | zone_manager_node 실행용 launch |
+| `launch/zone_manager.launch.xml` | - | zone_manager_node 실행용 launch |
 
 **빌드 (관제 PC와 두 로봇 모두)**
 
@@ -124,7 +124,7 @@ source install/setup.bash
 **실행 (관제 PC)**
 
 ```bash
-ros2 launch zone_traffic_control zone_manager.launch.py
+ros2 launch zone_traffic_control zone_manager.launch.xml
 
 # 상태 확인: free / occupied_by:pinky1
 ros2 topic echo /zone_manager/status
@@ -165,6 +165,20 @@ ros2 topic echo /zone_manager/status
 
 - 웹에서 바로 보기: [🗺️ Pinky Map Viewer 실행하기](https://htmlpreview.github.io/?https://raw.githubusercontent.com/cdwlsgh1-source/pinky_slam_nav/main/map_view_pc/pinky_map_viewer.html)
 - 로컬: `pinky_map_viewer.html`을 브라우저로 열기
+
+## 추돌 방지 실행 (관제 PC)
+
+브릿지와 `zone_manager_node`는 터미널을 나눠서 실행합니다. (사전에 `bridge_ws`, `zone_traffic_control` 빌드 후 `source` 필요)
+
+```bash
+# 터미널 1: 도메인 브릿지 (pinky1 + pinky2)
+ros2 launch launch/bridges.launch.xml                 # pinky2:=false 로 한 대만 가능
+
+# 터미널 2: zone_manager_node
+ros2 launch zone_traffic_control zone_manager.launch.xml
+```
+
+순찰 노드는 각 로봇에서 `-p robot_id:=pinky1` / `-p robot_id:=pinky2`로 실행합니다.
 
 ## 전체 실행 순서 요약
 

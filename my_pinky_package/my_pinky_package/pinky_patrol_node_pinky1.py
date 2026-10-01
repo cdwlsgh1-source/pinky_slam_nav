@@ -47,10 +47,10 @@ class PinkyPatrolNode(Node):
     #  P3로 향하려는 순간부터 허가가 필요하다. P1로 돌아오면 위험 구역 종료)
     WAYPOINTS = [
         POINTS["P2"],       # 0: 중간 경유점
-        POINTS["RED1IN"],   # 1: RED LINE       <- 여기 도착 후 진입 허가 요청
-        POINTS["P3"],       # 2: 우측 아래 끝      (위험 구역 안)
+        # POINTS["RED1IN"],   # 1: RED LINE       <- 여기 도착 후 진입 허가 요청
+        POINTS["P3"],       # 2: 우측 아래 끝     (위험 구역 안)
         POINTS["P6"],       # 3: 우측 위 끝      (위험 구역 안)
-        POINTS["RED1OUT"],  # 4: RED LINE       <- 여기 도착 시 이탈 통보
+        # POINTS["RED1OUT"],  # 4: RED LINE       <- 여기 도착 시 이탈 통보
         POINTS["P1"],       # 5: 시작점으로 복귀
     ]
 

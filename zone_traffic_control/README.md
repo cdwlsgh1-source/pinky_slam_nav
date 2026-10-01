@@ -38,7 +38,7 @@ zone_traffic_control/
 ├── zone_traffic_control/
 │   ├── zone_manager_node.py   # 중앙 관리 노드 (락 / 대기열 / 타임아웃 안전장치)
 │   └── zone_gate_client.py    # 로봇 쪽 헬퍼 (request_entry 대기 + notify_exit)
-├── launch/zone_manager.launch.py
+├── launch/zone_manager.launch.xml
 ├── config/zone_params.yaml
 └── package.xml / setup.py / setup.cfg
 ```
@@ -83,7 +83,7 @@ zone_traffic_control/
 4. `config/zone_params.yaml`의 `robot_ids`가 로봇에서 쓰는 `robot_id` 파라미터 값(`pinky1`, `pinky2`)과 정확히 같은지 확인합니다.
 5. 실행:
    ```bash
-   ros2 launch zone_traffic_control zone_manager.launch.py
+   ros2 launch zone_traffic_control zone_manager.launch.xml
    ```
 6. 로봇 쪽 도메인 브릿지 설정(기존에 `patrol_cmd`/`patrol_status`를 등록해둔 그 설정 파일)에, 아래 4개 String 토픽도 똑같은 방식으로 추가합니다. 이제 이 토픽들이 로봇 ↔ 관제 PC 사이를 오갑니다.
    - `/zone_manager/request_entry`
@@ -108,7 +108,7 @@ source install/setup.bash
 ## 2. zone_manager_node 실행 (관제 PC 또는 두 로봇이 모두 볼 수 있는 곳)
 
 ```bash
-ros2 launch zone_traffic_control zone_manager.launch.py
+ros2 launch zone_traffic_control zone_manager.launch.xml
 ```
 
 `config/zone_params.yaml`에서 `robot_ids`를 실제 사용하는 robot_id

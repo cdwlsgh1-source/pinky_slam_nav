@@ -1,0 +1,5 @@
+<launch>
+  <node pkg="zone_traffic_control" exec="zone_manager_node" name="zone_manager_node" output="screen">
+    <param from="$(find-pkg-share zone_traffic_control)/config/zone_params.yaml"/>
+  </node>
+</launch>

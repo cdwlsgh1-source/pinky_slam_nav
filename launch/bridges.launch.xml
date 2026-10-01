@@ -1,0 +1,11 @@
+<launch>
+  <!-- 도메인 브릿지 (관제 PC): pinky1(20<->50), pinky2(22<->50)
+       한 대만 띄우려면 pinky2:=false 처럼 지정 -->
+  <arg name="pinky1" default="true" description="pinky1 브릿지 실행 여부"/>
+  <arg name="pinky2" default="true" description="pinky2 브릿지 실행 여부"/>
+
+  <executable cmd="ros2 run domain_bridge domain_bridge $(dirname)/../domain_bridge_pc/config/pinky_bridge_pinky1.yaml"
+              name="domain_bridge_pinky1" output="screen" if="$(var pinky1)"/>
+  <executable cmd="ros2 run domain_bridge domain_bridge $(dirname)/../domain_bridge_pc/config/pinky_bridge_pinky2.yaml"
+              name="domain_bridge_pinky2" output="screen" if="$(var pinky2)"/>
+</launch>
