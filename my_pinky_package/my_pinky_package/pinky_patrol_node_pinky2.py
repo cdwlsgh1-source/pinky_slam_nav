@@ -1,9 +1,11 @@
 import rclpy
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from std_msgs.msg import String
-import json, math, os, time, threading
+from pinky_interfaces.srv import SetLed
+import json, math, os, time, threading, subprocess
 
 # === ZONE-MUTEX ADDED: import =============================================
 # pip/colcon으로 zone_traffic_control 패키지가 설치되어 있어야 합니다.
@@ -45,10 +47,10 @@ class PinkyPatrolNode(Node):
     # 다시 P4로 돌아올 때까지 전 구간. (P4는 위험 구역의 "문": P4까지는 자유롭게
     # 이동하고, P4를 지나가려는 순간부터 허가가 필요. 다시 P4로 돌아오면 위험 구역 종료)
     WAYPOINTS = [
-		# POINTS["RED2IN"],   # 0: RED LINE (0.600, -0.600)         <- 여기 도착 후 진입 허가 요청
+		POINTS["RED2IN"],   # 0: RED LINE (0.600, -0.600)         <- 여기 도착 후 진입 허가 요청
         POINTS["P3"],  	    # 1: 우측 아래 끝 (1.502, -0.400)      (위험 구역 안)
         POINTS["P6"],       # 2: 우측 위 끝 (1.498, 0.100)         (위험 구역 안)
-		# POINTS["RED2OUT"],  # 3: RED LINE (0.600, -0.600)         <- 여기 도착 시 이탈 통보
+		POINTS["RED2OUT"],  # 3: RED LINE (0.600, -0.600)         <- 여기 도착 시 이탈 통보
         POINTS["P7"],       # 4: 시작점으로 복귀 (0.002, -0.597)
     ]
 
@@ -102,7 +104,34 @@ class PinkyPatrolNode(Node):
         self._stop_requested = False # stop 명령이 들어왔는지
         self._thread = None          # 순찰을 수행하는 백그라운드 스레드 핸들
 
+        # 로봇 LED 서비스(pinky_led led_server)가 떠 있으면 초록색으로 점등
+        self._led_proc = None  # 직접 띄운 led_server 프로세스
+        self.led_cli = self.create_client(SetLed, 'set_led')
+        self.set_led('fill', 0, 255, 0)
+
         self.publish_status('IDLE', -1)
+
+    def set_led(self, command, r=0, g=0, b=0):
+        # led_server가 이미 떠 있지 않으면 직접 실행 (실패해도 순찰은 계속)
+        if not self.led_cli.wait_for_service(timeout_sec=1.0):
+            if self._led_proc is None:
+                self.get_logger().info('led_server 자동 실행')
+                self._led_proc = subprocess.Popen(['ros2', 'run', 'pinky_led', 'led_server'])
+            if not self.led_cli.wait_for_service(timeout_sec=10.0):
+                self.get_logger().warn('/set_led 서비스 없음 - LED 설정 생략')
+                return
+        req = SetLed.Request()
+        req.command, req.r, req.g, req.b = command, r, g, b
+        self.led_cli.call_async(req)
+
+    def clear_led(self):
+        # 종료 시 LED 끄기 (서비스가 응답할 때까지 잠깐 spin)
+        if not self.led_cli.service_is_ready():
+            return
+        req = SetLed.Request()
+        req.command = 'clear'
+        future = self.led_cli.call_async(req)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
 
     def publish_status(self, state, wp_index, detail=''):
         """상태 문자열을 JSON으로 직렬화해서 patrol_status로 발행."""
@@ -325,7 +354,7 @@ class PinkyPatrolNode(Node):
         self._running = False
 
 def main(args=None):
-    rclpy.init(args=args)
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = PinkyPatrolNode()
 
     # rclpy.spin(node) 대신 전용 executor를 명시적으로 만들어 사용
@@ -338,6 +367,12 @@ def main(args=None):
         pass
     finally:
         executor.shutdown()
+        try:
+            node.clear_led()
+        except Exception:
+            pass
+        if node._led_proc is not None:
+            node._led_proc.terminate()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
