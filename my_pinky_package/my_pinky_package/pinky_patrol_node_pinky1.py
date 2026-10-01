@@ -110,6 +110,8 @@ class PinkyPatrolNode(Node):
 
         # 로봇 LED 서비스(pinky_led led_server)가 떠 있으면 초록색으로 점등
         self._led_proc = None  # 직접 띄운 led_server 프로세스
+        self._blink_stop = None   # 깜박임 중단용 Event
+        self._blink_thread = None
         self.led_cli = self.create_client(SetLed, 'set_led')
         self.set_led('fill', 0, 255, 0)
 
@@ -128,7 +130,32 @@ class PinkyPatrolNode(Node):
         req.command, req.r, req.g, req.b = command, r, g, b
         self.led_cli.call_async(req)
 
+    def start_blink(self, r, g, b, period=1.0):
+        # 별도 스레드에서 (r,g,b) <-> 소등을 반복. stop_blink()로 중단.
+        self.stop_blink()
+        stop = threading.Event()
+        def loop():
+            on = True
+            while not stop.is_set():
+                if on:
+                    self.set_led('fill', r, g, b)
+                else:
+                    self.set_led('clear')
+                on = not on
+                stop.wait(period)
+        self._blink_stop = stop
+        self._blink_thread = threading.Thread(target=loop, daemon=True)
+        self._blink_thread.start()
+
+    def stop_blink(self):
+        if self._blink_stop is not None:
+            self._blink_stop.set()
+            self._blink_thread.join(timeout=3.0)
+            self._blink_stop = None
+            self._blink_thread = None
+
     def clear_led(self):
+        self.stop_blink()
         # 종료 시 LED 끄기 (서비스가 응답할 때까지 잠깐 spin)
         if not self.led_cli.service_is_ready():
             return
@@ -328,8 +355,11 @@ class PinkyPatrolNode(Node):
                     if i == self.ZONE_ENTRY_INDEX:
                         self.get_logger().info(f'[{i+1}] 위험 구역 진입 허가 요청 중...')
                         self.publish_status('WAITING_ZONE', i)
+                        self.start_blink(255, 0, 0)  # 정지 대기 -> 빨간불 깜박임
                         granted = self.gate.wait_for_entry(
                             stop_check=lambda: self._stop_requested)
+                        self.stop_blink()
+                        self.set_led('fill', 0, 255, 0)  # 대기 종료 -> 초록불
                         # granted가 False인 경우는 stop 명령으로 중단된 경우뿐이며,
                         # self._stop_requested가 이미 True이므로 아래 STOPPED 처리로 이어집니다.
                     # ============================================================================
