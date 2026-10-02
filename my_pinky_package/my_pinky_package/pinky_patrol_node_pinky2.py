@@ -132,12 +132,12 @@ class PinkyPatrolNode(Node):
         stop = threading.Event()
         def loop():
             on = True
-            while not stop.is_set():
-                if on:
-                    self.set_led('fill', r, g, b)
-                else:
-                    self.set_led('clear')
-                on = not on
+            while not stop.is_set():                # stop이 아닌경우,
+                if on:                              # True 이면
+                    self.set_led('fill', r, g, b)   # LED ON 
+                else:                               # Flase 이면
+                    self.set_led('clear')           # LED OFF
+                on = not on                         # on 변수를 True 이면 False로, Flase 이면 True로 변환
                 stop.wait(period)
         self._blink_stop = stop
         self._blink_thread = threading.Thread(target=loop, daemon=True)
@@ -245,12 +245,12 @@ class PinkyPatrolNode(Node):
         msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
         # covariance는 6x6 행렬을 1차원 배열로 편 것. 대각선 성분만 채움:
         # [0]=x분산, [7]=y분산, [35]=yaw분산 (6*5+5=35)
-        msg.pose.covariance[0] = 0.25
-        msg.pose.covariance[7] = 0.25
-        msg.pose.covariance[35] = 0.3
+        msg.pose.covariance[0] = 0.25   # x 오차값: 0.25 - x 좌표를 잘 못잡는 경우 해당 오차를 증가 -> 0.5
+        msg.pose.covariance[7] = 0.25   # y 오차값: 0.25 - y 좌표를 잘 못잡는 경우 해당 오차를 증가 -> 0.5
+        msg.pose.covariance[35] = 0.3   # yaw 오차값: 0.3 - yaw 불확실에 따른 좌표를 못잡는 경우 증가 -> 0.5 ~ 1.0
         pub.publish(msg)
 
-    def spin_in_place(self, duration=4.0, angular_speed=0.5):
+    def spin_in_place(self, duration=12.6, angular_speed=0.5):    # 좌표를 잘 못잡는 경우 duration 값을 길게 설정해보기 4.0 -> 12.6
         """
         [구독자 대기 패턴 #2 - publish_initial_pose와 동일 구조]
         초기 위치 보정 후 제자리 회전을 시켜 AMCL이 방향을 더 잘 잡게 함.
