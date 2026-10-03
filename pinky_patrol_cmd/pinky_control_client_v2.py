@@ -38,10 +38,13 @@ class PatrolClient(Node):
         명령어 종류마다 Start, Stop, monitor 등 함수를 따로 만들지 않고 하나의 함수로 통합하기 위함"""
 
 def main():
-    # 인자 개수 확인 (파일명 포함 3개 필요: 파일명, namespace, action)
+    # === GOTO-RETURN MODIFIED: 사용법 안내에 goto 추가 ================================
+    # 기존: python3 patrol_client.py <pinky1|pinky2> <start|stop|monitor>
     if len(sys.argv) < 3:
-        print('사용법: python3 patrol_client.py <pinky1|pinky2> <start|stop|monitor>')
+        print('사용법: python3 patrol_client.py <pinky1|pinky2> <start|stop|monitor|goto> [포인트]')
+        print('예시  : python3 patrol_client.py pinky1 goto P2')
         return
+    # ============================================================================
 
     namespace = sys.argv[1]
     action = sys.argv[2]
@@ -52,6 +55,17 @@ def main():
     if action == 'start' or action == 'stop':
         node.send_command(action)
         print(namespace, '에게', action, '명령 전송 완료')
+    
+    # === GOTO-RETURN ADDED: goto 명령 ==============================================
+    # 'goto P2' 로 입력하면 로봇에는 'goto:P2' 문자열로 전송됩니다.
+    elif action == 'goto':
+        if len(sys.argv) < 4:
+            print('포인트 이름이 필요합니다. 예: python3 patrol_client.py pinky1 goto P2')
+        else:
+            point = sys.argv[3].upper()    # p2 -> P2 (로봇 쪽에서도 upper() 처리하지만 이중 안전)
+            node.send_command('goto:' + point)
+            print(namespace, '에게 goto:' + point, '명령 전송 완료')
+    # ============================================================================
 
     elif action == 'monitor':
         print(namespace, '상태 모니터링 시작 (Ctrl+C로 종료)')

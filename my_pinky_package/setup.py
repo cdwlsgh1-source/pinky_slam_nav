@@ -30,6 +30,8 @@ setup(
             'pinky_patrol_node_zone_pinky1 = my_pinky_package.pinky_patrol_node_zone_pinky1:main',
             'pinky_patrol_node_pinky1 = my_pinky_package.pinky_patrol_node_pinky1:main',
             'pinky_patrol_node_pinky2 = my_pinky_package.pinky_patrol_node_pinky2:main',
+            'pinky_patrol_node_pinky1_v2 = my_pinky_package.pinky_patrol_node_pinky1_v2:main',
+            'pinky_patrol_node_pinky2_v2 = my_pinky_package.pinky_patrol_node_pinky2_v2:main',
         ],
     },
 )
