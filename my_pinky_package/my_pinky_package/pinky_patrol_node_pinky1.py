@@ -7,10 +7,10 @@ from std_msgs.msg import String
 from pinky_interfaces.srv import SetLed
 import json, math, os, time, threading, subprocess
 
-# === ZONE-MUTEX ADDED: import =============================================
+# === ZONE-MUTEX ADDED: import ===================================================
 # pip/colcon으로 zone_traffic_control 패키지가 설치되어 있어야 합니다.
 from zone_traffic_control.zone_gate_client import ZoneGateClient
-# ============================================================================
+# =================================================================================
 
 
 class PinkyPatrolNode(Node):    
@@ -56,7 +56,7 @@ class PinkyPatrolNode(Node):
         POINTS["P1"],       # 5: 시작점으로 복귀
     ]
 
-    # === ZONE-MUTEX ADDED =====================================================
+    # === ZONE-MUTEX ADDED ==========================================================
     """
     ZONE_ENTRY_INDEX: 이 인덱스의 waypoint에 "도착한 직후", 다음 waypoint로
     출발하기 전에 위험 구역 진입 허가를 요청합니다. (그 waypoint 자체까지는
@@ -76,12 +76,12 @@ class PinkyPatrolNode(Node):
 
     ZONE_ENTRY_INDEX = 1   # WAYPOINTS[1] = RED1, 도착 직후 다음 구간(P3)으로 넘어가기 전 진입 허가 대기
     ZONE_EXIT_INDEX = 4    # WAYPOINTS[4] = RED1, 여기 도착 시 위험 구역을 완전히 벗어났다고 통보
-    # ============================================================================
+    # ================================================================================
 
     def __init__(self):
         super().__init__('pinky_patrol_node')
 
-        # === ZONE-MUTEX ADDED: robot_id 파라미터 ==================================
+        # === ZONE-MUTEX ADDED: robot_id 파라미터 ======================================
         # 실행 시 --ros-args -p robot_id:=pinky1 로 지정.
         # zone_manager_node의 robot_ids 파라미터에 있는 값과 정확히 같아야 합니다.
         self.declare_parameter('robot_id', 'pinky1')
@@ -91,7 +91,7 @@ class PinkyPatrolNode(Node):
         # Nav2 액션 클라이언트 역할 + 퍼블리셔 생성 헬퍼 역할을 겸함
         self.navigator = BasicNavigator()
 
-        # === ZONE-MUTEX ADDED: gate client ========================================
+        # === ZONE-MUTEX ADDED: gate client ==========================================
         # navigator를 그대로 넘깁니다. 기존 코드가 isTaskComplete() 폴링 등으로
         # navigator를 이미 spin하고 있는 패턴과 동일하게 동작해서 별도 스레드/
         # executor 충돌 걱정이 없습니다.
@@ -276,7 +276,7 @@ class PinkyPatrolNode(Node):
     def save_last_pose(self, x, y, yaw=0.0):
         """다음 실행 시 이어서 시작할 수 있도록 마지막 위치를 파일에 저장."""
         with open(self.POSE_FILE, 'w') as f:
-            json.dump({'x': x, 'y': y, 'yaw': yaw}, f)
+            json.dump({'x': x, 'y': y, 'yaw': yaw}, f)   # 파일에 저장되는 형태
 
     def load_last_pose(self):
         if os.path.exists(self.POSE_FILE):
@@ -341,13 +341,13 @@ class PinkyPatrolNode(Node):
                     self.get_logger().info(f'{i+1}번째 목표 도착 성공 ({attempt+1}번째 시도)')
                     self.publish_status('MOVING', i + 1)
 
-                    # === ZONE-MUTEX ADDED: 이탈 통보 ===================================
+                    # === ZONE-MUTEX ADDED: 이탈 통보 ==============================================
                     # 위험 구역을 완전히 벗어나는 waypoint에 도착했으므로 락을 반납합니다.
                     if i == self.ZONE_EXIT_INDEX:
                         self.gate.notify_exit()
                     # ============================================================================
 
-                    # === ZONE-MUTEX ADDED: 진입 허가 대기 =============================
+                    # === ZONE-MUTEX ADDED: 진입 허가 대기 ==========================================
                     # 위험 구역의 "문"이 되는 waypoint(RED)에 도착한 직후, 다음 구간(P3)
                     # 으로 넘어가기 전에 허가를 기다립니다. 즉 RED까지는 자유롭게 오고,
                     # RED를 "지나가려는" 순간부터 다른 로봇이 구역 안에 있으면 여기서
@@ -373,6 +373,13 @@ class PinkyPatrolNode(Node):
                 # for-else: break 없이 3번 다 돌았을 때 = 3회 전부 실패
                 self.get_logger().error(f'{i+1}번째 목표 최종 실패 (3회 모두 실패)')
                 self.publish_status('FAILED', i + 1)
+
+                # === ZONE-MUTEX FIX: 진입 지점 도달 실패 시 순찰 중단 =================================
+                if i == self.ZONE_ENTRY_INDEX:
+                    self.get_logger().error(
+                        '위험 구역 진입 지점 도달 실패 - 허가 없이 진입할 수 없어 순찰을 중단합니다')
+                    self._stop_requested = True
+                # =================================================================================
 
             if self._stop_requested:
                 # 주의: 구역 안에서 멈춘 경우 여기서는 notify_exit를 보내지 않습니다.
