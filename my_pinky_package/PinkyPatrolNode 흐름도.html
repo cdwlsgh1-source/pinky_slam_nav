@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PinkyPatrolNode 흐름도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  --bg:#FFFFFF; --ink:#1F2328; --muted:#5B626B; --line:#D6DAE0; --lane:#FAFAF8;
+  --edge:#5F5E5A; --code:#F3F4F6; --yes:#3B6D11; --no:#A32D2D; --am:#854F0B;
+  --gray-f:#F1EFE8; --gray-s:#888780; --gray-t:#2C2C2A; --gray-u:#5F5E5A;
+  --purple-f:#EEEDFE; --purple-s:#534AB7; --purple-t:#3C3489; --purple-u:#534AB7;
+  --teal-f:#E1F5EE; --teal-s:#0F6E56; --teal-t:#085041; --teal-u:#0F6E56;
+  --amber-f:#FAEEDA; --amber-s:#854F0B; --amber-t:#633806; --amber-u:#854F0B;
+  --red-f:#FCEBEB; --red-s:#A32D2D; --red-t:#791F1F; --red-u:#A32D2D;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15171B; --ink:#E8EAED; --muted:#A3AAB4; --line:#3A4049; --lane:#1B1E23;
+    --edge:#9DA3AD; --code:#22262D; --yes:#97C459; --no:#F09595; --am:#EF9F27;
+    --gray-f:#2C2C2A; --gray-s:#B4B2A9; --gray-t:#F1EFE8; --gray-u:#B4B2A9;
+    --purple-f:#26215C; --purple-s:#AFA9EC; --purple-t:#CECBF6; --purple-u:#AFA9EC;
+    --teal-f:#04342C; --teal-s:#5DCAA5; --teal-t:#9FE1CB; --teal-u:#5DCAA5;
+    --amber-f:#412402; --amber-s:#EF9F27; --amber-t:#FAC775; --amber-u:#EF9F27;
+    --red-f:#501313; --red-s:#F09595; --red-t:#F7C1C1; --red-u:#F09595;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15171B; --ink:#E8EAED; --muted:#A3AAB4; --line:#3A4049; --lane:#1B1E23;
+  --edge:#9DA3AD; --code:#22262D; --yes:#97C459; --no:#F09595; --am:#EF9F27;
+  --gray-f:#2C2C2A; --gray-s:#B4B2A9; --gray-t:#F1EFE8; --gray-u:#B4B2A9;
+  --purple-f:#26215C; --purple-s:#AFA9EC; --purple-t:#CECBF6; --purple-u:#AFA9EC;
+  --teal-f:#04342C; --teal-s:#5DCAA5; --teal-t:#9FE1CB; --teal-u:#5DCAA5;
+  --amber-f:#412402; --amber-s:#EF9F27; --amber-t:#FAC775; --amber-u:#EF9F27;
+  --red-f:#501313; --red-s:#F09595; --red-t:#F7C1C1; --red-u:#F09595;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-text-size-adjust:100%}
+.wrap{max-width:1200px;margin:0 auto;padding:28px 20px 72px}
+h1{font-size:26px;font-weight:600;letter-spacing:-0.01em;margin:0 0 4px}
+.lead{margin:0 0 16px;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 18px;padding:0;list-style:none;font-size:13px;color:var(--muted)}
+.legend li{display:flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:14px;height:14px;border-radius:4px;background:var(--f);border:1.5px solid var(--s)}
+.sw.k-gray{--f:var(--gray-f);--s:var(--gray-s)}
+.sw.k-purple{--f:var(--purple-f);--s:var(--purple-s)}
+.sw.k-teal{--f:var(--teal-f);--s:var(--teal-s)}
+.sw.k-amber{--f:var(--amber-f);--s:var(--amber-s)}
+.sw.k-red{--f:var(--red-f);--s:var(--red-s)}
+.sw.chg{background:var(--bg);border:1.5px solid var(--ink);outline:1.5px solid var(--ink);outline-offset:2px;margin:0 2px}
+.tabs{display:flex;gap:4px;margin:0 0 22px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{appearance:none;background:none;border:0;border-bottom:3px solid transparent;padding:10px 16px;font:inherit;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+.tab:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;align-items:start}
+.sec{margin:0 0 34px}
+.sec h2{font-size:17px;font-weight:600;margin:0 0 2px}
+.sec h3{font-size:14px;font-weight:600;margin:16px 0 6px;color:var(--muted)}
+.sec .sub{margin:0 0 10px;color:var(--muted);font-size:14px}
+.diagram{overflow-x:auto;border:1px solid var(--line);border-radius:12px;padding:8px;background:var(--bg)}
+.diagram svg{display:block;width:100%;height:auto}
+
+/* svg parts */
+.ct{fill:var(--lane);stroke:var(--line);stroke-width:1;stroke-dasharray:6 4}
+.ctl{font-size:13px;font-weight:600;fill:var(--ink)}
+.cts{font-size:12px;fill:var(--muted)}
+.edge{fill:none;stroke:var(--edge);stroke-width:1.5}
+.edge.dash{stroke-dasharray:5 4}
+.edge.amber{stroke:var(--am)}
+.el{font-size:12px;font-weight:500;fill:var(--muted);paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.el-y{fill:var(--yes)} .el-n{fill:var(--no)} .el-am{fill:var(--am)}
+.ft{font-size:12px;fill:var(--muted);paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.ft.warn{fill:var(--no);font-weight:500}
+.ft.am{fill:var(--am);font-weight:500}
+.node{cursor:pointer;outline:none}
+.node .box{fill:var(--f);stroke:var(--s);stroke-width:1.2}
+.node:hover .box{stroke-width:2}
+.node.sel .box{stroke-width:3.2}
+.node:focus-visible .box{stroke:var(--ink);stroke-width:3.2}
+.node .nt{fill:var(--t);font-size:14px;font-weight:600}
+.node .ns{fill:var(--u);font-size:12px}
+.node .ring{fill:none;stroke:var(--ink);stroke-width:1.5}
+.node .tag{fill:var(--ink)}
+.node .tagt{fill:var(--bg);font-size:11px;font-weight:600}
+.k-gray{--f:var(--gray-f);--s:var(--gray-s);--t:var(--gray-t);--u:var(--gray-u)}
+.k-purple{--f:var(--purple-f);--s:var(--purple-s);--t:var(--purple-t);--u:var(--purple-u)}
+.k-teal{--f:var(--teal-f);--s:var(--teal-s);--t:var(--teal-t);--u:var(--teal-u)}
+.k-amber{--f:var(--amber-f);--s:var(--amber-s);--t:var(--amber-t);--u:var(--amber-u)}
+.k-red{--f:var(--red-f);--s:var(--red-s);--t:var(--red-t);--u:var(--red-u)}
+
+/* panel */
+#panel{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto;border:1px solid var(--line);border-radius:12px;padding:18px 18px 20px;background:var(--bg)}
+#panel h3{font-size:18px;font-weight:600;margin:2px 0 8px;line-height:1.35;overflow-wrap:anywhere}
+#panel p{margin:0 0 10px;font-size:14.5px}
+.p-stage{font-size:13px;color:var(--muted)}
+.badge{display:inline-block;margin-left:6px;padding:1px 9px;border-radius:999px;background:var(--ink);color:var(--bg);font-size:12px;font-weight:600}
+#panel pre{margin:10px 0 0;padding:10px 12px;background:var(--code);border-radius:8px;overflow:auto;font:13px/1.55 var(--mono)}
+#panel code{font:inherit}
+.p-why{margin-top:14px;padding-left:10px;border-left:3px solid var(--line);font-size:14px}
+.p-why b{display:block;font-weight:600;margin-bottom:2px}
+.map{margin:10px 0 0;padding:0;list-style:none;font-size:14px}
+.map li{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.map li:first-child{border-top:0}
+.map b{min-width:2.2em;font-weight:600}
+.p-close{display:none;appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;font:inherit;font-size:13px;padding:4px 12px;cursor:pointer;float:right;margin-left:8px}
+.p-close:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+@media (max-width:899px){
+  .layout{grid-template-columns:1fr}
+  #panel{position:fixed;left:0;right:0;bottom:0;top:auto;max-height:55vh;z-index:10;border-radius:14px 14px 0 0;border-width:1px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.18);padding:16px 18px calc(18px + env(safe-area-inset-bottom,0px))}
+  #panel.empty{display:none}
+  .p-close{display:block}
+  body.has-sel .wrap{padding-bottom:58vh}
+  h1{font-size:22px}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>PinkyPatrolNode 흐름도</h1>
+  <p class="lead">상자를 누르면 설명과 배운 단계가 나와요. (화면이 좁으면 아래쪽에 열려요.)</p>
+
+  <ul class="legend" aria-label="색 설명">
+    <li><i class="sw k-purple"></i>판단 · 대기</li>
+    <li><i class="sw k-teal"></i>실행</li>
+    <li><i class="sw k-amber"></i>중단 · 탈출 · 재시도</li>
+    <li><i class="sw k-red"></i>최종 실패</li>
+    <li><i class="sw k-gray"></i>시작 · 끝 · 외부</li>
+    <li><i class="sw chg"></i>수정 · 신규 (태그로 구분)</li>
+  </ul>
+
+  <div class="tabs" role="tablist" aria-label="흐름도 선택">
+    <button class="tab" role="tab" id="t-a" aria-controls="v-a" aria-selected="true">전체 구조</button>
+    <button class="tab" role="tab" id="t-b" aria-controls="v-b" aria-selected="false">순찰 흐름</button>
+    <button class="tab" role="tab" id="t-g" aria-controls="v-g" aria-selected="false">goto 경로</button>
+    <button class="tab" role="tab" id="t-c" aria-controls="v-c" aria-selected="false">시작 · 종료</button>
+  </div>
+
+  <div class="layout">
+    <div id="views">
+      <section id="v-a" role="tabpanel" aria-labelledby="t-a">
+        <div class="sec">
+          <h2>스레드 3개가 신호를 주고받아요</h2>
+          <p class="sub">세로 칸 하나가 스레드 하나예요. 실선은 호출·전달, 점선은 공유 깃발이에요.</p>
+          <div class="diagram" data-d="a"></div>
+        </div>
+      </section>
+
+      <section id="v-b" role="tabpanel" aria-labelledby="t-b" hidden>
+        <div class="sec">
+          <h2>① 준비</h2>
+          <p class="sub">스레드가 시작되면 상태를 켜고, 저장된 위치로 보정하고, Nav2를 기다려요.</p>
+          <div class="diagram" data-d="b1"></div>
+        </div>
+        <div class="sec">
+          <h2>② 웨이포인트 하나 이동 · 재시도</h2>
+          <p class="sub">한 지점을 최대 3번 시도해요. 이중 테두리가 이번에 수정한 부분이에요.</p>
+          <div class="diagram" data-d="b2"></div>
+        </div>
+        <div class="sec">
+          <h2>③ 위험 구역</h2>
+          <p class="sub">RED1IN에 도착하면 허가를 기다리고, RED1OUT에 도착하면 반납해요.</p>
+          <h3>진입 허가 대기</h3>
+          <div class="diagram" data-d="b3"></div>
+          <h3>이탈 통보</h3>
+          <div class="diagram" data-d="b3x"></div>
+        </div>
+        <div class="sec">
+          <h2>④ 마무리</h2>
+          <p class="sub">루프가 끝난 뒤 완주 또는 정지 상태를 남기고, 순찰 중 표시를 내려요.</p>
+          <div class="diagram" data-d="b4"></div>
+        </div>
+      </section>
+
+      <section id="v-g" role="tabpanel" aria-labelledby="t-g" hidden>
+        <div class="sec">
+          <h2>예시: goto:P2,P3,P6,P7</h2>
+          <p class="sub">밖에서 안으로 들어갈 때만 RED1IN(허가), 안에서 밖으로 나올 때만 RED1OUT(반납)을 지나가요.</p>
+          <div class="diagram" data-d="g0"></div>
+        </div>
+        <div class="sec">
+          <h2>① 명령 검사</h2>
+          <p class="sub">스레드를 시작하기 전에 입력을 걸러내요. 통과하면 _run_route가 출발해요.</p>
+          <div class="diagram" data-d="g1"></div>
+        </div>
+        <div class="sec">
+          <h2>② _run_route: 지점 순회</h2>
+          <p class="sub">구역 4가지 경우(밖→안, 안→밖, 안→안, 밖→밖)는 A·B 분기와 건너뛰기로 처리해요.</p>
+          <div class="diagram" data-d="g2"></div>
+        </div>
+        <div class="sec">
+          <h2>③ 헬퍼 함수 반환값</h2>
+          <p class="sub">True/False가 "락을 잡았는가"와 "계속할 수 있는가"를 알려줘요.</p>
+          <div class="diagram" data-d="g3"></div>
+        </div>
+      </section>
+
+      <section id="v-c" role="tabpanel" aria-labelledby="t-c" hidden>
+        <div class="sec">
+          <h2>켜지고, 기다리고, Ctrl+C로 끝나요</h2>
+          <p class="sub">대기 중인 메인 스레드가 명령을 받아 처리하고, 종료할 때는 finally에서 5단계로 정리해요.</p>
+          <div class="diagram" data-d="c"></div>
+        </div>
+      </section>
+    </div>
+
+    <aside id="panel" class="empty" aria-live="polite"></aside>
+  </div>
+</main>
+
+<script>
+(function(){
+  var N=function(id,x,y,w,h,k,t,s,i){return Object.assign({id:id,x:x,y:y,w:w,h:h,k:k,t:t,s:s},i||{});};
+  var E=function(p,o){return Object.assign({p:p},o||{});};
+  var D={};
+  /* ───────── 전체 구조 ───────── */
+  D.a={label:'전체 구조: 스레드 3개',vb:[760,570],
+    lanes:[
+      {x:10,y:46,w:220,h:494,t:'메인 스레드',s:'executor.spin()이 돌리는 흐름'},
+      {x:272,y:46,w:216,h:494,t:'작업 스레드',s:'start 또는 goto마다 새로 생김'},
+      {x:530,y:46,w:220,h:494,t:'깜박임 스레드',s:'Thread(target=loop)'}
+    ],
+    nodes:[
+      N('a_pc',22,96,196,46,'gray','관제 PC','patrol_cmd 발행',{st:'② 통신/명령',
+        d:"관제 PC가 patrol_cmd 토픽으로 'start', 'goto:P2,P3', 'stop' 같은 글자를 보내요.",
+        c:"ros2 topic pub --once patrol_cmd std_msgs/msg/String \"{data: 'goto:P2,P3'}\""}),
+      N('a_spin',22,166,196,46,'purple','executor.spin()','메시지가 올 때까지 대기',{st:'⑤ main',
+        d:"메인 스레드가 하는 일은 '기다리다 콜백 호출'뿐이에요. 오래 걸리는 일을 맡기지 않아서 stop 명령을 언제든 받을 수 있어요.",
+        c:"executor.spin()"}),
+      N('a_cmd',22,240,196,120,'teal','_cmd_cb(msg)',['start · goto · stop 처리','검사 후 스레드 출발','콜백은 즉시 리턴'],{st:'② 통신/명령',
+        d:"명령을 읽어요. start와 goto는 (goto는 입력 검사 후) _running을 먼저 켜고 작업 스레드를 출발시켜요. stop은 깃발을 올리고 이동을 취소한 뒤 바로 끝나요.",
+        c:"if cmd == 'start':\n    self._running = True\n    Thread(target=self._run_patrol, daemon=True).start()\nelif cmd.startswith('goto:'):\n    ...  # 검사 3종 후\n    Thread(target=self._run_route, args=(names,), daemon=True).start()",
+        why:"콜백 안에서 작업을 직접 돌리면, 끝날 때까지 stop 메시지를 받아줄 사람이 없어져요."}),
+      N('a_status',282,96,196,44,'gray','관제 PC','patrol_status 수신',{st:'② 통신/명령',
+        d:"로봇이 JSON 글자로 상태(IDLE, MOVING, WAITING_ZONE, ARRIVED, STOPPED 등)를 보내요. 순찰과 goto 둘 다 같은 토픽을 써요.",
+        c:"self.publish_status('MOVING', 2)"}),
+      N('a_run',282,190,196,82,'teal','_run_patrol()',['start: 웨이포인트 순회','이동 · 재시도 · 위험 구역'],{st:'④ _run_patrol',
+        d:"start 명령의 순찰 전체를 맡는 작업 스레드예요. 지금은 try/finally로 감싸서, 어떻게 끝나든 대기 LED 복귀와 _running = False가 실행돼요."}),
+      N('a_route',282,292,196,82,'teal','_run_route(names)',['goto: 지점 순회','구역 처리 · 홈 복귀'],{chg:true,tag:'신규',st:'④-4 goto 경로',
+        d:"goto 명령의 경로를 맡는 작업 스레드예요. 구역 안/밖을 보고 RED1IN 허가 대기와 RED1OUT 락 반납을 알아서 처리하고, 마지막에 홈(P1)으로 돌아가요.",
+        c:"Thread(target=self._run_route, args=(names,), daemon=True)"}),
+      N('a_helper',282,404,196,60,'purple','헬퍼 함수',['_init_pose_once (공용)','_navigate · 구역 헬퍼 (goto)'],{chg:true,tag:'신규',st:'③ · ④-4',
+        d:"_init_pose_once는 순찰과 goto가 함께 써요(노드 실행 후 첫 작업에서만 초기 위치 보정). _navigate(이동 + 3회 재시도), _enter_zone, _leave_zone은 goto(_run_route)가 써요."}),
+      N('a_gate',282,484,196,46,'purple','ZoneGateClient','허가 요청 · 이탈 통보 (공용)',{st:'④-3 위험 구역',
+        d:"다른 로봇과 위험 구역 출입을 조정하는 클라이언트예요. 순찰과 goto 모두 진입 지점에서 허가를 기다리고, 이탈 지점에서 반납해요.",
+        c:"self.gate.wait_for_entry(\n    stop_check=lambda: self._stop_requested)\nself.gate.notify_exit()"}),
+      N('a_blink',542,190,196,82,'teal','loop()',['켬/끔 반복 (색은 상황별)','대기 초록 · 허가 빨강 · goto 노랑'],{st:'① LED',
+        d:"start_blink가 만든 스레드예요. Event 깃발이 올라올 때까지 켬/끔을 반복해요. 대기(초록), 구역 허가 대기(빨강), goto 도착 후 대기(노랑)에 모두 같은 함수를 써요.",
+        c:"while not stop.is_set():\n    ...\n    stop.wait(period)",
+        why:"time.sleep 대신 stop.wait을 쓰면, 쉬는 도중에 깃발이 올라와도 즉시 깨어나요."}),
+      N('a_led',542,404,196,50,'gray','LED 서비스','/set_led',{st:'① LED',
+        d:"pinky_led 패키지의 led_server가 제공하는 서비스예요. 없으면 set_led가 자동으로 띄워요(로그 레벨 WARN, 별도 세션).",
+        c:"self.led_cli.call_async(req)"})
+    ],
+    edges:[
+      E([[120,142],[120,166]],{l:['patrol_cmd',132,154,'start']}),
+      E([[120,212],[120,240]],{l:['콜백 호출',132,226,'start']}),
+      E([[218,248],[282,248]],{l:['start',250,237,'middle','y']}),
+      E([[218,262],[282,262]],{dash:true,l:['stop',250,276,'middle','n']}),
+      E([[218,330],[282,330]],{l:['goto',250,319,'middle','y']}),
+      E([[380,190],[380,140]],{l:['publish_status',392,165,'start']}),
+      E([[478,225],[542,225]],{l:['blink 시작',510,214,'middle']}),
+      E([[478,258],[542,258]],{dash:true,l:['blink 중지',510,272,'middle']}),
+      E([[640,272],[640,404]],{l:['set_led',652,340,'start']})
+    ],
+    texts:[{x:380,y:558,t:'점선 = 공유 깃발 (_stop_requested, Event)',a:'middle'}]
+  };
+
+  /* ───────── 순찰 ① 준비 ───────── */
+  D.b1={label:'순찰 준비 흐름 (수정본)',vb:[760,530],
+    nodes:[
+      N('b1_start',90,14,220,48,'gray','_running = True','STARTING 발행',{st:'④-1 준비',
+        d:"순찰 스레드가 시작되면 '순찰 중' 표시를 켜고 관제에 알려요. _cmd_cb가 이미 켜 둔 값이라 사실상 한 번 더 켜는 거예요(무해).",
+        c:"self._running = True\nself.publish_status('STARTING', -1)"}),
+      N('b1_done',90,92,220,52,'purple','이미 보정했나?','_pose_initialized',{chg:true,tag:'신규',st:'③-2 · ④-1',
+        d:"_init_pose_once의 첫 줄이에요. 이 노드를 켠 뒤 이미 한 번 보정을 했으면 바로 끝내요.",
+        c:"if self._pose_initialized:\n    return\nself._pose_initialized = True",
+        why:"첫 작업에서 AMCL이 위치를 잡으면 이후엔 로봇이 움직이며 계속 추정해요. 매번 저장된 옛 위치를 다시 넣으면 잘 추정된 위치를 덮어쓸 수 있고, 제자리 회전 시간도 낭비돼요. 플래그를 먼저 True로 올리는 건 파일이 없거나 실패해도 다시 시도하지 않게 하려는 거예요."}),
+      N('b1_has',90,186,220,52,'purple','저장된 위치 있나?','load_last_pose()',{st:'③-3 파일 저장',
+        d:"마지막으로 저장해 둔 위치 파일이 있으면 딕셔너리, 없으면 None을 돌려줘요.",
+        c:"last = self.load_last_pose()\nif last is None:\n    return"}),
+      N('b1_cal',380,178,250,68,'teal','초기 보정',['publish_initial_pose','→ spin_in_place'],{st:'③-2 구독자 대기',
+        d:"저장된 위치를 AMCL에게 알려주고(구독자가 붙을 때까지 기다린 뒤 발행), 제자리 회전으로 방향을 잡게 해요.",
+        c:"self.publish_initial_pose(x, y, yaw)\nself.spin_in_place(duration=4.0, angular_speed=0.5)",
+        why:"_init_pose_once는 spin_in_place에 duration=4.0을 직접 넘겨요. spin_in_place의 기본값은 12.6초(한 바퀴)지만 이 호출에서는 적용되지 않아요."}),
+      N('b1_nav',90,290,220,52,'teal','Nav2 활성화 대기','waitUntilNav2Active()',{st:'④-1 준비',
+        d:"Nav2가 준비될 때까지 멈춰서 기다려요. 초기 위치를 받아야 AMCL이 완전히 활성화되기 때문에 보정 뒤에 와요.",
+        c:"self.navigator.waitUntilNav2Active()"}),
+      N('b1_loop',90,374,220,52,'teal','웨이포인트 순회','for i, wp in enumerate(...)',{st:'④-1 준비',
+        d:"WAYPOINTS 6개를 순번(i)과 함께 하나씩 꺼내요. 웨이포인트마다 set_drive_led()로 주행 중 초록 고정 점등을 켜요.",
+        c:"for i, wp in enumerate(self.WAYPOINTS):\n    pose = self.make_pose(*wp)\n    self.set_drive_led()"}),
+      N('b1_fin',90,458,220,52,'gray','finally','set_idle_led() · _running = False',{chg:true,tag:'신규',st:'④-1 준비',
+        d:"위의 모든 단계는 try 안에서 실행돼요. 정상 완주, STOPPED, 예외 어떤 경우든 finally에서 대기 LED(초록 깜박임)로 돌아오고 _running을 내려요.",
+        c:"finally:\n    self.set_idle_led()\n    self._running = False",
+        why:"예전에는 _running = False가 함수 맨 끝에 있어서, 도중에 예외가 나면 True로 남아 이후 start가 전부 무시됐어요."})
+    ],
+    edges:[
+      E([[200,62],[200,92]]),
+      E([[200,144],[200,186]],{l:['NO',212,165,'start','y']}),
+      E([[90,118],[50,118],[50,316],[89,316]],{l:['YES · 건너뜀',58,165,'start','n']}),
+      E([[310,212],[379,212]],{l:['YES',345,200,'middle','y']}),
+      E([[200,238],[200,289]],{l:['NO · 보정 생략',212,265,'start','n']}),
+      E([[505,246],[505,316],[311,316]]),
+      E([[200,342],[200,374]]),
+      E([[200,426],[200,458]],{dash:true,l:['끝나면 항상',212,442,'start']})
+    ],
+    texts:[{x:330,y:400,t:'각 웨이포인트는 ② 이동 · 재시도로 이어져요',a:'start'}]
+  };
+
+  /* ───────── 순찰 ② 이동·재시도 ───────── */
+  D.b2={label:'이동과 3회 재시도 흐름 (수정본)',vb:[680,730],
+    lanes:[{x:20,y:14,w:580,h:446,t:'for attempt in range(3)',s:''}],
+    nodes:[
+      N('b2_go',150,50,200,48,'teal','goToPose(pose)','목표 전송 (비동기)',{st:'④-2 이동 + 재시도',
+        d:"Nav2에 목표 좌표를 보내요. 비동기라 보내자마자 돌아오니, 도착은 아래 폴링으로 확인해요. 웨이포인트마다 이 앞에서 set_drive_led()로 초록 고정 점등을 켜요.",
+        c:"self.navigator.goToPose(pose)"}),
+      N('b2_poll',150,129,200,52,'purple','isTaskComplete() 폴링','0.1초마다 확인',{st:'④-2 이동 + 재시도',
+        d:"도착하거나 실패할 때까지 0.1초마다 확인하고, 그 사이 stop 요청이 오면 이동을 취소해요.",
+        c:"while not self.navigator.isTaskComplete():\n    if self._stop_requested:\n        self.navigator.cancelTask()\n        break\n    time.sleep(0.1)",
+        why:"폴링이 없으면 도착 전에 다음 목표를 보내서 이전 목표가 덮어써져요. sleep이 없으면 CPU를 100% 써요."}),
+      N('b2_cancel',395,129,190,52,'amber','cancelTask() → break','루프 탈출',{st:'④-2 이동 + 재시도',
+        d:"안쪽 break는 while만 빠져나가요. 바로 아래의 if self._stop_requested: break가 attempt 루프까지 빠져나가게 해요.",
+        c:"if self._stop_requested:\n    break"}),
+      N('b2_res',150,215,200,52,'teal','getResult() + 위치 저장','save_last_pose(*current)',{st:'③-3 · ④-2',
+        d:"결과(SUCCEEDED / FAILED / CANCELED)를 받고, 성공·실패와 관계없이 현재 위치를 저장해 다음 재시작에 대비해요. (goto의 _navigate는 위치를 못 읽으면 성공했을 때만 목표 좌표로 대체해요)",
+        c:"result = self.navigator.getResult()\nself.save_last_pose(*current)"}),
+      N('b2_succ',150,301,200,52,'purple','result == SUCCEEDED?','이번 시도가 성공했나?',{st:'④-2 이동 + 재시도',
+        d:"성공하면 위험 구역 처리를 거쳐 break, 실패하면 RETRY를 발행하고 다시 시도해요.",
+        c:"if result == TaskResult.SUCCEEDED:\n    ...\nelse:\n    ..."}),
+      N('b2_moving',395,301,190,52,'teal','MOVING 발행 → break',['구역 처리 후','다음 웨이포인트로'],{st:'④-2 → ④-3',
+        d:"관제에 도착을 알리고, 이 웨이포인트가 진입·이탈 지점이면 구역 처리를 한 뒤 break해요. 자세한 건 ③ 위험 구역을 봐요.",
+        c:"self.publish_status('MOVING', i + 1)\n...\nbreak"}),
+      N('b2_retry',150,387,200,52,'amber','RETRY 발행','다음 attempt로',{st:'④-2 이동 + 재시도',
+        d:"일시적 장애물이나 위치 튐은 흔해서, 재시도 3번으로 흡수해요.",
+        c:"self.publish_status('RETRY', i + 1, str(result))"}),
+      N('b2_failed',150,494,200,52,'red','FAILED 발행','최종 실패',{st:'④-2 이동 + 재시도',
+        d:"break 없이 3번 다 돌았을 때만 실행되는 for-else예요.",
+        c:"else:  # for-else\n    self.publish_status('FAILED', i + 1)"}),
+      N('b2_zchk',140,580,220,52,'purple','i == ZONE_ENTRY_INDEX?','진입 지점(RED1IN)인가?',{chg:true,st:'④-2 이동 + 재시도 (수정)',
+        d:"3번 다 실패한 지점이 허가 요청 지점(RED1IN, index 1)인지 확인해요.",
+        c:"if i == self.ZONE_ENTRY_INDEX:\n    ...",
+        why:"허가 요청(wait_for_entry)이 SUCCEEDED 안쪽에 있어서, 실패한 채 P3로 가면 허가 없이 위험 구역에 들어가기 때문이에요. 조건이 ==라서 P2, P3, P6 같은 다른 지점은 계속 진행해요."}),
+      N('b2_zstop',410,580,230,52,'amber','_stop_requested = True','→ STOPPED 후 순찰 종료',{chg:true,st:'④-2 이동 + 재시도 (수정)',
+        d:"중단 깃발을 올려요. 바로 아래의 기존 if self._stop_requested: 가 STOPPED를 발행하고 순찰을 끝내요. 아직 구역 밖(문 앞)이라 notify_exit는 필요 없어요.",
+        c:"self.get_logger().error('위험 구역 진입 지점 도달 실패')\nself._stop_requested = True"}),
+      N('b2_next',150,666,200,44,'gray','다음 웨이포인트로',null,{st:'④-2 이동 + 재시도',
+        d:"P2, P3, P6처럼 진입 지점이 아닌 곳은 FAILED만 발행하고 다음 웨이포인트로 계속 가요."})
+    ],
+    edges:[
+      E([[250,98],[250,128]]),
+      E([[350,155],[394,155]],{l:['stop',372,142,'middle','n']}),
+      E([[250,181],[250,214]],{l:['완료',262,198,'start','y']}),
+      E([[250,267],[250,300]]),
+      E([[350,327],[394,327]],{l:['YES',372,314,'middle','y']}),
+      E([[250,353],[250,386]],{l:['NO',262,370,'start','n']}),
+      E([[150,413],[100,413],[100,74],[149,74]],{c:'amber',l:['재시도',62,232,'middle','am']}),
+      E([[250,439],[250,493]],{l:['3번 다 실패 → for-else',262,478,'start','n']}),
+      E([[250,546],[250,579]]),
+      E([[360,606],[409,606]],{l:['YES',385,593,'middle','n']}),
+      E([[250,632],[250,665]],{l:['NO',262,649,'start','y']})
+    ],
+    texts:[{x:62,y:249,t:'(최대 3번)',a:'middle',cls:'am'}]
+  };
+
+  /* ───────── 순찰 ③ 위험 구역: 진입 ───────── */
+  D.b3={label:'위험 구역 진입 허가 대기 흐름',vb:[680,610],
+    nodes:[
+      N('b3_start',240,20,200,48,'gray','RED1IN 도착 성공','i == ZONE_ENTRY_INDEX (1)',{st:'④-3 위험 구역',
+        d:"RED1IN은 위험 구역의 '문'이에요. 문 앞까지는 허가 없이 오고, 문을 넘기 직전에 허가를 요청해요.",
+        c:"if i == self.ZONE_ENTRY_INDEX:"}),
+      N('b3_wz',210,97,260,52,'teal','WAITING_ZONE 발행','+ start_blink(255,0,0) 빨간 깜박임',{st:'① LED · ④-3',
+        d:"관제에 '대기 중'을 알리고 빨간불을 깜박여요. 깜박임은 별도 스레드라 이 줄은 바로 끝나요.",
+        c:"self.publish_status('WAITING_ZONE', i)\nself.start_blink(255, 0, 0)"}),
+      N('b3_wait',200,179,280,56,'purple','wait_for_entry()','다른 로봇이 안에 있으면 여기서 대기',{st:'④-3 위험 구역',
+        d:"허가가 날 때까지 멈춰서 기다려요. 빈 구역이면 바로 통과해요. stop_check에 lambda를 넘겨서 대기 중에도 stop을 확인해요.",
+        c:"granted = self.gate.wait_for_entry(\n    stop_check=lambda: self._stop_requested)",
+        why:"값(self._stop_requested)을 그대로 넘기면 그 순간의 False가 고정돼서, 대기 중 stop이 와도 영원히 못 빠져나와요. lambda는 물어볼 때마다 현재 값을 확인해요."}),
+      N('b3_ok',40,291,160,48,'teal','허가됨','구역이 비었음',{st:'④-3 위험 구역',
+        d:"다른 로봇이 구역 안에 없어서 락을 받았어요."}),
+      N('b3_stp',480,291,160,48,'amber','stop 요청됨','대기 중 탈출',{st:'④-3 위험 구역',
+        d:"대기 중 stop이 와서 대기를 빠져나왔어요. 허가를 받은 게 아니라서, 이후 STOPPED로 이어져요."}),
+      N('b3_sb',210,372,260,52,'teal','stop_blink() → if granted:','set_drive_led() 주행 LED',{chg:true,tag:'수정',st:'① LED',
+        d:"허가든 stop이든 같은 줄을 지나요. 깜박임 스레드를 join으로 완전히 끝낸 뒤, 허가를 받았을 때만 초록 고정(주행 LED)을 켜요. stop이면 초록불 없이 넘어가요.",
+        c:"self.stop_blink()\nif granted:\n    self.set_drive_led()",
+        why:"예전엔 stop_blink() 뒤에 set_led(초록)을 무조건 켰어요. 이제 granted 값이 실제로 쓰이고, 이 두 줄 순서(stop_blink 먼저)는 set_drive_led() 안에도 들어 있어요."}),
+      N('b3_brk',220,453,240,48,'gray','break','attempt 루프 탈출',{st:'④-2 이동 + 재시도',
+        d:"성공했으니 attempt 재시도 루프를 빠져나가요.",c:"break"}),
+      N('b3_chk',220,531,240,52,'purple','_stop_requested?','stop 명령이 왔나?',{st:'④-3 위험 구역',
+        d:"break 뒤에 정지 요청이 있었는지 한 번 더 확인해요. 갈림길은 wait_for_entry가 아니라 여기서 결정돼요.",
+        c:"if self._stop_requested:\n    self.publish_status('STOPPED', i)\n    break"}),
+      N('b3_p3',30,531,150,52,'teal','P3로 출발','위험 구역 안으로',{st:'④-3 위험 구역',
+        d:"허가를 받았으니 다음 웨이포인트 P3(위험 구역 안)로 이동해요."}),
+      N('b3_st',500,531,150,52,'amber','STOPPED 발행','+ 바깥 루프 break',{st:'④-3 위험 구역',
+        d:"STOPPED를 발행하고 바깥 웨이포인트 루프를 끝내요. 구역 안에 있을 수 있어서 notify_exit는 보내지 않아요. zone_manager의 max_hold_sec 타임아웃이 안전망이에요.",
+        c:"self.publish_status('STOPPED', i)\nbreak"})
+    ],
+    edges:[
+      E([[340,68],[340,96]]),
+      E([[340,149],[340,178]]),
+      E([[200,207],[120,207],[120,290]],{l:['허가',160,194,'middle','y']}),
+      E([[480,207],[560,207],[560,290]],{l:['stop',520,194,'middle','n']}),
+      E([[120,339],[120,398],[209,398]]),
+      E([[560,339],[560,398],[471,398]]),
+      E([[340,424],[340,452]]),
+      E([[340,501],[340,530]]),
+      E([[220,557],[181,557]],{l:['NO',200,544,'middle','y']}),
+      E([[460,557],[499,557]],{l:['YES',480,544,'middle','n']})
+    ]
+  };
+
+  /* ───────── 순찰 ③ 위험 구역: 이탈 ───────── */
+  D.b3x={label:'위험 구역 이탈 통보 흐름',vb:[680,100],
+    nodes:[
+      N('b3x_in',20,24,190,52,'gray','RED1OUT 도착 성공','i == ZONE_EXIT_INDEX (4)',{st:'④-3 위험 구역',
+        d:"P3 → P6를 거쳐 다시 문(RED1OUT)으로 돌아온 지점이에요."}),
+      N('b3x_ex',245,24,190,52,'teal','gate.notify_exit()','구역을 벗어났다고 통보',{st:'④-3 위험 구역',
+        d:"이탈 지점에 성공 도착했을 때만 통보해요. 3번 다 실패하면 통보가 나가지 않아서, 락이 max_hold_sec까지 유지돼요(남은 빈틈).",
+        c:"if i == self.ZONE_EXIT_INDEX:\n    self.gate.notify_exit()"}),
+      N('b3x_lock',470,24,190,52,'gray','락 반납','다른 로봇이 진입 가능',{st:'④-3 위험 구역',
+        d:"다른 로봇의 wait_for_entry가 풀려요."})
+    ],
+    edges:[E([[210,50],[244,50]]),E([[435,50],[469,50]])]
+  };
+
+  /* ───────── 순찰 ④ 마무리 ───────── */
+  D.b4={label:'순찰 마무리 흐름',vb:[680,190],
+    nodes:[
+      N('b4_q',20,20,220,52,'purple','루프를 break로 나왔나?','for-else 판단',{st:'④-3 마무리',
+        d:"break 없이 6개를 다 돌았을 때만 for-else가 실행돼요.",
+        c:"for i, wp in enumerate(self.WAYPOINTS):\n    ...\nelse:\n    self.publish_status('DONE', len(self.WAYPOINTS))"}),
+      N('b4_stop',310,14,190,48,'amber','STOPPED 발행','루프 안에서 이미 발행',{st:'④-3 마무리',
+        d:"stop 요청(사용자 또는 진입 지점 도달 실패)이 있으면 STOPPED를 발행하고 break해요."}),
+      N('b4_done',20,110,220,52,'teal','DONE 발행','len(WAYPOINTS)',{st:'④-3 마무리',
+        d:"DONE은 '전부 성공'이 아니라 '끝까지 돌았다'는 뜻이에요. 일부 웨이포인트가 FAILED여도 나올 수 있어요(남은 빈틈)."}),
+      N('b4_run',310,110,190,52,'gray','finally','set_idle_led() · _running = False',{chg:true,tag:'수정',st:'④-1 · ④-3',
+        d:"_running = False가 함수 맨 끝에서 finally로 옮겨졌어요. 에러가 나도 내려가고, 대기 LED(초록 깜박임)로 복귀해요.",
+        c:"finally:\n    self.set_idle_led()\n    self._running = False"})
+    ],
+    edges:[
+      E([[240,46],[309,46]],{l:['YES',275,34,'middle','n']}),
+      E([[130,72],[130,110]],{l:['NO',142,91,'start','y']}),
+      E([[405,62],[405,110]]),
+      E([[240,136],[309,136]])
+    ]
+  };
+
+  /* ───────── 시작·종료 ───────── */
+  var fx=[24,154,284,414,544];
+  D.c={label:'main 실행부터 종료까지 (수정본)',vb:[680,690],
+    lanes:[{x:14,y:484,w:652,h:112,t:'finally (무조건 실행)',s:''}],
+    nodes:[
+      N('c_start',110,10,200,40,'gray','python 실행 → main()',null,{st:'⑤ main',
+        d:"파이썬 파일을 직접 실행하면 맨 아래 if __name__ == '__main__': main()이 실행돼요.",
+        c:"if __name__ == '__main__':\n    main()"}),
+      N('c_init',110,72,200,52,'teal','rclpy.init(...)','SignalHandlerOptions.NO',{st:'⑤ main',
+        d:"ROS2 통신을 시작해요. SignalHandlerOptions.NO는 Ctrl+C를 rclpy가 아니라 파이썬의 KeyboardInterrupt로 받게 해서, 정리 작업을 직접 순서대로 하기 위한 설정이에요.",
+        c:"rclpy.init(args=args,\n    signal_handler_options=SignalHandlerOptions.NO)"}),
+      N('c_node',110,146,200,52,'teal','노드 생성','__init__: 대기 LED + IDLE 발행',{chg:true,tag:'수정',st:'② class',
+        d:"PinkyPatrolNode()를 만들면 __init__이 자동 실행돼요. robot_id를 읽고, 내비게이터·게이트·퍼블리셔·구독자를 만든 뒤, 대기 LED(초록 깜박임, set_idle_led)를 켜고 IDLE을 보고해요.",
+        c:"node = PinkyPatrolNode()"}),
+      N('c_spin',110,240,200,120,'purple','executor.spin() 대기',['메시지가 올 때까지','계속 대기'],{st:'⑤ main',
+        d:"메인 스레드는 여기서 대기만 해요. 명령이 오면 콜백(_cmd_cb)을 부르고, 끝나면 다시 대기해요.",
+        c:"executor = rclpy.executors.SingleThreadedExecutor()\nexecutor.add_node(node)\nexecutor.spin()",
+        why:"rclpy.spin(node) 한 줄 대신 executor를 직접 만들면, finally에서 executor.shutdown()을 직접 불러 종료 순서를 제어할 수 있어요."}),
+      N('c_startcb',400,206,250,56,'teal','_cmd_cb → 스레드 출발','_run_patrol (별도 스레드), 즉시 리턴',{st:'② 통신/명령',
+        d:"start 명령이면 _running을 먼저 켜고 순찰 스레드를 출발시켜요. 콜백은 바로 끝나서, 순찰 중에도 stop을 받을 수 있어요."}),
+      N('c_gotocb',400,272,250,56,'teal','_cmd_cb → goto 검사 후 출발','_run_route (별도 스레드)',{chg:true,tag:'신규',st:'③ _cmd_cb · ④-4',
+        d:"goto:P2,P3 같은 명령이면 이름을 뽑고, 비어 있는지 · 없는 이름인지 · 금지 지점인지 검사해요. 통과하면 _running을 켜고 _run_route를 스레드로 출발시켜요.",
+        c:"names = raw.split(':', 1)[1].replace(',', ' ').upper().split()"}),
+      N('c_stopcb',400,338,250,56,'amber','_cmd_cb → 깃발 + 취소','_stop_requested = True, cancelTask()',{st:'② 통신/명령',
+        d:"stop 명령이면 깃발을 올리고 진행 중인 Nav2 이동도 취소해요. 깃발은 순찰/goto 어느 쪽이든 읽어요.",
+        why:"깃발만 쓰면 현재 목표까지 계속 달리고, cancelTask만 쓰면 '실패'로 보고 재시도로 이어질 수 있어요. 둘 다 써야 해요."}),
+      N('c_kbd',110,397,200,52,'amber','KeyboardInterrupt','except: pass → finally로',{st:'⑤ main',
+        d:"Ctrl+C는 에러가 아니라 정상 종료 신호로 취급해요. pass로 넘기고 finally로 가요.",
+        c:"try:\n    executor.spin()\nexcept KeyboardInterrupt:\n    pass"}),
+      N('c_f1',fx[0],512,112,60,'teal','① executor 중단','shutdown()',{st:'⑤ main',
+        d:"콜백 처리를 멈춰요.",c:"executor.shutdown()"}),
+      N('c_f2',fx[1],512,112,60,'teal','② LED 끄기','clear_led()',{st:'① LED · ⑤ main',
+        d:"깜박임 스레드를 정리하고 LED를 꺼요. 서비스 통신이 필요해서 ROS를 끄기 전에 해야 해요. try/except로 감싸서 실패해도 아래 정리는 계속돼요.",
+        c:"try:\n    node.clear_led()\nexcept Exception:\n    pass"}),
+      N('c_f3',fx[2],512,112,60,'teal','③ led 서버 종료','kill() + wait(2초)',{chg:true,tag:'수정',st:'⑤ main',
+        d:"이 노드가 직접 띄운 led_server만 종료해요. 이미 LED를 끈 뒤라 정리할 게 없고, terminate()는 led_server 안에서 이중 shutdown 에러를 내서 kill()로 바꿨어요. 별도 세션(start_new_session=True)으로 띄웠기 때문에 터미널 Ctrl+C가 닿지 않아, 종료는 이 finally가 책임져요.",
+        c:"if node._led_proc is not None:\n    node._led_proc.kill()\n    try:\n        node._led_proc.wait(timeout=2.0)\n    except Exception:\n        pass"}),
+      N('c_f4',fx[3],512,112,60,'teal','④ 노드 정리','destroy_node()',{st:'⑤ main',
+        d:"노드를 정리해요.",c:"node.destroy_node()"}),
+      N('c_f5',fx[4],512,112,60,'teal','⑤ ROS 종료','rclpy.shutdown()',{st:'⑤ main',
+        d:"아직 살아 있을 때만 종료해서, 중복 호출로 에러가 나는 걸 막아요.",
+        c:"if rclpy.ok():\n    rclpy.shutdown()"}),
+      N('c_end',535,624,130,40,'gray','프로그램 종료',null,{st:'⑤ main',
+        d:"순찰 중에 Ctrl+C를 눌러도 cancelTask()는 부르지 않아서, 로봇이 마지막 목표를 향해 계속 갈 수 있어요. 필요하면 finally에 추가하는 걸 검토해요."})
+    ],
+    edges:[
+      E([[210,50],[210,71]]),
+      E([[210,124],[210,145]]),
+      E([[210,198],[210,239]]),
+      E([[311,250],[399,250]],{both:true,l:['start 수신',355,238,'middle','y']}),
+      E([[311,300],[399,300]],{both:true,l:['goto 수신',355,288,'middle','y']}),
+      E([[311,350],[399,350]],{both:true,l:['stop 수신',355,338,'middle','n']}),
+      E([[210,360],[210,396]],{l:['Ctrl+C',222,380,'start','n']}),
+      E([[210,449],[210,483]]),
+      E([[136,542],[153,542]]),E([[266,542],[283,542]]),E([[396,542],[413,542]]),E([[526,542],[543,542]]),
+      E([[600,596],[600,623]])
+    ],
+    texts:[
+      {x:525,y:412,t:'처리 후 다시 대기로 복귀',a:'middle'},
+      {x:28,y:586,t:'② LED 끄기는 ⑤ ROS 종료보다 먼저 (서비스 통신이 필요하기 때문)',a:'start',cls:'warn'}
+    ]
+  };
+
+  /* ───────── goto ⓪ 예시 ───────── */
+  D.g0={label:'goto 예시: goto:P2,P3,P6,P7',vb:[680,150],
+    lanes:[{x:104,y:14,w:378,h:112,t:'위험 구역 (락 보유)',s:''}],
+    nodes:[
+      N('g0_p2',20,56,76,44,'gray','P2',null,{tag:'신규',st:'④-4 goto 경로',d:"첫 지점이에요. 구역 밖이라 허가 없이 바로 이동해요(구역 밖 → 밖)."}),
+      N('g0_in',114,56,76,44,'red','RED1IN',null,{st:'④-4 goto 경로',d:"다음 지점 P3가 구역 안이라서(밖 → 안), 코드가 자동으로 RED1IN을 먼저 지나가요. 도착하면 WAITING_ZONE을 발행하고 빨강 깜박임으로 허가를 기다려요.",c:"_enter_zone(idx, name)"}),
+      N('g0_p3',208,56,76,44,'amber','P3',null,{st:'④-4 goto 경로',d:"구역 안 지점이에요. 락을 가진 채 도착해서 노랑 깜박임으로 10초 대기해요."}),
+      N('g0_p6',302,56,76,44,'amber','P6',null,{st:'④-4 goto 경로',d:"구역 안 → 구역 안이라서 RED1IN/OUT 없이 락을 유지한 채 바로 이동해요."}),
+      N('g0_out',396,56,76,44,'red','RED1OUT',null,{st:'④-4 goto 경로',d:"다음 지점 P7이 구역 밖이라서(안 → 밖), RED1OUT을 지나며 LEAVING_ZONE을 발행하고, 도착하면 notify_exit로 락을 반납해요.",c:"_leave_zone()"}),
+      N('g0_p7',490,56,76,44,'gray','P7',null,{st:'④-4 goto 경로',d:"구역 밖 지점이에요. 도착해서 10초 대기해요."}),
+      N('g0_p1',584,56,76,44,'gray','P1 (홈)',null,{st:'④-4 goto 경로',d:"경로를 다 돈 뒤 RETURNING을 발행하고 홈으로 돌아가 DONE을 발행해요."})
+    ],
+    edges:[
+      E([[96,78],[113,78]]),E([[190,78],[207,78]]),E([[284,78],[301,78]]),
+      E([[378,78],[395,78]]),E([[472,78],[489,78]]),E([[566,78],[583,78]])
+    ],
+    texts:[
+      {x:58,y:118,t:'goto 시작',a:'middle'},
+      {x:152,y:118,t:'허가 대기',a:'middle',cls:'warn'},
+      {x:434,y:118,t:'락 반납',a:'middle',cls:'am'},
+      {x:622,y:118,t:'홈 복귀',a:'middle'}
+    ]
+  };
+
+  /* ───────── goto ① 명령 검사 ───────── */
+  D.g1={label:'goto 명령 검사 흐름',vb:[680,590],
+    nodes:[
+      N('g1_in',40,14,220,48,'gray','goto:P2,P3,P6','관제가 보낸 명령',{tag:'신규',st:'③ _cmd_cb',d:"patrol_cmd로 온 글자예요. 대소문자와 쉼표/공백이 섞여도 처리해요(goto:p2, p3 ,P6)."}),
+      N('g1_parse',40,92,220,52,'teal','이름 뽑기','split · replace · upper',{st:'③ _cmd_cb',
+        d:"처음 ':' 하나만 기준으로 자르고, 쉼표를 공백으로 바꾸고, 대문자로 만든 뒤 공백 기준으로 나눠요. 이름은 원본(raw)에서 뽑고, 판별용 cmd는 소문자예요.",
+        c:"names = raw.split(':', 1)[1].replace(',', ' ').upper().split()"}),
+      N('g1_empty',40,174,220,52,'purple','비어 있나?','if not names',{st:'③ _cmd_cb',d:"goto: 뒤에 아무것도 없는 경우예요.",c:"if not names:"}),
+      N('g1_f1',340,174,280,52,'red','FAILED 발행','detail: no point given',{st:'③ _cmd_cb',d:"관제에 실패를 알리고 아무 작업도 시작하지 않아요."}),
+      N('g1_unk',40,256,220,52,'purple','없는 이름이 있나?','not in POINTS',{st:'③ _cmd_cb',d:"POINTS에 없는 이름이 하나라도 있으면 실패예요.",c:"unknown = [n for n in names if n not in self.POINTS]"}),
+      N('g1_f2',340,256,280,52,'red','FAILED 발행','detail: unknown point',{st:'③ _cmd_cb',d:"어떤 이름이 문제인지 detail에 담아 알려요."}),
+      N('g1_den',40,338,220,52,'purple','금지 지점이 있나?','not in GOTO_ALLOWED',{st:'③ _cmd_cb · ② 상수',d:"RED* 같은 지점은 직접 갈 수 없어요. 구역의 문은 코드가 허가 절차와 함께 자동으로 지나가요.",c:"denied = [n for n in names if n not in self.GOTO_ALLOWED]"}),
+      N('g1_f3',340,338,280,52,'red','FAILED 발행','detail: not allowed',{st:'③ _cmd_cb'}),
+      N('g1_run',40,420,220,52,'purple','이미 작업 중인가?','if self._running',{st:'③ _cmd_cb',d:"순찰이나 다른 goto가 진행 중이면 무시해요."}),
+      N('g1_f4',340,420,280,52,'amber','경고 로그만 남기고 무시','상태 발행 없음',{st:'③ _cmd_cb'}),
+      N('g1_go',40,502,220,60,'teal','스레드 출발',['_running = True','Thread(_run_route, args=(names,))'],{st:'③ _cmd_cb',
+        d:"검사를 모두 통과하면 _running을 먼저 켜고(연타해도 중복 실행 안 됨) _run_route를 별도 스레드로 출발시켜요. 콜백은 바로 끝나요.",
+        c:"self._stop_requested = False\nself._running = True\nself._thread = threading.Thread(\n    target=self._run_route, args=(names,), daemon=True)\nself._thread.start()",
+        why:"args=(names,)에서 쉼표는 필수예요. 원소가 1개인 튜플은 쉼표가 있어야 튜플이에요."})
+    ],
+    edges:[
+      E([[150,62],[150,91]]),E([[150,144],[150,173]]),
+      E([[150,226],[150,255]],{l:['NO',162,241,'start','y']}),
+      E([[150,308],[150,337]],{l:['NO',162,323,'start','y']}),
+      E([[150,390],[150,419]],{l:['NO',162,405,'start','y']}),
+      E([[150,472],[150,501]],{l:['NO',162,487,'start','y']}),
+      E([[260,200],[339,200]],{l:['YES',300,188,'middle','n']}),
+      E([[260,282],[339,282]],{l:['YES',300,270,'middle','n']}),
+      E([[260,364],[339,364]],{l:['YES',300,352,'middle','n']}),
+      E([[260,446],[339,446]],{l:['YES',300,434,'middle','n']})
+    ],
+    texts:[
+      {x:340,y:520,t:'⚠ 검사 3종이 _running 확인보다 앞에 있어요',a:'start',cls:'warn'},
+      {x:340,y:540,t:'(작업 중 잘못된 goto → FAILED가 발행됨)',a:'start',cls:'warn'}
+    ]
+  };
+
+  /* ───────── goto ② _run_route ───────── */
+  D.g2={label:'_run_route 흐름',vb:[680,850],
+    lanes:[],
+    nodes:[
+      N('g2_s',150,14,200,48,'gray','_run_route(names)','in_zone = False',{tag:'신규',st:'④-4 goto 경로',d:"in_zone은 '락을 잡고 있는가'를 나타내는 깃발이에요. 헬퍼 함수의 반환값이 이 깃발을 올리고 내려요.",c:"in_zone = False\nlast = len(names) - 1"}),
+      N('g2_i',150,92,200,52,'teal','STARTING 발행','_init_pose_once · Nav2 대기',{st:'④-4 goto 경로',d:"detail에 경로 전체(P2,P3,P6)를 담아 STARTING을 발행하고, 순찰과 같은 초기 보정(_init_pose_once)과 Nav2 대기를 해요.",c:"self.publish_status('STARTING', -1, ','.join(names))\nself._init_pose_once()\nself.navigator.waitUntilNav2Active()"}),
+      N('g2_l',150,174,200,48,'teal','지점마다 반복','enumerate(names)',{st:'④-4 goto 경로',d:"idx는 경로 안에서의 순번, name은 지점 이름이에요.",c:"for idx, name in enumerate(names):"}),
+      N('g2_stop',150,252,200,52,'purple','stop 요청?','_stop_requested',{st:'④-4 goto 경로'}),
+      N('g2_stopbox',420,252,230,52,'amber','STOPPED 발행 → return','finally는 그래도 실행',{st:'④-4 goto 경로',d:"return으로 함수가 끝나도 finally가 실행돼서 대기 LED 복귀와 _running = False는 빠지지 않아요."}),
+      N('g2_case',150,334,200,82,'purple','구역 처리 판단',['현재 → 다음 지점이','구역 안/밖?'],{st:'④-4 goto 경로',d:"to_zone = name in ZONE_POINTS와 in_zone을 비교해요. 밖→안은 A, 안→밖은 B를 실행하고, 안→안과 밖→밖은 건너뛰고 바로 C로 가요.",c:"to_zone = name in self.ZONE_POINTS\nif to_zone and not in_zone: ...    # A\nelif not to_zone and in_zone: ...  # B"}),
+      N('g2_A',420,322,230,46,'teal','A) 밖 → 안: _enter_zone','허가 대기, 실패/stop이면 return',{st:'④-4 · _enter_zone',d:"RED1IN으로 이동 → WAITING_ZONE 발행 → 빨강 깜박임 → wait_for_entry. True면 in_zone = True로 올리고 계속, False면 즉시 return해요.",c:"if not self._enter_zone(idx, name):\n    return\nin_zone = True"}),
+      N('g2_B',420,382,230,46,'teal','B) 안 → 밖: _leave_zone','RED1OUT 경유 · 락 반납',{st:'④-4 · _leave_zone',d:"LEAVING_ZONE을 발행하고 RED1OUT으로 이동해요. 성공하면 notify_exit로 락을 반납하고 in_zone = False, 실패하면 락을 유지한 채 FAILED로 끝내요(max_hold_sec 타임아웃 대기).",c:"if not self._leave_zone():\n    ...  # FAILED / STOPPED\n    return\nin_zone = False"}),
+      N('g2_nav',150,446,200,52,'teal','C) _navigate(지점)','이동 + 3회 재시도',{st:'④-4 · _navigate',d:"목표 지점으로 이동해요. 성공하면 True, stop이거나 3번 다 실패하면 False예요.",c:"self.publish_status('MOVING', idx, name)\nif not self._navigate(self.POINTS[name]):\n    ..."}),
+      N('g2_navfail',420,446,230,52,'amber','return (FAILED / STOPPED)','구역 안이면 후퇴 시도 먼저',{st:'④-4 goto 경로',d:"이동에 실패했는데(stop 아님) 구역 안이라면 RED1OUT으로 후퇴해 락을 반납하려고 시도한 뒤 끝내요. 순찰과 달리 실패하면 즉시 종료해요.",c:"if in_zone and not self._stop_requested:\n    in_zone = not self._leave_zone()"}),
+      N('g2_arr',150,528,200,52,'teal','D) ARRIVED · 대기','노랑 깜박임 · 10초',{st:'④-4 goto 경로',d:"ARRIVED를 발행하고 노랑 깜박임으로 GOTO_WAIT_SEC(10초) 기다려요. WAIT_EVERY_POINT가 False면 마지막 지점에서만 기다려요.",c:"self.start_blink(255, 255, 0)\ncompleted = self._wait_interruptible(self.GOTO_WAIT_SEC)\nself.stop_blink()"}),
+      N('g2_arrstop',420,528,230,52,'amber','stop → STOPPED return','구역 안이면 락 유지',{st:'④-4 goto 경로',d:"구역 안에서 stop이 오면 notify_exit를 보내지 않아요. 물리적으로 아직 안에 있기 때문이에요(max_hold_sec가 안전망)."}),
+      N('g2_e',150,610,200,52,'purple','마지막이 구역 안?','in_zone',{st:'④-4 goto 경로'}),
+      N('g2_ebox',420,610,230,52,'teal','E) _leave_zone','RED1OUT 경유 · 락 반납',{st:'④-4 goto 경로',d:"마지막 지점이 구역 안이면, 홈으로 가기 전에 RED1OUT에서 락을 반납해요."}),
+      N('g2_f',150,692,200,52,'teal','F) 홈 복귀','RETURNING → DONE',{st:'④-4 goto 경로',d:"RETURNING을 발행하고 HOME_NAME(P1)으로 이동해요. 성공하면 DONE(returned home)을 발행해요."}),
+      N('g2_fin',150,774,200,52,'gray','finally','set_idle_led · _running = False',{st:'④-4 goto 경로',d:"어떤 경로로 끝나든 실행돼요. 대기 LED로 돌아오고 다음 명령을 받을 수 있게 돼요.",c:"finally:\n    self.set_idle_led()\n    self._running = False"})
+    ],
+    edges:[
+      E([[250,62],[250,91]]),E([[250,144],[250,173]]),E([[250,222],[250,251]]),
+      E([[350,278],[419,278]],{l:['YES',385,266,'middle','n']}),
+      E([[250,304],[250,333]],{l:['NO',262,319,'start','y']}),
+      E([[350,345],[419,345]]),E([[350,405],[419,405]]),
+      E([[250,416],[250,445]]),
+      E([[350,472],[419,472]],{l:['실패',385,460,'middle','n']}),
+      E([[250,498],[250,527]],{l:['성공',262,513,'start','y']}),
+      E([[350,554],[419,554]],{l:['stop',385,542,'middle','n']}),
+      E([[150,554],[110,554],[110,198],[149,198]],{c:'amber',l:['다음 지점',64,376,'middle','am']}),
+      E([[250,580],[250,609]],{l:['지점 소진',262,595,'start']}),
+      E([[350,636],[419,636]],{l:['YES',385,624,'middle','y']}),
+      E([[250,662],[250,691]],{l:['NO',262,677,'start','y']}),
+      E([[535,662],[535,718],[351,718]]),
+      E([[250,744],[250,773]],{dash:true,l:['끝나면 항상',262,759,'start']})
+    ]
+  };
+
+  /* ───────── goto ③ 반환값 요약 ───────── */
+  D.g3={label:'헬퍼 함수 반환값',vb:[680,290],
+    nodes:[
+      N('g3_n',20,50,190,60,'gray','_navigate(wp)','이동 + 3회 재시도',{tag:'신규',st:'④-4 goto 경로',d:"목표 지점으로 이동하고 성공 여부를 반환해요. 상태 발행은 호출한 쪽이 해요. 순찰의 이동 루프를 함수로 분리한 거예요."}),
+      N('g3_nt',230,50,210,60,'teal','True','SUCCEEDED로 도착',{st:'④-4 goto 경로'}),
+      N('g3_nf',460,50,210,60,'amber','False','stop 요청 또는 3회 모두 실패',{st:'④-4 goto 경로',d:"둘을 구분하려면 호출한 쪽에서 _stop_requested를 확인해요."}),
+      N('g3_e',20,130,190,60,'gray','_enter_zone(idx, name)','RED1IN 이동 + 허가 대기',{st:'④-4 goto 경로'}),
+      N('g3_et',230,130,210,60,'teal','True','허가를 받음 (락 보유)',{st:'④-4 goto 경로',d:"호출한 쪽이 in_zone = True로 올려요."}),
+      N('g3_ef',460,130,210,60,'amber','False','RED1IN 이동 실패 · 대기 중 stop',{st:'④-4 goto 경로',d:"락이 없는 상태라 반납할 게 없어요. 작업은 바로 끝나요."}),
+      N('g3_l',20,210,190,60,'gray','_leave_zone()','RED1OUT 이동 + 락 반납',{st:'④-4 goto 경로'}),
+      N('g3_lt',230,210,210,60,'teal','True','RED1OUT 도착 · 락 반납',{st:'④-4 goto 경로',d:"notify_exit를 보내고 호출한 쪽이 in_zone = False로 내려요."}),
+      N('g3_lf',460,210,210,60,'amber','False','RED1OUT 도달 실패 (락 유지)',{st:'④-4 goto 경로',d:"락을 반납하지 못해요. zone_manager의 max_hold_sec 타임아웃까지 다른 로봇이 더 기다려요(남은 빈틈)."})
+    ],
+    edges:[],
+    texts:[
+      {x:115,y:32,t:'함수',a:'middle'},{x:335,y:32,t:'반환 True',a:'middle'},{x:565,y:32,t:'반환 False',a:'middle'}
+    ]
+  };
+
+  /* ───────── 이미지 전용: 위치 보정 + 저장 ───────── */
+  D.e1={label:'위치 보정과 저장 흐름',vb:[680,590],
+    nodes:[
+      N('e1_done',90,50,220,52,'purple','이미 보정했나?','_pose_initialized'),
+      N('e1_has',90,140,220,52,'purple','저장된 위치 있나?','load_last_pose()'),
+      N('e1_cal',380,132,250,68,'teal','초기 보정',['publish_initial_pose','→ spin_in_place']),
+      N('e1_end',90,230,220,48,'gray','Nav2 활성화 대기로',null),
+      N('e1_s1',90,350,220,48,'gray','get_current_pose()','현재 위치 읽기'),
+      N('e1_s2',90,428,220,52,'purple','current가 None인가?','이동 중이 아니면 None'),
+      N('e1_box',380,420,250,68,'amber','성공했으면 목표 좌표로 대체',['(방향 포함)','실패면 저장 안 함']),
+      N('e1_s3',90,520,220,48,'teal','save_last_pose(*current)','~/.pinky_last_pose.json')
+    ],
+    edges:[
+      E([[200,102],[200,140]],{l:['NO',212,121,'start','y']}),
+      E([[90,76],[50,76],[50,254],[89,254]],{l:['YES · 건너뜀',58,121,'start','n']}),
+      E([[310,166],[379,166]],{l:['YES',345,154,'middle','y']}),
+      E([[200,192],[200,229]],{l:['NO · 보정 생략',212,211,'start','n']}),
+      E([[505,200],[505,254],[311,254]]),
+      E([[200,398],[200,427]]),
+      E([[310,454],[379,454]],{l:['YES',345,442,'middle','y']}),
+      E([[200,480],[200,519]],{l:['NO',212,500,'start','y']}),
+      E([[505,488],[505,544],[311,544]])
+    ],
+    texts:[
+      {x:20,y:24,t:'① 초기 위치 보정 (_init_pose_once, 노드 실행 후 1회)',a:'start',cls:'hd'},
+      {x:20,y:322,t:'② 위치 저장 (_navigate 안, 이동이 끝날 때마다)',a:'start',cls:'hd'},
+      {x:20,y:586,t:'※ _run_patrol 안의 인라인 루프는 결과와 상관없이 목표 좌표(방향 0)로 대체해요',a:'start',cls:'warn'}
+    ]
+  };
+
+
+  /* ───────── 렌더링 ───────── */
+  var NODES={};
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+  function lineList(s){ if(!s) return []; return Array.isArray(s)?s:[s]; }
+
+  function render(key,spec,idx){
+    var W=spec.vb[0],H=spec.vb[1];
+    var o='<svg viewBox="0 0 '+W+' '+H+'" style="min-width:'+W+'px" role="group" aria-label="'+esc(spec.label)+'" xmlns="http://www.w3.org/2000/svg">';
+    o+='<defs>'
+      +'<marker id="ah'+idx+'" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="stroke:var(--edge)"/></marker>'
+      +'<marker id="ahA'+idx+'" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="stroke:var(--am)"/></marker>'
+      +'</defs>';
+
+    (spec.lanes||[]).forEach(function(l){
+      o+='<rect class="ct" x="'+l.x+'" y="'+l.y+'" width="'+l.w+'" height="'+l.h+'" rx="12"/>';
+      if(l.s){
+        o+='<text class="ctl" x="'+(l.x+12)+'" y="'+(l.y+20)+'">'+esc(l.t)+'</text>';
+        o+='<text class="cts" x="'+(l.x+12)+'" y="'+(l.y+38)+'">'+esc(l.s)+'</text>';
+      }else{
+        o+='<text class="ctl" x="'+(l.x+16)+'" y="'+(l.y+20)+'">'+esc(l.t)+'</text>';
+      }
+    });
+
+    (spec.edges||[]).forEach(function(e){
+      var d='M'+e.p.map(function(p){return p[0]+' '+p[1];}).join(' L ');
+      var m=(e.c==='amber')?'ahA':'ah';
+      o+='<path class="edge'+(e.dash?' dash':'')+(e.c==='amber'?' amber':'')+'" d="'+d+'" marker-end="url(#'+m+idx+')"'+(e.both?' marker-start="url(#'+m+idx+')"':'')+'/>';
+    });
+
+    spec.nodes.forEach(function(n){
+      NODES[n.id]=n;
+      var sub=lineList(n.s);
+      var total=18+16*sub.length;
+      var top=n.y+(n.h-total)/2;
+      var cx=n.x+n.w/2;
+      o+='<g class="node k-'+n.k+'" tabindex="0" role="button" data-node="'+n.id+'" aria-label="'+esc(n.t)+'">';
+      if(n.chg){
+        o+='<rect class="ring" x="'+(n.x-4)+'" y="'+(n.y-4)+'" width="'+(n.w+8)+'" height="'+(n.h+8)+'" rx="11"/>';
+      }
+      o+='<rect class="box" x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" rx="8"/>';
+      o+='<text class="nt" x="'+cx+'" y="'+(top+9)+'" text-anchor="middle" dominant-baseline="central">'+esc(n.t)+'</text>';
+      sub.forEach(function(t,i){
+        o+='<text class="ns" x="'+cx+'" y="'+(top+18+16*i+8)+'" text-anchor="middle" dominant-baseline="central">'+esc(t)+'</text>';
+      });
+      if(n.chg){
+        o+='<rect class="tag" x="'+(n.x+n.w-36)+'" y="'+(n.y-12)+'" width="40" height="18" rx="9"/>';
+        o+='<text class="tagt" x="'+(n.x+n.w-16)+'" y="'+(n.y-3)+'" text-anchor="middle" dominant-baseline="central">'+(n.tag||'수정')+'</text>';
+      }
+      o+='</g>';
+    });
+
+    (spec.edges||[]).forEach(function(e){
+      if(e.l){
+        o+='<text class="el'+(e.l[4]?' el-'+e.l[4]:'')+'" x="'+e.l[1]+'" y="'+e.l[2]+'" text-anchor="'+(e.l[3]||'middle')+'" dominant-baseline="central">'+esc(e.l[0])+'</text>';
+      }
+    });
+    (spec.texts||[]).forEach(function(t){
+      o+='<text class="ft'+(t.cls?' '+t.cls:'')+'" x="'+t.x+'" y="'+t.y+'" text-anchor="'+(t.a||'start')+'" dominant-baseline="central">'+esc(t.t)+'</text>';
+    });
+    o+='</svg>';
+    return o;
+  }
+
+  var idx=0;
+  document.querySelectorAll('[data-d]').forEach(function(el){
+    var key=el.getAttribute('data-d');
+    el.innerHTML=render(key,D[key],idx++);
+  });
+
+  /* ───────── 패널 ───────── */
+  var panel=document.getElementById('panel');
+  var current=null;
+
+  function defaultPanel(){
+    panel.classList.add('empty');
+    document.body.classList.remove('has-sel');
+    panel.innerHTML=
+      '<h3>학습 단계 지도</h3>'
+     +'<p>상자를 누르면 그 부분의 설명, 코드, 배운 단계가 여기에 나와요.</p>'
+     +'<ul class="map">'
+     +'<li><b>①</b><span>import: 도구 상자</span></li>'
+     +'<li><b>②</b><span>class: 상수와 __init__</span></li>'
+     +'<li><b>③</b><span>def: LED · 통신 · 좌표 · 파일</span></li>'
+     +'<li><b>④</b><span>_run_patrol: 순찰 본체</span></li>'
+     +'<li><b>⑤</b><span>main: 시작과 종료</span></li>'
+     +'</ul>'
+     +'<p style="margin-top:12px;color:var(--muted);font-size:13px">이중 테두리 + 태그는 새 코드에서 바뀐 부분이에요. 신규: goto, 헬퍼 함수, _init_pose_once, try/finally. 수정: RED1IN 도달 실패 시 중단, set_drive_led, kill().</p>';
+  }
+
+  function clearSel(){
+    if(current){current.classList.remove('sel');current=null;}
+  }
+
+  function showNode(id,g){
+    var n=NODES[id]; if(!n) return;
+    clearSel();
+    current=g; g.classList.add('sel');
+    var title=n.t;
+    var h='<button class="p-close" type="button" id="pclose">닫기</button>';
+    h+='<div class="p-stage">'+esc(n.st||'')+(n.chg?'<span class="badge">'+((n.tag==='신규')?'신규':'수정됨')+'</span>':'')+'</div>';
+    h+='<h3>'+esc(title)+'</h3>';
+    if(n.d) h+='<p>'+esc(n.d)+'</p>';
+    if(n.c) h+='<pre><code>'+esc(n.c)+'</code></pre>';
+    if(n.why) h+='<div class="p-why"><b>왜 이렇게?</b>'+esc(n.why)+'</div>';
+    panel.innerHTML=h;
+    panel.classList.remove('empty');
+    document.body.classList.add('has-sel');
+    panel.scrollTop=0;
+  }
+
+  document.addEventListener('click',function(e){
+    var g=e.target.closest('[data-node]');
+    if(g){showNode(g.getAttribute('data-node'),g);return;}
+    if(e.target.id==='pclose'){clearSel();defaultPanel();}
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Enter' && e.key!==' ') return;
+    var g=e.target.closest && e.target.closest('[data-node]');
+    if(g){e.preventDefault();showNode(g.getAttribute('data-node'),g);}
+  });
+
+  /* ───────── 탭 ───────── */
+  var tabs=document.querySelectorAll('[role="tab"]');
+  tabs.forEach(function(t){
+    t.addEventListener('click',function(){
+      tabs.forEach(function(x){
+        var on=(x===t);
+        x.setAttribute('aria-selected',on?'true':'false');
+        document.getElementById(x.getAttribute('aria-controls')).hidden=!on;
+      });
+      clearSel(); defaultPanel();
+    });
+  });
+
+  defaultPanel();
+})();
+</script>
+</body>
+</html>
