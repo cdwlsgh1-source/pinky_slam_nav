@@ -2,13 +2,17 @@
 Pinky2 순찰 노드
 
 [지원 명령]  (토픽: patrol_cmd)
-  start      : WAYPOINTS 전체 순회
-  goto:<P>   : <P> 지점 이동 -> 10초 대기(노랑 LED) -> 홈(P7) 복귀
-  stop       : 현재 작업 즉시 중단
+  start                : WAYPOINTS 전체 순회
+  goto:<P>[,<P>,...]   : 지정한 지점들을 순서대로 방문 -> 홈(P1) 복귀
+                         예) goto:P2          (1개 지점)
+                             goto:P2,P3,P6    (여러 지점 경로)
+                         각 지점 도착 시 GOTO_WAIT_SEC초 대기(노랑 LED)
+  stop                 : 현재 작업 즉시 중단
 
 [상태 발행]  (토픽: patrol_status, JSON)
   IDLE / STARTING / MOVING / WAITING_ZONE / ARRIVED /
   LEAVING_ZONE / RETURNING / DONE / STOPPED / FAILED / RETRY
+  (goto 경로 중에는 waypoint = 경로 안에서의 순번, detail = 지점 이름)
 
 [파일 구성]
   1. IMPORT
@@ -19,10 +23,10 @@ Pinky2 순찰 노드
   6. 초기화 (__init__)
   7. LED 제어
   8. 통신 (상태 발행 / 명령 수신)
-  9. 좌표 변환 / 위치 저장
+  9. 좌표 변환 / 위치 저장 / 초기 위치 보정
   10. 주행 (Nav2 이동 헬퍼)
   11. 위험 구역 (zone mutex 헬퍼)
-  12. 작업: goto 후 복귀
+  12. 작업: goto 경로 순회 후 복귀
   13. 작업: 전체 순찰
   14. main
 """
@@ -61,28 +65,29 @@ class PinkyPatrolNode(Node):
 
     # 좌표: (x, y) 또는 (x, y, yaw[rad])
     POINTS = {
-        "P1": (0.000,  0.000),   # 원점 부근 (시작점 / 홈)
-        "P2": (0.650,  0.150),   # 원점과 우측 구간 사이 중간 지점
-        "P3": (1.550, -0.400),   # 우측 아래 끝
-        "P4": (1.000, -0.400),   # 중앙-우측 아래
-        "P5": (1.000,  0.100),   # 중앙-우측 위
-        "P6": (1.550,  0.060),   # 우측 위 끝
-        "P7": (0.000, -0.600),   # 원점 아래쪽
+        "P1": (0.0,  0.0),   # 원점 부근 (시작점 / 홈)
+        "P2": (0.65,  0.15),   # 원점과 우측 구간 사이 중간 지점
+        "P3": (1.55, -0.40),   # 우측 아래 끝
+        "P4": (1.00, -0.40),   # 중앙-우측 아래
+        "P5": (1.00,  0.10),   # 중앙-우측 위
+        "P6": (1.55,  0.06),   # 우측 위 끝
+        "P7": (0.00, -0.60),   # 원점 아래쪽
 
         # 위험 구역 경계(RED LINE): IN = 진입 방향, OUT = 이탈 방향(180도 회전)
-        "RED1IN":  (0.600, -0.500, 0),
-        "RED1OUT": (0.600, -0.500, 3.14),
-        "RED2IN":  (0.550, -0.800, 0),
-        "RED2OUT": (0.550, -0.800, 3.14),
+        "RED1IN":  (0.60, -0.50, 0),
+        "RED1OUT": (0.60, -0.50, 3.14),
+        "RED2IN":  (0.55, -0.60, 0),
+        "RED2OUT": (0.55, -0.60, 3.14),
     }
 
-    # start 명령의 순찰 경로(Pinky2): RED2IN -> P3 -> P6 -> RED2OUT -> P7
+    # start 명령의 순찰 경로: P2 -> RED2IN -> P3 -> P6 -> RED2OUT -> P1
     WAYPOINTS = [
-        POINTS["RED2IN"],   # 0: RED LINE (도착 후 진입 허가 요청)
-        POINTS["P3"],       # 1: 우측 아래 끝 (위험 구역 안)
-        POINTS["P6"],       # 2: 우측 위 끝   (위험 구역 안)
-        POINTS["RED2OUT"],  # 3: RED LINE (도착 시 이탈 통보)
-        POINTS["P7"],       # 4: 시작점(홈) 복귀
+        POINTS["P2"],       # 0: 중간 경유점
+        POINTS["RED2IN"],   # 1: RED LINE (도착 후 진입 허가 요청)
+        POINTS["P3"],       # 2: 우측 아래 끝 (위험 구역 안)
+        POINTS["P6"],       # 3: 우측 위 끝   (위험 구역 안)
+        POINTS["RED2OUT"],  # 4: RED LINE (도착 시 이탈 통보)
+        POINTS["P1"],       # 5: 시작점 복귀
     ]
 
     # ==========================================================================
@@ -91,8 +96,8 @@ class PinkyPatrolNode(Node):
     # [순찰(start)용] WAYPOINTS 리스트의 "순번(index)"이며 좌표 값이 아닙니다.
     #   ZONE_ENTRY_INDEX: 이 waypoint 도착 직후, 다음으로 출발하기 전에 진입 허가 요청
     #   ZONE_EXIT_INDEX : 이 waypoint 도착 시 구역을 벗어난 것으로 보고 락 반납
-    ZONE_ENTRY_INDEX = 0   # WAYPOINTS[0] = RED2IN
-    ZONE_EXIT_INDEX = 3    # WAYPOINTS[3] = RED2OUT
+    ZONE_ENTRY_INDEX = 1   # WAYPOINTS[1] = RED2IN
+    ZONE_EXIT_INDEX = 4    # WAYPOINTS[4] = RED2OUT
 
     # [goto용] POINTS의 키 이름 기준
     ZONE_ENTRY_NAME = 'RED2IN'                       # 허가 요청 지점
@@ -102,8 +107,9 @@ class PinkyPatrolNode(Node):
     # ==========================================================================
     # 4. goto 상수
     # ==========================================================================
-    HOME_NAME = 'P7'                                  # 작업 후 복귀할 초기 위치
-    GOTO_WAIT_SEC = 10.0                              # 목적지 도착 후 대기 시간(초)
+    HOME_NAME = 'P7'                                  # 경로 완료 후 복귀할 초기 위치
+    GOTO_WAIT_SEC = 10.0                              # 지점 도착 후 대기 시간(초)
+    WAIT_EVERY_POINT = True                           # True: 모든 지점에서 대기 / False: 마지막 지점에서만
     GOTO_ALLOWED = {'P1', 'P2', 'P7'} | ZONE_POINTS   # RED*는 직접 goto 금지
 
     # ==========================================================================
@@ -137,6 +143,7 @@ class PinkyPatrolNode(Node):
         self._running = False         # 작업(순찰/goto) 수행 중 여부
         self._stop_requested = False  # stop 명령 수신 여부
         self._thread = None           # 작업 스레드 핸들
+        self._pose_initialized = False  # 초기 위치 보정을 이미 했는지 (노드 실행 후 1회만)
 
         # LED
         self._led_proc = None         # 직접 띄운 led_server 프로세스
@@ -250,24 +257,33 @@ class PinkyPatrolNode(Node):
             self._thread = threading.Thread(target=self._run_patrol, daemon=True)
             self._thread.start()
 
-        # --- goto:<POINT>: 이동 -> 대기 -> 복귀 ---
+        # --- goto:<P>[,<P>,...]: 지점들을 순서대로 방문 -> 홈 복귀 ---
         elif cmd.startswith('goto:'):
-            name = raw.split(':', 1)[1].strip().upper()
-            if name not in self.POINTS:
-                self.get_logger().warn(f'알 수 없는 포인트: {name}')
-                self.publish_status('FAILED', -1, f'unknown point: {name}')
+            # 'goto:p2, p3 ,P6' -> ['P2', 'P3', 'P6']  (쉼표/공백 모두 구분자)
+            names = raw.split(':', 1)[1].replace(',', ' ').upper().split()
+
+            if not names:
+                self.get_logger().warn('goto 포인트가 비어 있습니다.')
+                self.publish_status('FAILED', -1, 'no point given')
                 return
-            if name not in self.GOTO_ALLOWED:
-                self.get_logger().warn(f'goto 불가 포인트: {name}')
-                self.publish_status('FAILED', -1, f'not allowed: {name}')
+            unknown = [n for n in names if n not in self.POINTS]
+            if unknown:
+                self.get_logger().warn(f'알 수 없는 포인트: {unknown}')
+                self.publish_status('FAILED', -1, f'unknown point: {unknown}')
+                return
+            denied = [n for n in names if n not in self.GOTO_ALLOWED]
+            if denied:
+                self.get_logger().warn(f'goto 불가 포인트: {denied}')
+                self.publish_status('FAILED', -1, f'not allowed: {denied}')
                 return
             if self._running:
                 self.get_logger().warn('작업 중입니다. 명령 무시.')
                 return
+
             self._stop_requested = False
             self._running = True
             self._thread = threading.Thread(
-                target=self._run_goto_and_return, args=(name,), daemon=True)
+                target=self._run_route, args=(names,), daemon=True)
             self._thread.start()
 
         # --- stop: 현재 작업 중단 ---
@@ -282,7 +298,7 @@ class PinkyPatrolNode(Node):
             self.get_logger().warn(f'알 수 없는 명령: {cmd}')
 
     # ==========================================================================
-    # 9. 좌표 변환 / 위치 저장
+    # 9. 좌표 변환 / 위치 저장 / 초기 위치 보정
     # ==========================================================================
     def quat_to_yaw(self, q):
         """쿼터니언 -> yaw(rad). atan2로 -pi~pi 전 구간을 정확히 복원."""
@@ -363,6 +379,25 @@ class PinkyPatrolNode(Node):
         cmd_pub.publish(Twist())   # 정지 명령으로 마무리
         time.sleep(0.5)
 
+    def _init_pose_once(self):
+        """
+        노드 실행 후 첫 작업(start/goto)에서만 초기 위치 보정을 수행.
+        저장된 마지막 위치를 AMCL에 알려주고 제자리 회전으로 방향을 잡는다.
+        이미 했거나 저장된 위치가 없으면 아무것도 하지 않음.
+        """
+        if self._pose_initialized:
+            return
+        self._pose_initialized = True   # 실패/없음이어도 다시 시도하지 않음
+
+        last = self.load_last_pose()
+        if last is None:
+            self.get_logger().info('저장된 위치 없음 - 초기 위치 보정 생략')
+            return
+        self.publish_initial_pose(last['x'], last['y'], last['yaw'])
+        self.get_logger().info('초기 방향 보정을 위해 제자리 회전을 시작합니다...')
+        self.spin_in_place(duration=4.0, angular_speed=0.5)
+        self.get_logger().info('초기 방향 보정 완료.')
+
     # ==========================================================================
     # 10. 주행 (Nav2 이동 헬퍼)
     # ==========================================================================
@@ -385,6 +420,14 @@ class PinkyPatrolNode(Node):
                 return False
 
             result = self.navigator.getResult()
+
+            # 마지막 위치 저장 (다음 노드 실행 시 초기 위치 보정에 사용)
+            current = self.get_current_pose()
+            if current is None and result == TaskResult.SUCCEEDED:
+                current = (wp[0], wp[1], wp[2] if len(wp) > 2 else 0.0)
+            if current is not None:
+                self.save_last_pose(*current)
+
             if result == TaskResult.SUCCEEDED:
                 return True
             self.get_logger().warn(f'이동 실패({result}), 재시도 {attempt+1}/{retries}')
@@ -402,81 +445,135 @@ class PinkyPatrolNode(Node):
     # ==========================================================================
     # 11. 위험 구역 (zone mutex 헬퍼)
     # ==========================================================================
+    def _end_state(self):
+        """이동이 끝난 이유: stop 요청이면 STOPPED, 아니면 FAILED."""
+        return 'STOPPED' if self._stop_requested else 'FAILED'
+
+    def _enter_zone(self, idx, name):
+        """
+        진입 문(ZONE_ENTRY_NAME)으로 이동 -> 진입 허가 대기.
+        True  : 허가를 받음 (락 보유)
+        False : 이동 실패 또는 대기 중 stop (락 없음)
+        """
+        door = self.POINTS[self.ZONE_ENTRY_NAME]
+
+        # 1) 문 앞까지 이동 (도착할 때까지 여기서 기다림)
+        self.publish_status('MOVING', idx, self.ZONE_ENTRY_NAME)    # 관제에 알리기만 함
+        arrived = self._navigate(door)                              # 실제 이동 명령
+        if not arrived:
+            self.publish_status(self._end_state(), idx, self.ZONE_ENTRY_NAME)
+            return False                                            # 락 받기 전이라 반납할 것 없음
+
+        # 2) 허가 대기 (빨강 깜박임)
+        self.publish_status('WAITING_ZONE', idx, name)
+        self.start_blink(255, 0, 0)
+        granted = self.gate.wait_for_entry(stop_check=lambda: self._stop_requested)
+        self.stop_blink()
+        if not granted:                                             # 대기 중 stop
+            self.publish_status('STOPPED', idx, name)
+            return False
+
+        return True                                                 # 허가받음
+
+
     def _leave_zone(self):
-        """RED2OUT 이동 후 락 반납. 도착하면 True, 실패하면 False(락 유지)."""
-        if self._navigate(self.POINTS[self.ZONE_EXIT_NAME]):
-            self.gate.notify_exit()
-            self.get_logger().info('위험 구역 이탈, 락 반납 완료')
-            return True
-        self.get_logger().warn('RED2OUT 도달 실패 - 락 유지 (max_hold_sec 타임아웃 대기)')
-        return False
+        """
+        이탈 문(ZONE_EXIT_NAME)으로 이동 -> 락 반납.
+        True  : 도착해서 락을 반납함
+        False : 도달 실패 (락 유지, max_hold_sec 타임아웃 대기)
+        """
+        door = self.POINTS[self.ZONE_EXIT_NAME]
+
+        arrived = self._navigate(door)                              # 실제 이동 명령
+        if not arrived:
+            self.get_logger().warn(
+                f'{self.ZONE_EXIT_NAME} 도달 실패 - 락 유지 (max_hold_sec 타임아웃 대기)')
+            return False
+
+        self.gate.notify_exit()                                     # 도착했을 때만 락 반납
+        self.get_logger().info('위험 구역 이탈, 락 반납 완료')
+        return True
 
     # ==========================================================================
-    # 12. 작업: goto 후 복귀
+    # 12. 작업: goto 경로 순회 후 복귀
     # ==========================================================================
-    def _run_goto_and_return(self, name):
+    def _run_route(self, names):
         """
-        [별도 스레드] 흐름
-          구역 밖 포인트: 이동 -> 노랑 대기 -> 홈 복귀
-          구역 안 포인트: RED2IN -> 허가 대기 -> 이동 -> 노랑 대기 -> RED2OUT(락 반납) -> 홈 복귀
+        [별도 스레드] names 리스트의 지점을 순서대로 방문한 뒤 홈으로 복귀.
+
+        구역 처리 규칙 (인접한 두 지점의 구역 여부로 판단):
+          구역 밖 -> 구역 안 : RED1IN 경유 + 진입 허가 대기 (락 획득)
+          구역 안 -> 구역 안 : 락 유지한 채 바로 이동 (RED1IN/OUT 경유 없음)
+          구역 안 -> 구역 밖 : RED1OUT 경유 + 락 반납
+          구역 밖 -> 구역 밖 : 바로 이동
+        마지막 지점이 구역 안이면 홈 복귀 전에 RED1OUT에서 락을 반납.
+
+        예) P2,P3,P6,P7
+          P2 -> (RED1IN, 허가) -> P3 -> P6 -> (RED1OUT, 반납) -> P7 -> 홈(P1)
         """
-        needs_zone = name in self.ZONE_POINTS
         in_zone = False   # True = 허가(락) 보유 중
+        last = len(names) - 1
         try:
-            self.publish_status('STARTING', -1, name)
+            self.publish_status('STARTING', -1, ','.join(names))
+            self._init_pose_once()   # 최초 1회만 초기 위치 보정
             self.navigator.waitUntilNav2Active()
 
-            # --- A) 구역 안 포인트: RED2IN 도착 후 허가 대기 ---
-            if needs_zone:
-                self.publish_status('MOVING', -1, self.ZONE_ENTRY_NAME)
-                if not self._navigate(self.POINTS[self.ZONE_ENTRY_NAME]):
-                    # 락 받기 전이므로 반납할 것 없음
+            for idx, name in enumerate(names):
+                if self._stop_requested:
+                    self.publish_status('STOPPED', idx, name)
+                    return
+
+                to_zone = name in self.ZONE_POINTS
+
+                # --- A) 구역 밖 -> 안: RED1IN 도착 후 허가 대기 ---
+                if to_zone and not in_zone:                 # 다음 지점이 구역 안이고, 아직 락이 없으면
+                    if not self._enter_zone(idx, name):     # 허가를 못 받았으면 (이동 실패 / 대기 중 stop)
+                        return                              #   -> 작업 종료
+                    in_zone = True                          # 허가받음 -> "락 보유 중" 표시
+
+                # --- B) 구역 안 -> 밖: RED1OUT 도착 후 락 반납 ---
+                elif not to_zone and in_zone:               # 다음 지점이 구역 밖이고, 락을 가지고 있으면
+                    self.publish_status('LEAVING_ZONE', idx, self.ZONE_EXIT_NAME)
+                    if not self._leave_zone():              # RED1OUT 도착/락 반납에 실패했으면
+                        self.publish_status('STOPPED' if self._stop_requested else 'FAILED',
+                                            idx, self.ZONE_EXIT_NAME)
+                        return                              #   -> 작업 종료 (락은 유지됨)
+                    in_zone = False                         # 반납 완료 -> "락 없음" 표시
+
+                # --- C) 목표 지점으로 이동 ---
+                self.publish_status('MOVING', idx, name)
+                if not self._navigate(self.POINTS[name]):   # 목표 지점 이동에 실패했으면 (stop 포함)
+                    if in_zone and not self._stop_requested:  # 구역 안에 있고, stop이 아닌 "실패"라면
+                        # 이동 실패(stop 아님): RED1OUT 후퇴 시도, 성공 시 락 반납
+                        in_zone = not self._leave_zone()    # 반납 성공(True)이면 in_zone=False, 실패면 True 유지
                     self.publish_status('STOPPED' if self._stop_requested else 'FAILED',
-                                        -1, self.ZONE_ENTRY_NAME)
-                    return
+                                        idx, name)
+                    return                                  #   -> 작업 종료
 
-                self.publish_status('WAITING_ZONE', -1, name)
-                self.start_blink(255, 0, 0)               # 허가 대기: 빨강 깜박임
-                granted = self.gate.wait_for_entry(
-                    stop_check=lambda: self._stop_requested)
-                self.stop_blink()
-                if not granted:                           # 대기 중 stop
-                    self.publish_status('STOPPED', -1, name)
-                    return
-                in_zone = True                            # 여기부터 락 보유
+                # --- D) 도착: 노랑 깜박임 + 대기 ---
+                self.publish_status('ARRIVED', idx, name)
+                if self.WAIT_EVERY_POINT or idx == last:    # 모든 지점에서 대기하는 설정이거나, 마지막 지점이면
+                    self.start_blink(255, 255, 0)
+                    completed = self._wait_interruptible(self.GOTO_WAIT_SEC)
+                    self.stop_blink()
+                    if not completed:                       # 대기를 끝까지 못 했으면 (중간에 stop)
+                        self.publish_status('STOPPED', idx, name)  # 구역 안이면 락 유지
+                        return
 
-            # --- B) 목표 지점으로 이동 ---
-            self.publish_status('MOVING', -1, name)
-            if not self._navigate(self.POINTS[name]):
-                if in_zone and not self._stop_requested:
-                    # 이동 실패(stop 아님): RED2OUT 후퇴 시도, 성공 시 락 반납
-                    in_zone = not self._leave_zone()
-                self.publish_status('STOPPED' if self._stop_requested else 'FAILED', -1, name)
-                return
-
-            # --- C) 도착: 노랑 깜박임 + 대기 ---
-            self.publish_status('ARRIVED', -1, name)
-            self.start_blink(255, 255, 0)
-            if not self._wait_interruptible(self.GOTO_WAIT_SEC):
-                self.stop_blink()
-                self.publish_status('STOPPED', -1, name)  # 구역 안이면 락 유지
-                return
-            self.stop_blink()
-
-            # --- D) 구역 이탈: RED2OUT 도착 후 락 반납 ---
-            if in_zone:
-                self.publish_status('LEAVING_ZONE', -1, self.ZONE_EXIT_NAME)
-                if not self._leave_zone():
+            # --- E) 마지막 지점이 구역 안이면: RED1OUT 도착 후 락 반납 ---
+            if in_zone:                                     # 락을 아직 가지고 있으면 (마지막 지점이 구역 안)
+                self.publish_status('LEAVING_ZONE', last, self.ZONE_EXIT_NAME)
+                if not self._leave_zone():                  # RED1OUT 도착/락 반납에 실패했으면
                     self.publish_status('STOPPED' if self._stop_requested else 'FAILED',
-                                        -1, self.ZONE_EXIT_NAME)
+                                        last, self.ZONE_EXIT_NAME)
                     return
-                in_zone = False
+                in_zone = False                             # 반납 완료
 
-            # --- E) 홈으로 복귀 ---
+            # --- F) 홈으로 복귀 ---
             self.publish_status('RETURNING', -1, self.HOME_NAME)
-            if self._navigate(self.POINTS[self.HOME_NAME]):
+            if self._navigate(self.POINTS[self.HOME_NAME]): # 홈에 도착했으면 (여기만 not 없음)
                 self.publish_status('DONE', -1, 'returned home')
-            else:
+            else:                                           # 홈 이동 실패 또는 stop
                 self.publish_status('STOPPED' if self._stop_requested else 'FAILED', -1, 'return')
         finally:
             self.set_idle_led()     # 어떤 경우든 종료 시 대기 LED로 복귀
@@ -490,13 +587,8 @@ class PinkyPatrolNode(Node):
         self._running = True
         self.publish_status('STARTING', -1)
         try:
-            # 1) 이전 위치가 있으면 초기 위치 보정
-            last = self.load_last_pose()
-            if last is not None:
-                self.publish_initial_pose(last['x'], last['y'], last['yaw'])
-                self.get_logger().info('초기 방향 보정을 위해 제자리 회전을 시작합니다...')
-                self.spin_in_place(duration=4.0, angular_speed=0.5)
-                self.get_logger().info('초기 방향 보정 완료.')
+            # 1) 최초 1회만 초기 위치 보정 (이후 start/goto에서는 생략)
+            self._init_pose_once()
 
             # 2) Nav2 활성화 대기
             self.navigator.waitUntilNav2Active()
