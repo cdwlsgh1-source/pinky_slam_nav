@@ -80,14 +80,13 @@ class PinkyPatrolNode(Node):
         "RED2OUT": (0.55, -0.60, 3.14),
     }
 
-    # start 명령의 순찰 경로: P2 -> RED2IN -> P3 -> P6 -> RED2OUT -> P1
+    # start 명령의 순찰 경로: RED2IN -> P3 -> P6 -> RED2OUT -> P7
     WAYPOINTS = [
-        POINTS["P2"],       # 0: 중간 경유점
-        POINTS["RED2IN"],   # 1: RED LINE (도착 후 진입 허가 요청)
-        POINTS["P3"],       # 2: 우측 아래 끝 (위험 구역 안)
-        POINTS["P6"],       # 3: 우측 위 끝   (위험 구역 안)
-        POINTS["RED2OUT"],  # 4: RED LINE (도착 시 이탈 통보)
-        POINTS["P1"],       # 5: 시작점 복귀
+        POINTS["RED2IN"],   # 0: RED LINE (0.55, -0.60)    <- 여기 도착 후 진입 허가 요청
+        POINTS["P3"],       # 1: 우측 아래 끝 (1.55, -0.40) (위험 구역 안)
+        POINTS["P6"],       # 2: 우측 위 끝 (1.55, 0.06)    (위험 구역 안)
+        POINTS["RED2OUT"],  # 3: RED LINE (0.55, -0.60)    <- 여기 도착 시 이탈 통보
+        POINTS["P7"],       # 4: 시작점으로 복귀 (0.00, -0.60)
     ]
 
     # ==========================================================================
@@ -96,8 +95,8 @@ class PinkyPatrolNode(Node):
     # [순찰(start)용] WAYPOINTS 리스트의 "순번(index)"이며 좌표 값이 아닙니다.
     #   ZONE_ENTRY_INDEX: 이 waypoint 도착 직후, 다음으로 출발하기 전에 진입 허가 요청
     #   ZONE_EXIT_INDEX : 이 waypoint 도착 시 구역을 벗어난 것으로 보고 락 반납
-    ZONE_ENTRY_INDEX = 1   # WAYPOINTS[1] = RED2IN
-    ZONE_EXIT_INDEX = 4    # WAYPOINTS[4] = RED2OUT
+    ZONE_ENTRY_INDEX = 0   # WAYPOINTS[0] = RED2IN
+    ZONE_EXIT_INDEX = 3    # WAYPOINTS[3] = RED2OUT
 
     # [goto용] POINTS의 키 이름 기준
     ZONE_ENTRY_NAME = 'RED2IN'                       # 허가 요청 지점
@@ -525,13 +524,13 @@ class PinkyPatrolNode(Node):
 
                 to_zone = name in self.ZONE_POINTS
 
-                # --- A) 구역 밖 -> 안: RED1IN 도착 후 허가 대기 ---
+                # --- A) 구역 밖 -> 안: RED2IN 도착 후 허가 대기 ---
                 if to_zone and not in_zone:                 # 다음 지점이 구역 안이고, 아직 락이 없으면
                     if not self._enter_zone(idx, name):     # 허가를 못 받았으면 (이동 실패 / 대기 중 stop)
                         return                              #   -> 작업 종료
                     in_zone = True                          # 허가받음 -> "락 보유 중" 표시
 
-                # --- B) 구역 안 -> 밖: RED1OUT 도착 후 락 반납 ---
+                # --- B) 구역 안 -> 밖: RED2OUT 도착 후 락 반납 ---
                 elif not to_zone and in_zone:               # 다음 지점이 구역 밖이고, 락을 가지고 있으면
                     self.publish_status('LEAVING_ZONE', idx, self.ZONE_EXIT_NAME)
                     if not self._leave_zone():              # RED1OUT 도착/락 반납에 실패했으면
@@ -544,7 +543,7 @@ class PinkyPatrolNode(Node):
                 self.publish_status('MOVING', idx, name)
                 if not self._navigate(self.POINTS[name]):   # 목표 지점 이동에 실패했으면 (stop 포함)
                     if in_zone and not self._stop_requested:  # 구역 안에 있고, stop이 아닌 "실패"라면
-                        # 이동 실패(stop 아님): RED1OUT 후퇴 시도, 성공 시 락 반납
+                        # 이동 실패(stop 아님): RED2OUT 후퇴 시도, 성공 시 락 반납
                         in_zone = not self._leave_zone()    # 반납 성공(True)이면 in_zone=False, 실패면 True 유지
                     self.publish_status('STOPPED' if self._stop_requested else 'FAILED',
                                         idx, name)
@@ -560,7 +559,7 @@ class PinkyPatrolNode(Node):
                         self.publish_status('STOPPED', idx, name)  # 구역 안이면 락 유지
                         return
 
-            # --- E) 마지막 지점이 구역 안이면: RED1OUT 도착 후 락 반납 ---
+            # --- E) 마지막 지점이 구역 안이면: RED2OUT 도착 후 락 반납 ---
             if in_zone:                                     # 락을 아직 가지고 있으면 (마지막 지점이 구역 안)
                 self.publish_status('LEAVING_ZONE', last, self.ZONE_EXIT_NAME)
                 if not self._leave_zone():                  # RED1OUT 도착/락 반납에 실패했으면
