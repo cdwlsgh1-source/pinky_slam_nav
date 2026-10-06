@@ -25,7 +25,6 @@ setup(
     entry_points={
         'console_scripts': [
             'zone_manager_node = zone_traffic_control.zone_manager_node:main',
-            'zone_manager_node_v2 = zone_traffic_control.zone_manager_node_v2:main',
         ],
     },
 )
