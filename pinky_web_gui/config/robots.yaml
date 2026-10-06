@@ -1,0 +1,14 @@
+# 웹 GUI 백엔드 설정. 로봇 이름은 코드에 쓰지 않고 여기서만 정한다.
+# robots 는 domain_bridge 가 관제 PC(domain 50)에 만들어 주는 /{id}/... 토픽의 {id} 이다.
+robots:
+  - pinky1
+  - pinky2
+
+# 구역 점유 상태 토픽 (zone_manager_node 발행, 값: free | occupied_by:<id>)
+zone_status_topic: /zone_manager/status
+
+# 어떤 토픽이든 마지막 수신 후 이 시간(초)이 지나면 online=false
+online_timeout_sec: 5.0
+
+# WebSocket 으로 내보내는 pose 이벤트의 로봇당 최대 빈도(Hz)
+pose_max_hz: 10

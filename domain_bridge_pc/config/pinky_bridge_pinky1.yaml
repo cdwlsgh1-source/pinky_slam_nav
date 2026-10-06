@@ -74,6 +74,20 @@ topics:
     to_domain: 50
     remap: /pinky1/battery_state
 
+  # 로봇은 /battery_state 대신 Float32 두 개(/battery/percent, /battery/voltage)를 발행함.
+  # 웹 GUI 백엔드가 이 두 토픽을 구독한다.
+  /battery/percent:
+    type: std_msgs/msg/Float32
+    from_domain: 20
+    to_domain: 50
+    remap: /pinky1/battery/percent
+
+  /battery/voltage:
+    type: std_msgs/msg/Float32
+    from_domain: 20
+    to_domain: 50
+    remap: /pinky1/battery/voltage
+
   # [주행 필수] lane_follower_node가 관제 PC(50)에서 실행되므로, 로봇(20)에서
   # 로컬로 도는 lane_detector_node(namespace=pinky1)가 발행하는 차선 정보를
   # 그대로 넘겨받아야 함. 로봇 쪽에서 이미 pinky1 네임스페이스를 쓰고 있어서

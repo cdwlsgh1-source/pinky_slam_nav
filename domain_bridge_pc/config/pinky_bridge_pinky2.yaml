@@ -69,6 +69,20 @@ topics:
     to_domain: 50
     remap: /pinky2/battery_state
 
+  # 로봇은 /battery_state 대신 Float32 두 개(/battery/percent, /battery/voltage)를 발행함.
+  # 웹 GUI 백엔드가 이 두 토픽을 구독한다.
+  /battery/percent:
+    type: std_msgs/msg/Float32
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/battery/percent
+
+  /battery/voltage:
+    type: std_msgs/msg/Float32
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/battery/voltage
+
   # === ZONE-MUTEX ADDED ======================================================
   # zone_manager_node는 관제 PC(도메인 50)에서만 실행됩니다.
   # 메시지 안에 "pinky2:토큰" 형태로 robot_id가 이미 포함되어 있어서

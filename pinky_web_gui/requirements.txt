@@ -1,0 +1,4 @@
+# rclpy 는 pip 가 아니라 ROS 2(jazzy)가 제공한다. venv 를 --system-site-packages 로 만들어 함께 쓴다.
+fastapi
+uvicorn[standard]
+pyyaml

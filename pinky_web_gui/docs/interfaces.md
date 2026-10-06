@@ -20,6 +20,7 @@
 | `/{id}/tf`, `/{id}/tf_static` | tf2_msgs/TFMessage | 로봇 → PC | :52-62 | :48-58 |
 | `/{id}/amcl_pose` | PoseWithCovarianceStamped | 로봇 → PC | :65-69 | :60-64 |
 | `/{id}/battery_state` | sensor_msgs/BatteryState | 로봇 → PC | :71-75 | :66-70 |
+| `/{id}/battery/percent`, `/{id}/battery/voltage` | std_msgs/Float32 | 로봇 → PC | 추가됨 (2026-10-06) | 추가됨 (2026-10-06) |
 | `/pinky1/lane/center_offset` | Float32 | 로봇 → PC | :81-84 | 없음 |
 | `/pinky1/lane/detected`, `/pinky1/crossline/detected` | Bool | 로봇 → PC | :86-94 | 없음 |
 | `/zone_manager/request_entry` | String (`<id>:<token>`) | 로봇 → PC | :104-108 | :80-84 |
@@ -29,6 +30,7 @@
 | `/{id}/camera/image_raw/compressed` | sensor_msgs/CompressedImage | **브리지에 없음** | - | - |
 
 설명:
+- **배터리**: 로봇(도메인 20, 22 실측)은 `/battery_state`를 발행하지 않고 `/battery/percent`, `/battery/voltage`(Float32, RELIABLE/VOLATILE)만 발행한다. `/battery_state` 항목은 브리지 YAML에 있지만 원본이 없어 비어 있다. 두 YAML에 Float32 두 토픽을 추가했고(`/{id}/battery/percent|voltage`), 백엔드는 이 둘을 구독한다. percent 는 **0~100 단위**다 (pinky1 실측 94.65, 2026-10-06). PRD 예시의 0.82(0~1)와 다르다.
 - 로봇 쪽 원래 이름은 remap 전 이름이다 (`/patrol_cmd`, `/patrol_status`, `/cmd_vel`, `/amcl_pose` …). 관제 PC에서만 `/{id}/` 접두가 붙는다.
 - `/zone_manager/request_entry|notify_exit|grant_entry`는 remap이 없고 두 로봇이 한 토픽을 공유한다 (메시지 안의 `robot_id`로 구분, Y1:96-102). QoS는 RELIABLE, depth 10 (`zone_gate_client.py:43-52`, `zone_manager_node.py:55-63`).
 - `/zone_manager/status`는 `zone_manager_node`가 발행하고(`zone_manager_node.py:64`) 값은 `free` | `occupied_by:<robot_id>` (`:156`). 점유가 바뀔 때만 발행한다 (`:134`, `:140`).

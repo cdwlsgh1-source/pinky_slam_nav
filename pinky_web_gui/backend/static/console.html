@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinky 백엔드 콘솔</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; background: #fff; color: #111; }
+  pre { background: #f3f3f3; padding: 12px; overflow: auto; max-height: 70vh; }
+  @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } pre { background: #222; } }
+</style>
+<h1>Pinky 백엔드 콘솔</h1>
+<p>브라우저 개발자 도구 콘솔(F12)에서 WebSocket 메시지를 확인하세요. 아래는 최근 메시지입니다.</p>
+<p id="st">연결 중...</p>
+<pre id="log"></pre>
+<script>
+  const logEl = document.getElementById('log'), st = document.getElementById('st');
+  const lines = [];
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onopen = () => { st.textContent = '연결됨'; };
+  ws.onclose = () => { st.textContent = '연결 끊김'; };
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    console.log(m.type, m);
+    lines.push(e.data);
+    if (lines.length > 40) lines.shift();
+    logEl.textContent = lines.join('\n');
+  };
+</script>
+</html>
