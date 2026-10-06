@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinky 관제 (콘솔 확인용)</title>
+<style>
+  body { font: 14px/1.5 monospace; margin: 16px; background: #111; color: #ddd; }
+  h1 { font-size: 16px; }
+  #status { margin-bottom: 8px; }
+  #log { white-space: pre-wrap; max-height: 70vh; overflow: auto; border: 1px solid #333; padding: 8px; }
+</style>
+</head>
+<body>
+<h1>Pinky 관제 — WebSocket 확인용 (Step 1)</h1>
+<div id="status">연결 중…</div>
+<div id="log"></div>
+<script>
+  // Step 1 확인용 최소 페이지. 수신한 메시지를 화면과 브라우저 콘솔에 그대로 찍는다.
+  const statusEl = document.getElementById('status');
+  const logEl = document.getElementById('log');
+  const MAX_LINES = 200;
+
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.onopen = () => { statusEl.textContent = '연결됨'; };
+  ws.onclose = () => { statusEl.textContent = '연결 끊김'; };
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    console.log(msg);
+    logEl.textContent += ev.data + '\n';
+    const lines = logEl.textContent.split('\n');
+    if (lines.length > MAX_LINES) logEl.textContent = lines.slice(-MAX_LINES).join('\n');
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+</script>
+</body>
+</html>

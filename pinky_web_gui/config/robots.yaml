@@ -1,0 +1,17 @@
+# 웹 GUI 백엔드 설정. 로봇 이름은 코드에 하드코딩하지 않고 여기서만 읽는다.
+# 로봇 ID는 zone_traffic_control/config/zone_params.yaml 의 robot_ids,
+# 순찰 노드의 robot_id 와 같아야 한다.
+
+robots:
+  - pinky1
+  - pinky2
+
+# 관제 PC 안에서만 쓰이는 토픽이라 브리지를 거치지 않고 바로 구독한다.
+zone_status_topic: /zone_manager/status
+
+# 한 로봇의 어떤 토픽이든 마지막 수신 후 이 시간(초)이 지나면 offline.
+# patrol_status 는 상태가 바뀔 때만 발행되므로 그 토픽만으로 판정하지 않는다.
+online_timeout_sec: 5
+
+# 브라우저로 보내는 pose 이벤트의 로봇당 최대 빈도 (Hz)
+pose_max_hz: 10
