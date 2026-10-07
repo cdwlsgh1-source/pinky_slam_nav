@@ -12,3 +12,6 @@ online_timeout_sec: 5.0
 
 # WebSocket 으로 내보내는 pose 이벤트의 로봇당 최대 빈도(Hz)
 pose_max_hz: 10
+
+# 지도 yaml (robots.yaml 이 있는 폴더 기준 상대 경로). 해상도, origin, 임계값은 이 파일에서 읽어 /api/map 으로 내려준다.
+map_yaml: ../../map_view_pc/my_pinky_map10.yaml

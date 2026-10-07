@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinky 관제</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- 왼쪽: 메뉴바 -->
+  <nav class="menubar" aria-label="메뉴">
+    <div class="brand">Pinky</div>
+    <button class="menu-item active" data-view="main">메인</button>
+    <button class="menu-item" disabled title="준비 중">로그</button>
+    <button class="menu-item" disabled title="준비 중">포인트</button>
+  </nav>
+
+  <!-- 위: 시스템 알람 -->
+  <header class="alarmbar" aria-label="시스템 알람">
+    <span class="chip" id="connChip" data-level="warn">연결 중...</span>
+    <span class="chip" id="zoneChip" data-level="dim">구역: -</span>
+    <ul class="alarm-list" id="alarmList"><li class="dim">알람 없음</li></ul>
+  </header>
+
+  <!-- 가운데: 지도 화면 -->
+  <main class="mapwrap">
+    <div class="stage" id="stage">
+      <canvas id="mapCanvas"></canvas>
+      <div class="stage-note" id="stageNote">지도 불러오는 중...</div>
+      <div class="map-tools">
+        <button id="gridBtn" type="button" aria-pressed="true" title="x, y 좌표 그리드 켜기/끄기">그리드</button>
+        <button id="fitBtn" type="button" title="지도를 화면에 맞춤">맞춤</button>
+      </div>
+    </div>
+    <div class="readout">
+      <span><span class="tag">pixel</span> <b id="pxOut">-</b></span>
+      <span><span class="tag">map (x, y)</span> <b id="xyOut">-</b></span>
+      <span><span class="tag">occupancy</span> <b id="occOut">-</b></span>
+    </div>
+  </main>
+
+  <!-- 오른쪽: 로봇 카드 / 명령어 / 클릭 좌표 -->
+  <aside class="sidebar" aria-label="로봇과 명령">
+    <section>
+      <h2>로봇</h2>
+      <div id="robotCards"></div>
+    </section>
+
+    <section>
+      <h2>명령어</h2>
+      <div class="cmd-grid">
+        <button type="button" disabled>순찰 시작</button>
+        <button type="button" disabled>정지</button>
+        <button type="button" disabled>지점 이동</button>
+      </div>
+      <p class="hint">명령 전송은 Step 3에서 활성화됩니다.</p>
+    </section>
+
+    <section>
+      <h2>클릭 좌표 <small>(waypoint 지정용)</small></h2>
+      <div class="row-actions">
+        <button type="button" id="copyAllBtn">전체 복사</button>
+        <button type="button" id="clearBtn">지우기</button>
+      </div>
+      <p class="hint" id="pointsEmpty">지도를 클릭하면 좌표가 기록됩니다.</p>
+      <ul class="points" id="pointsList"></ul>
+    </section>
+  </aside>
+
+</div>
+<script src="mapmath.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

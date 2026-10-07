@@ -13,6 +13,7 @@ class Config:
     zone_status_topic: str
     online_timeout_sec: float
     pose_max_hz: float
+    map_yaml: str = None  # 지도 yaml 의 절대 경로 (robots.yaml 위치 기준 상대 경로로 적는다)
 
 
 def load_config(path=None) -> Config:
@@ -34,4 +35,10 @@ def load_config(path=None) -> Config:
     if timeout <= 0 or hz <= 0:
         raise ValueError(f'{path}: online_timeout_sec, pose_max_hz 는 0보다 커야 한다')
 
-    return Config(tuple(robots), zone_topic, timeout, hz)
+    map_yaml = raw.get('map_yaml')
+    if map_yaml is not None:
+        if not isinstance(map_yaml, str) or not map_yaml:
+            raise ValueError(f'{path}: map_yaml 은 문자열 경로여야 한다')
+        map_yaml = str((path.resolve().parent / map_yaml).resolve())
+
+    return Config(tuple(robots), zone_topic, timeout, hz, map_yaml)

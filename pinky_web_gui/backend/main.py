@@ -6,15 +6,18 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from .config import Config, load_config
 from .hub import Hub
+from .map_loader import load_map
 from .state import StateStore
 
 log = logging.getLogger('backend')
 
 STATIC = Path(__file__).resolve().parent / 'static'
+FRONTEND = Path(__file__).resolve().parent.parent / 'frontend'
 TICK_SEC = 0.1  # online 타임아웃 판정과 보류된 pose 전송 주기
 
 
@@ -22,6 +25,16 @@ def create_app(cfg: Config, mock: bool) -> FastAPI:
     store = StateStore(cfg.robots, cfg.zone_status_topic, cfg.online_timeout_sec, cfg.pose_max_hz)
     hub = Hub()
     bg = {}  # lifespan 에서 만든 리소스
+
+    # 지도는 시작할 때 한 번 읽는다. 실패해도 서버는 뜨고 /api/map 만 503 을 돌려준다.
+    map_meta = map_png = None
+    if cfg.map_yaml:
+        try:
+            map_meta, map_png = load_map(cfg.map_yaml)
+            log.info('지도 로드: %s (%dx%d, %.3f m/px)', cfg.map_yaml,
+                     map_meta['width'], map_meta['height'], map_meta['resolution'])
+        except Exception:
+            log.exception('지도 로드 실패: %s', cfg.map_yaml)
 
     async def consume(queue):
         """큐에서 이벤트를 꺼내 상태에 반영하고 변경분을 브로드캐스트한다 (상태를 바꾸는 유일한 곳)."""
@@ -74,7 +87,19 @@ def create_app(cfg: Config, mock: bool) -> FastAPI:
     async def state():
         return store.snapshot()
 
-    @app.get('/')
+    @app.get('/api/map')
+    async def api_map():
+        if map_meta is None:
+            return JSONResponse({'error': 'map not available'}, status_code=503)
+        return map_meta
+
+    @app.get('/api/map/image')
+    async def api_map_image():
+        if map_png is None:
+            return JSONResponse({'error': 'map not available'}, status_code=503)
+        return Response(map_png, media_type='image/png')
+
+    @app.get('/console')
     async def console():
         return FileResponse(STATIC / 'console.html')
 
@@ -92,6 +117,12 @@ def create_app(cfg: Config, mock: bool) -> FastAPI:
             pass
         finally:
             hub.unregister(q)
+
+    # API 와 /ws 를 모두 등록한 뒤 마지막에 정적 파일을 '/' 에 붙인다 (FR2-9, 빌드 단계 없음)
+    if FRONTEND.is_dir():
+        app.mount('/', StaticFiles(directory=FRONTEND, html=True), name='frontend')
+    else:
+        log.warning('frontend 폴더가 없어 정적 파일을 서빙하지 않는다: %s', FRONTEND)
 
     return app
 

@@ -1,6 +1,7 @@
-# pinky_web_gui 백엔드 (Step 1)
+# pinky_web_gui (Step 1 백엔드 + Step 2 지도 화면)
 
 관제 PC(`ROS_DOMAIN_ID=50`)에서 두 로봇의 상태 토픽을 구독해 하나의 상태 모델로 합치고 WebSocket으로 중계하는 FastAPI 백엔드다. **구독 전용**이며 로봇으로 나가는 명령은 없다 (Step 3).
+브라우저에서 `http://localhost:8000/` 로 지도 화면(`frontend/`)이 열린다 (빌드 단계 없음).
 토픽 규약은 `docs/interfaces.md`, 작업 규칙은 `CLAUDE.md`를 본다.
 
 ## 설치 (한 번만)
@@ -54,7 +55,10 @@ export ROS_DOMAIN_ID=50
 | `GET /api/health` | `{"ok", "mock", "robots", "ws_clients"}` |
 | `GET /api/state` | 전체 상태 (WebSocket `snapshot` 과 같은 구조) |
 | `WS /ws` | 접속 즉시 `snapshot`, 이후 변경분 `robot_update` / `zone` |
-| `GET /` | 콘솔 확인용 최소 HTML (메시지를 `console.log` 로 출력) |
+| `GET /api/map` | 지도 메타데이터 (width, height, resolution, origin, negate, occupied_thresh, free_thresh, image_url). 값은 `config/robots.yaml` 의 `map_yaml` 이 가리키는 yaml/pgm 에서 읽는다 |
+| `GET /api/map/image` | 지도 PNG (pgm 픽셀 값 그대로, 8비트 그레이) |
+| `GET /` | 지도 화면 (`frontend/index.html`) |
+| `GET /console` | 콘솔 확인용 최소 HTML (메시지를 `console.log` 로 출력) |
 
 ### 상태 모델
 
@@ -87,7 +91,24 @@ curl -s localhost:8000/api/health
 curl -s localhost:8000/api/state | python3 -m json.tool
 ```
 
-브라우저에서 `http://localhost:8000/` 를 열고 F12 콘솔에서 `snapshot`/`robot_update` 를 확인한다.
+브라우저에서 `http://localhost:8000/console` 을 열고 F12 콘솔에서 `snapshot`/`robot_update` 를 확인한다.
+
+### 지도 화면 확인 (Step 2)
+
+```bash
+.venv/bin/python -m backend.main --mock      # 그리고 브라우저에서 http://localhost:8000/
+.venv/bin/python tests/verify_transform.py   # 변환식이 기존 pinky_map_viewer.html 과 같은지 (Chrome 필요, PASS 가 나와야 함)
+```
+
+mock 모드에서 두 마커가 지도 오른쪽 방 안의 사각형을 돌고, 마커 방향 화살표가 진행 방향과 같아야 한다. 스크린샷: `docs/step2_screenshot.png`.
+
+| 확인 | 방법 |
+|---|---|
+| 호버 좌표/occupancy | 지도 위에서 마우스를 움직이면 아래 줄에 pixel, map(m), occupancy 가 나온다 |
+| 클릭 좌표 기록 | 지도를 클릭하면 오른쪽 "클릭 좌표"에 쌓이고 복사/삭제할 수 있다. 드래그(4px 초과 이동)는 클릭으로 치지 않는다 |
+| 확대/이동 | 휠로 커서 위치 기준 확대, 드래그로 이동, "맞춤" 버튼으로 복귀 |
+| 재연결 | 백엔드를 껐다 켜면 "연결 끊김"이 뜨고, 1초에서 5초까지 늘려가며 자동 재연결한다. 끊긴 동안 마커는 흐리게 보인다 |
+| 모바일 폭 | 창 너비를 860px 아래로 줄이면 메뉴가 위 가로 줄이 되고 사이드바가 지도 아래로 내려간다 |
 
 ## 실제 로봇 확인 절차 (사용자 수행)
 
@@ -104,8 +125,29 @@ backend/state.py       StateStore (상태 모델, online 판정, pose 제한)
 backend/ros_bridge.py  rclpy 노드, 별도 스레드 spin
 backend/mock.py        --mock 가짜 데이터
 backend/hub.py         WebSocket 클라이언트별 큐와 브로드캐스트
+backend/map_loader.py  지도 yaml/pgm -> 메타데이터 + PNG (표준 라이브러리만 사용)
 backend/static/        콘솔 확인용 HTML
-tests/                 단위 테스트
+frontend/              지도 화면 (index.html, style.css, app.js, mapmath.js)
+frontend/mapmath.js    월드<->픽셀 변환과 occupancy 판정 (변환식이 있는 유일한 곳)
+tests/                 단위 테스트, verify_transform.py (변환식 대조)
 ```
 
 스레드 모델: rclpy 콜백(별도 스레드)은 값을 뽑아 `loop.call_soon_threadsafe` 로 `asyncio.Queue` 에 넣는다. 큐를 소비하는 단일 태스크만 `StateStore` 를 바꾸고 브로드캐스트하므로 락이 없다. mock 도 같은 큐로 같은 이벤트를 넣는다.
+
+## 화면 구성 (Step 2)
+
+```
+┌────────┬──────────────────────────────┬────────────┐
+│ 메뉴바  │ 시스템 알람 (연결, 구역, 이벤트)  │            │
+│ 메인    ├──────────────────────┬───────┤            │
+│ 로그*   │                      │ 로봇   │            │
+│ 포인트* │     지도 (Canvas)     │ 카드   │            │
+│        │                      │ 명령어* │            │
+│        │  pixel / map / occ.  │ 클릭좌표│            │
+└────────┴──────────────────────┴───────┴────────────┘
+* 구조만 있고 비활성 (로그, 포인트 화면은 이후 Step, 명령 버튼은 Step 3)
+```
+
+- 지도 판정: `negate: 0` 이면 `p = (255 - v) / 255`, `p > occupied_thresh` 는 occupied, `p < free_thresh` 는 free, 그 외 unknown 이다 (map_server trinary 규칙).
+- 지도의 회색(205)은 `free_thresh: 0.196` 때문에 unknown 으로 나온다 (205 -> p = 0.19608).
+- 마커 색은 `/api/state` 의 로봇 순서대로 고정 팔레트에서 받는다 (로봇 이름은 코드에 없다).

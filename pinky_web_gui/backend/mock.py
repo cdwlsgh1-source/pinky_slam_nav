@@ -1,7 +1,8 @@
 """--mock 용 가짜 데이터. ROS 없이 실제와 같은 이벤트를 같은 큐로 흘려 보낸다.
 
 두 로봇(config 의 robots 순서대로)이 사각형 경로를 서로 다른 위상으로 돈다.
-좌표는 데모용이며 지도의 통과 가능 여부와 무관하다.
+사각형은 지도(my_pinky_map10)의 오른쪽 방 안쪽 free 영역(P4, P3 와 같은 x 범위)이라 마커가 벽을 지나지 않는다.
+배터리 percentage 는 실제 로봇과 같이 0~100 단위다.
 """
 import asyncio
 import json
@@ -9,7 +10,7 @@ import math
 import time
 
 # (x, y) 사각형 꼭짓점. 한 바퀴를 돌면 DONE 후 다시 STARTING.
-CORNERS = [(0.0, 0.0), (1.5, 0.0), (1.5, -0.4), (0.0, -0.4)]
+CORNERS = [(1.00, -0.30), (1.55, -0.30), (1.55, -0.55), (1.00, -0.55)]
 SPEED = 0.25        # m/s
 POSE_HZ = 20
 ZONE_PERIOD = 8.0   # s
@@ -64,8 +65,8 @@ async def run_mock(robots, queue):
                 last_seg[rid] = seg
         if tick % POSE_HZ == 0:  # 1초마다 배터리
             for k, rid in enumerate(robots):
-                pct = max(0.05, 0.82 - 0.0005 * t - 0.03 * k)
-                queue.put_nowait(('battery', rid, pct, 6.0 + 2.0 * pct))
+                pct = max(5.0, 82.0 - 0.05 * t - 3.0 * k)
+                queue.put_nowait(('battery', rid, pct, 6.0 + 2.0 * pct / 100))
             slot = int(t // ZONE_PERIOD) % (n + 1)
             queue.put_nowait(('zone', 'free' if slot == n else f'occupied_by:{robots[slot]}'))
         tick += 1
