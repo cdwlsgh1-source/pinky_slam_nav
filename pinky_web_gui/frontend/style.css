@@ -26,8 +26,8 @@ h2 small { font-weight: 400; }
 
 /* 전체 배치: 메뉴바 | (알람 / 지도 | 사이드바) */
 .app { display: grid; height: 100%; gap: 8px; padding: 8px;
-  grid-template-columns: 92px minmax(0, 1fr) 300px;
-  grid-template-rows: auto minmax(0, 1fr) 170px;
+  grid-template-columns: 92px minmax(0, 1fr) var(--side-w, 300px);   /* 사이드바 너비와 이력 높이는 끌어서 바꾼다 (app.js 의 패널 크기) */
+  grid-template-rows: auto minmax(0, 1fr) var(--hist-h, 170px);
   grid-template-areas: "menu alarm alarm" "menu map side" "menu hist hist"; }
 .menubar { grid-area: menu; display: flex; flex-direction: column; gap: 6px; padding: 10px 8px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
@@ -124,12 +124,47 @@ dialog p { margin: 0 0 12px; line-height: 1.6; }
   padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .points li button { padding: 1px 6px; font-size: 11px; }
 
+/* 패널 크기 조절 손잡이: 패널 사이의 8px 간격 위에 겹쳐 놓는다 (레이아웃은 그대로) */
+.split { z-index: 4; background: transparent; border-radius: 4px; touch-action: none; }
+.split:hover, .split:focus-visible, .split.active { background: var(--accent); opacity: .55; outline: none; }
+.split-v { grid-area: side; justify-self: start; align-self: stretch; width: 10px; margin-left: -9px; cursor: col-resize; }
+.split-h { grid-area: hist; align-self: start; justify-self: stretch; height: 10px; margin-top: -9px; cursor: row-resize; }
+body.resizing { user-select: none; -webkit-user-select: none; }
+body.resizing.col { cursor: col-resize; } body.resizing.row { cursor: row-resize; }
+body.resizing #mapCanvas { cursor: inherit; }
+
+/* 사이드바 섹션 접기: 제목을 누르면 접고 펼친다 */
+.sidebar section > h2 { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+.sidebar section > h2::before { content: '▾'; color: var(--dim); font-size: 11px; }
+.sidebar section.collapsed > h2 { margin-bottom: 0; }
+.sidebar section.collapsed > h2::before { content: '▸'; }
+.sidebar section.collapsed > :not(h2) { display: none; }
+
+/* 비상정지 (항상 보이는 상단 줄) */
+.estop { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+.estop button { padding: 5px 10px; font-weight: 700; }
+button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+button.danger:hover:not(:disabled) { color: #fff; filter: brightness(1.12); border-color: var(--bad); }
+#estopButtons { display: inline-flex; gap: 6px; }
+
+/* LiDAR 토글, 수동 조작 */
+.check { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.pad { display: grid; grid-template-columns: repeat(3, 44px); grid-template-areas: ". fwd ." "left back right";
+  gap: 6px; margin: 8px 0 0; justify-content: center; }
+.pad button { height: 44px; padding: 0; font-size: 16px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pad button[data-dir="fwd"] { grid-area: fwd; } .pad button[data-dir="left"] { grid-area: left; }
+.pad button[data-dir="back"] { grid-area: back; } .pad button[data-dir="right"] { grid-area: right; }
+.pad button.down { background: var(--accent); color: #fff; border-color: var(--accent); }
+code { font-family: var(--mono); }
+
 /* 좁은 화면: 메뉴는 위 가로 줄, 사이드바는 지도 아래 */
 @media (max-width: 860px) {
   html, body { height: auto; }
   .app { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto auto;
     grid-template-areas: "menu" "alarm" "map" "side" "hist"; }
   .history { height: 240px; }
+  .split { display: none; }
+  .alarmbar { position: sticky; top: 0; z-index: 5; }  /* 좁은 화면에서도 비상정지가 항상 보이게 */
   .menubar { flex-direction: row; align-items: center; overflow-x: auto; }
   .brand { padding: 0 8px; }
   .menu-item { width: auto; }

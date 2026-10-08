@@ -8,6 +8,7 @@ import logging
 import threading
 
 from .commands import CommandUnavailable
+from .scan import RateLimiter, compact
 from .state import quat_to_yaw
 
 log = logging.getLogger('backend.ros')
@@ -23,6 +24,12 @@ class RosBridge:
         self._rclpy = None
         self._cmd_pubs = {}  # 로봇 id -> /{id}/patrol_cmd 퍼블리셔 (시작할 때 한 번만 만든다)
         self._String = None
+        self._Twist = None
+        self._LaserScan = None
+        self._sensor_qos = None
+        self._vel_pubs = {}   # 로봇 id -> /{id}/cmd_vel 퍼블리셔
+        self._scan_subs = {}  # 로봇 id -> /{id}/scan 구독 (브라우저가 켰을 때만 존재한다)
+        self._scan_lock = threading.Lock()
 
     def _put(self, event):
         # 루프가 닫힌 뒤(종료 중)에 들어오는 콜백은 무시한다
@@ -33,14 +40,21 @@ class RosBridge:
 
     def start(self):
         import rclpy
-        from geometry_msgs.msg import PoseWithCovarianceStamped
+        from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
         from rclpy.node import Node
-        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+        from sensor_msgs.msg import LaserScan
         from std_msgs.msg import Float32, String
 
         self._rclpy = rclpy
         self._String = String
-        rclpy.init()
+        self._Twist = Twist
+        self._LaserScan = LaserScan
+        self._sensor_qos = qos_profile_sensor_data  # BEST_EFFORT: 센서 발행자(RELIABLE/BEST_EFFORT)와 모두 연결된다
+        # rclpy 기본값은 SIGINT/SIGTERM 에서 컨텍스트를 곧바로 shutdown 한다. 그러면 uvicorn 이 종료 절차를 시작하기 전에
+        # 발행이 막혀서, 수동 조작/비상정지 중에 서버를 끄면 마지막 0 속도를 보낼 수 없다 (격리 도메인에서 확인).
+        # 시그널은 uvicorn 이 처리하게 하고, lifespan 종료 단계에서 0 속도를 보낸 뒤 rclpy 를 정리한다.
+        rclpy.init(signal_handler_options=rclpy.SignalHandlerOptions.NO)
         node = Node('pinky_web_gui_backend')
         self._node = node
 
@@ -71,6 +85,8 @@ class RosBridge:
         # 이름은 설정의 robots 에서만 나온다. 허용 목록 검증은 백엔드(commands.validate)가 이미 끝낸 뒤다.
         for rid in self._cfg.robots:
             self._cmd_pubs[rid] = node.create_publisher(String, f'/{rid}/patrol_cmd', 10)
+            # 비상정지 0 속도와 수동 조작. 허용 명령은 backend.motion 이 만든 (선속도, 각속도) 뿐이다.
+            self._vel_pubs[rid] = node.create_publisher(Twist, f'/{rid}/cmd_vel', 10)
 
         self._thread = threading.Thread(target=self._spin, name='rclpy-spin', daemon=True)
         self._thread.start()
@@ -87,6 +103,45 @@ class RosBridge:
         if pub.get_subscription_count() == 0:
             raise CommandUnavailable(f'/{rid}/patrol_cmd 를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다)')
         pub.publish(self._String(data=data))
+
+    def publish_twist(self, rid, linear, angular):
+        """/{rid}/cmd_vel 로 (선속도 m/s, 각속도 rad/s) 를 발행한다. 비상정지는 구독자가 없어도 시도해야 하므로 막지 않는다.
+
+        반환: 구독자(domain_bridge)가 하나라도 있으면 True. 없으면 발행은 하되 False (어디에도 전달되지 않았을 수 있다).
+        """
+        pub = self._vel_pubs.get(rid)
+        if pub is None:
+            raise CommandUnavailable(f'{rid} 의 cmd_vel 퍼블리셔가 없습니다')
+        msg = self._Twist()
+        msg.linear.x = float(linear)
+        msg.angular.z = float(angular)
+        pub.publish(msg)
+        return pub.get_subscription_count() > 0
+
+    def scan_enable(self, rid, on):
+        """LiDAR 구독을 켜거나 끈다 (FR4-5). 켤 때만 /{rid}/scan 을 구독하고, 끄면 구독을 해제해서 브리지가 더는 중계하지 않게 한다."""
+        if rid not in self._vel_pubs or self._node is None:
+            raise CommandUnavailable(f'알 수 없는 로봇이거나 ROS 가 준비되지 않았습니다: {rid}')
+        m = self._cfg.motion
+        with self._scan_lock:
+            if on and rid not in self._scan_subs:
+                limiter = RateLimiter(m.scan_max_hz)
+
+                def cb(msg, rid=rid):
+                    if not limiter.allow():
+                        return
+                    self._put(('scan', rid) + compact(msg.angle_min, msg.angle_increment, msg.ranges,
+                                                       m.scan_decimate, msg.range_min, msg.range_max))
+
+                self._scan_subs[rid] = self._node.create_subscription(self._LaserScan, f'/{rid}/scan', cb, self._sensor_qos)
+                log.info('%s LiDAR 구독 시작', rid)
+            elif not on and rid in self._scan_subs:
+                self._node.destroy_subscription(self._scan_subs.pop(rid))
+                log.info('%s LiDAR 구독 해제', rid)
+
+    def scan_subscribed(self):
+        with self._scan_lock:
+            return sorted(self._scan_subs)
 
     def _on_pose(self, rid, msg):
         p = msg.pose.pose

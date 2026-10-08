@@ -8,6 +8,8 @@ import logging
 import math
 import time
 
+from .zone import ZoneTracker
+
 log = logging.getLogger('backend.state')
 
 
@@ -31,7 +33,8 @@ class StateStore:
         self._timeout = online_timeout_sec
         self._pose_interval = 1.0 / pose_max_hz
         self._now = now
-        self.zone = None  # 수신 전에는 null
+        self.zone = None  # 수신 전에는 null. 원문 문자열 (free | occupied_by:<id>[:<token>])
+        self._zone = ZoneTracker(now)
         self.zone_topic = zone_topic
         self._r = {
             rid: {'online': False, 'last_seen': None, 'patrol': None, 'pose': None, 'battery': None}
@@ -52,7 +55,21 @@ class StateStore:
                 'pose': s['pose'],
                 'battery': s['battery'],
             }
-        return {'type': 'snapshot', 'robots': robots, 'zone': self.zone}
+        return {'type': 'snapshot', 'robots': robots, 'zone': self.zone, 'zone_info': self.zone_info()}
+
+    def zone_info(self):
+        """구역 상태 해석 결과. 수신 전이면 None."""
+        return None if self.zone is None else self._zone.info()
+
+    def pose(self, rid):
+        return self._r[rid]['pose']
+
+    def patrol_state(self, rid):
+        p = self._r[rid]['patrol']
+        return p['state'] if p else None
+
+    def is_online(self, rid):
+        return self._r[rid]['online']
 
     # ---- 이벤트 반영. 반환값은 WebSocket 으로 내보낼 메시지 목록 ----
     def apply(self, event):
@@ -70,6 +87,8 @@ class StateStore:
             out += self._apply_pose(rid, event[2], event[3], event[4])
         elif kind == 'battery':
             out += self._apply_battery(rid, event[2], event[3])
+        elif kind == 'scan':
+            pass  # 수신했다는 사실(online 갱신)만 반영한다. 점은 StateStore 가 아니라 scan 경로로 나간다
         else:
             log.warning('알 수 없는 이벤트 종류 무시: %r', kind)
         return out
@@ -87,7 +106,8 @@ class StateStore:
         if status == self.zone:
             return []
         self.zone = status
-        return [{'type': 'zone', 'status': status}]
+        self._zone.update(status)
+        return [{'type': 'zone', 'status': status, **self._zone.info()}]
 
     def _apply_patrol(self, rid, raw):
         """FR1-6: JSON 이 아니면 서버는 유지하고, 원문을 detail 에 보관한다.

@@ -232,3 +232,39 @@ def test_stop_does_not_replace_last_task():
     _, msgs = t.sent('a', 'stop', [], 'stop')
     assert t.last_command('a')['cmd'] == 'stop' and t.last_task('a')['cmd'] == 'goto'
     assert [m['field'] for m in msgs if m['type'] == 'robot_update'] == ['last_command']
+
+
+# ---- 비상정지 기록 (Step 4) ----
+def test_estop_entry_acknowledged_by_stopped_only():
+    t, c = tracker()
+    e, msgs = t.estop('a', 'stop + cmd_vel 0 (2.0초)', True, True)
+    assert e['cmd'] == 'estop' and e['result'] == SENT and msgs[0]['type'] == 'command'
+    assert t.on_patrol('a', 'MOVING') == []          # 작업 중인 다른 상태는 응답이 아니다
+    out = t.on_patrol('a', 'STOPPED')
+    assert out[0]['entry']['result'] == ACKNOWLEDGED
+
+
+def test_estop_without_stopped_is_not_reported_as_no_response():
+    t, c = tracker()
+    t.estop('a', 'x', True, True)
+    c.t += 6
+    [m, *_] = t.tick()
+    assert m['entry']['result'] == SENT and '이미 멈춰' in m['entry']['detail']   # 이미 멈춘 로봇의 비상정지는 오류가 아니다
+
+
+def test_estop_partial_and_total_failure():
+    t, c = tracker()
+    e, _ = t.estop('a', 'x', False, True, 'patrol_cmd stop 전송 실패: 구독자 없음')
+    assert e['result'] == SENT and '구독자 없음' in e['detail']
+    c.t += 6
+    assert t.tick() == []                              # patrol_cmd 가 안 나갔으면 STOPPED 를 기다리지 않는다
+    e2, _ = t.estop('b', 'x', False, False, '둘 다 실패')
+    assert e2['result'] == FAILED
+
+
+def test_estop_does_not_replace_last_task():
+    t, c = tracker()
+    t.sent('a', 'goto', ['P2'], 'goto:P2')
+    t.estop('a', 'x', True, True)
+    assert t.last_task('a')['cmd'] == 'goto'           # 진행 문구/경로 선이 비상정지로 사라지지 않는다
+    assert t.last_command('a')['cmd'] == 'estop'

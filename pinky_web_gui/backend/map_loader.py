@@ -48,8 +48,8 @@ def encode_png_gray(width, height, pixels):
             + chunk(b'IEND', b''))
 
 
-def load_map(yaml_path):
-    """반환: (메타데이터 dict, PNG bytes)"""
+def load_grid(yaml_path):
+    """반환: (메타데이터 dict, 픽셀 bytes). 픽셀은 pgm 그대로 (행 0 이 위쪽). mock 의 LiDAR 시뮬레이션도 이것을 쓴다."""
     yaml_path = Path(yaml_path)
     raw = yaml.safe_load(yaml_path.read_text(encoding='utf-8'))
     width, height, pixels = read_pgm(yaml_path.parent / raw['image'])
@@ -64,4 +64,10 @@ def load_map(yaml_path):
         'free_thresh': float(raw.get('free_thresh', 0.196)),
         'image_url': '/api/map/image',
     }
-    return meta, encode_png_gray(width, height, pixels)
+    return meta, pixels
+
+
+def load_map(yaml_path):
+    """반환: (메타데이터 dict, PNG bytes)"""
+    meta, pixels = load_grid(yaml_path)
+    return meta, encode_png_gray(meta['width'], meta['height'], pixels)

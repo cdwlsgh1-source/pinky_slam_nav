@@ -44,3 +44,31 @@ robot_settings:
     goto_wait_sec: 10
     wait_every_point: true
     start_route: [RED2IN, P3, P6, RED2OUT, P7]
+
+# ---- 구역 / 비상정지 / 오버레이 (Step 4) ----
+# 구역 영역 yaml (robots.yaml 이 있는 폴더 기준 상대 경로). 사각형과 문 위치를 정한다.
+zone_yaml: zone.yaml
+
+# 경로 추정 (지도 위의 선): 지점 사이를 직선이 아니라 지도의 벽을 피하는 최단 경로로 그린다. mock 로봇의 이동도 같은 경로를 따른다.
+# Nav2 의 실제 계획이 아니라 지도 점유 격자 위의 추정이다 (/plan 토픽은 브리지에 없다). 벽에서 이만큼(m) 떨어진 칸만 지난다.
+planner_inflation_m: 0.08
+
+# 비상정지: patrol_cmd 로 stop 을 보내고, /{id}/cmd_vel 에 0 속도를 estop_burst_hz 로 estop_burst_sec 동안 보낸다.
+# 첫 작업의 초기 위치 보정 회전 중에는 stop 이 즉시 먹지 않을 수 있어서 0 속도를 함께 보낸다.
+motion:
+  estop_burst_hz: 10
+  estop_burst_sec: 2.0
+
+# 수동 조작 (데드맨: 누르는 동안만). 입력이 input_timeout_sec 동안 없거나 WebSocket 이 끊기면 즉시 0 속도.
+# max_* 는 설정값이고 코드에도 더 낮은 하드 상한이 있다 (선속도 0.2 m/s, 각속도 1.0 rad/s).
+manual:
+  enabled: true
+  max_linear: 0.1        # m/s
+  max_angular: 0.5       # rad/s
+  input_timeout_sec: 0.5
+  rate_hz: 10
+
+# LiDAR 오버레이: 브라우저가 켰을 때만 /{id}/scan 을 구독한다. 대역폭을 위해 빈도와 점 수를 줄여서 보낸다.
+scan:
+  max_hz: 5
+  decimate: 3            # 3개당 1개

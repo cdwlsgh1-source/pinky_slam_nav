@@ -64,7 +64,9 @@ def test_pose_rate_limited_but_latest_kept_and_trailing_flushed():
 
 def test_zone_and_nan():
     s, _ = make()
-    assert s.apply(('zone', 'free')) == [{'type': 'zone', 'status': 'free'}]
+    # Step 4: status(원문)는 그대로 두고 해석 결과(state/holder/token/held_sec)를 더했다
+    [m] = s.apply(('zone', 'free'))
+    assert m['type'] == 'zone' and m['status'] == 'free' and m['state'] == 'free' and m['holder'] is None
     assert s.apply(('zone', 'free')) == []
     s.apply(('battery', 'a', float('nan'), 7.9))
     json.dumps(s.snapshot(), allow_nan=False)  # NaN 이 남아 있으면 예외

@@ -70,6 +70,9 @@ class Page:
             await self.call('Input.dispatchMouseEvent', type=t, x=x, y=y, button='left', clickCount=1)
 
     async def click_sel(self, sel):
+        # 사이드바는 스크롤되므로, 화면 밖에 있으면 먼저 화면 안으로 가져온다 (좌표 클릭이 빗나가지 않게)
+        await self.js(f"document.querySelector({json.dumps(sel)}).scrollIntoView({{block: 'nearest'}})")
+        await asyncio.sleep(0.05)
         xy = await self.js(f"(() => {{ const r = document.querySelector({json.dumps(sel)}).getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }})()")
         await self.mouse(xy[0], xy[1])
 
@@ -117,7 +120,8 @@ async def run(shot):
                 await pg.click_point(n)
             check('포인트 클릭으로 경로 추가', await pg.js("JSON.stringify(app.routes.pinky1) === '[\"P2\",\"P3\",\"P6\"]'"))
             check('포인트 클릭은 좌표 기록을 늘리지 않음', await pg.js('app.clicks.length') == clicks0)
-            await pg.mouse(*(await pg.js("(() => { const r = canvas.getBoundingClientRect(); return [r.left + 20, r.top + r.height - 20]; })()")))
+            # 지도 안쪽의 빈 곳 (포인트에서 먼 곳). 캔버스 모서리는 레이아웃에 따라 지도 밖일 수 있어서 월드 좌표로 고른다
+            await pg.mouse(*(await pg.js("(() => { const s = worldToScreen(0.3, -0.3); const r = canvas.getBoundingClientRect(); return [r.left + s.sx, r.top + s.sy]; })()")))
             check('빈 곳 클릭은 좌표 기록', await pg.js('app.clicks.length') == clicks0 + 1)
             await asyncio.sleep(0.6)
             check('경로 목록 UI 3개', await pg.js("document.querySelectorAll('#routeList li').length") == 3)

@@ -21,6 +21,11 @@
   <header class="alarmbar" aria-label="시스템 알람">
     <span class="chip" id="connChip" data-level="warn">연결 중...</span>
     <span class="chip" id="zoneChip" data-level="dim">구역: -</span>
+    <!-- 비상정지: 항상 보이고, 확인 팝업 없이 한 번 누르면 동작한다 (FR4-7) -->
+    <div class="estop" id="estopBar" role="group" aria-label="비상정지">
+      <span id="estopButtons"></span>
+      <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">모두 정지</button>
+    </div>
     <ul class="alarm-list" id="alarmList"><li class="dim">알람 없음</li></ul>
   </header>
 
@@ -51,11 +56,31 @@
     <section>
       <h2>경로 이동 <small>(goto)</small></h2>
       <label class="field">대상 로봇 <select id="routeRobot"></select></label>
-      <p class="hint">지도의 포인트(P1~P7)를 클릭하면 경로 끝에 추가됩니다. 구역 문(RED*)과 락은 로봇이 알아서 처리합니다.</p>
+      <p class="hint">지도의 포인트(P1~P7)를 클릭하면 경로 끝에 추가됩니다. 구역 문(RED*)과 락은 로봇이 알아서 처리합니다. 지도 위의 선은 지도의 벽을 피하는 최단 경로를 계산한 <b>추정</b>이며, 실제 경로는 Nav2 가 정하므로 조금 다를 수 있습니다.</p>
       <ol class="route" id="routeList"></ol>
       <p class="hint" id="routeEmpty">경로가 비어 있습니다.</p>
       <div class="row-actions"><button type="button" id="routeClearBtn">경로 비우기</button></div>
       <p class="hint" id="routeMeta"></p>
+    </section>
+
+    <section>
+      <h2>오버레이 <small>(LiDAR)</small></h2>
+      <div id="scanToggles"></div>
+      <p class="hint">켠 로봇만 서버가 <code>/scan</code> 을 구독합니다 (5Hz, 점 3개당 1개). 점은 AMCL 위치를 기준으로 지도에 그리며, 센서와 로봇 중심의 오프셋은 무시하므로 실제와 몇 cm 어긋날 수 있습니다.</p>
+    </section>
+
+    <section id="drivePanel">
+      <h2>수동 조작 <small>(누르는 동안만)</small></h2>
+      <label class="field">대상 로봇 <select id="driveRobot"></select></label>
+      <label class="check"><input type="checkbox" id="driveEnable"> 수동 조작 켜기</label>
+      <div class="pad" id="drivePad">
+        <button type="button" data-dir="fwd" aria-label="전진">▲</button>
+        <button type="button" data-dir="left" aria-label="좌회전">◀</button>
+        <button type="button" data-dir="back" aria-label="후진">▼</button>
+        <button type="button" data-dir="right" aria-label="우회전">▶</button>
+      </div>
+      <p class="hint" id="driveInfo"></p>
+      <p class="hint" id="driveMsg"></p>
     </section>
 
     <section>
@@ -68,6 +93,12 @@
       <ul class="points" id="pointsList"></ul>
     </section>
   </aside>
+
+  <!-- 패널 크기 조절 손잡이 (끌기 / 방향키 / 더블클릭으로 초기화) -->
+  <div class="split split-v" id="splitV" role="separator" aria-orientation="vertical" tabindex="0"
+       title="끌어서 사이드바 너비 조절 (더블클릭: 초기화)"></div>
+  <div class="split split-h" id="splitH" role="separator" aria-orientation="horizontal" tabindex="0"
+       title="끌어서 명령 이력 높이 조절 (더블클릭: 초기화)"></div>
 
   <!-- 아래: 명령 이력 -->
   <section class="history" aria-label="명령 이력">
@@ -95,6 +126,7 @@
 
 <script src="mapmath.js"></script>
 <script src="patrolview.js"></script>
+<script src="zoneview.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

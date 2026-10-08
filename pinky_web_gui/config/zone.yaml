@@ -1,0 +1,19 @@
+# 지도에 그리는 위험 구역 영역 (FR4-1). 화면 표시 전용이며 구역 상호 배제는 zone_manager_node 가 한다.
+#
+# 구역 좌표는 순찰 노드나 zone_manager(v1) 설정 어디에도 없다. 구역은 코드의 ZONE_POINTS(P3~P6)와
+# RED 문 포인트로만 정의된다. 그래서 사각형은 points.yaml 의 구역 지점 좌표에서 계산한다 (좌표를 두 곳에 적지 않는다).
+#
+#   x_min = min(구역 지점 x) - margin     x_max = max(구역 지점 x) + margin
+#   y_min = min(구역 지점 y) - margin     y_max = max(구역 지점 y) + margin
+#
+# ★ 이 값은 초안이다. 사용자가 실제 맵과 대조해 경계를 확인하기 전까지 confirmed: false 로 두고,
+#   화면에 "구역 영역: 초안(미확인)" 이 표시된다. 확인 뒤 margin 을 고치고 confirmed: true 로 바꾼다.
+#   (확인용 그림: docs/step4_zone_draft.png)
+points: [P3, P4, P5, P6]
+margin: 0.15        # m. 로봇 크기와 문까지의 거리를 고려한 여유. 값의 근거는 아직 없다 (확인 필요)
+confirmed: false
+
+# 로봇별 진입/이탈 문. 이름은 points.yaml 의 문(RED*) 이어야 한다. 키는 robots.yaml 의 robots 와 같아야 한다.
+doors:
+  pinky1: {in: RED1IN, out: RED1OUT}
+  pinky2: {in: RED2IN, out: RED2OUT}

@@ -13,7 +13,11 @@ ALLOWED_CMDS = ('start', 'stop', 'goto')
 # 명령마다 "받아들였다" 고 볼 수 있는 patrol_status 상태. 노드는 start/goto 를 받으면 곧바로 STARTING 을 발행하고,
 # stop 은 작업을 끊으면서 STOPPED 를 발행한다. 작업 중인 로봇은 무시한 명령과 상관없이 MOVING 등으로 계속 상태가 바뀌므로
 # "아무 상태 변화" 를 응답으로 보면 무시된 start 가 응답한 것으로 잘못 표시된다.
-ACK_STATES = {'start': ('STARTING',), 'goto': ('STARTING',), 'stop': ('STOPPED',)}
+ACK_STATES = {'start': ('STARTING',), 'goto': ('STARTING',), 'stop': ('STOPPED',), 'estop': ('STOPPED',)}
+
+# 비상정지 이력의 detail (patrol_cmd stop 에 로봇이 응답하지 않은 경우). 작업 중이 아니던 로봇은 stop 에 응답하지 않는 것이 정상이라
+# '응답 없음' 오류로 표시하지 않고, 0 속도는 따로 보냈다는 사실을 알려 준다.
+ESTOP_NO_STOPPED = '로봇이 이미 멈춰 있었거나 stop 이 반영되지 않았을 수 있음 (cmd_vel 0 속도는 전송됨)'
 
 # 이력의 결과 값
 SENT = 'sent'                    # 토픽에 발행함 (로봇이 받았다는 뜻은 아니다)
@@ -109,6 +113,17 @@ class CommandTracker:
         e = self._new_entry(robot, safe_cmd, safe_points, '', result, reason)
         return e, [{'type': 'command', 'entry': dict(e)}]
 
+    def estop(self, robot, sent_str, patrol_ok, vel_ok, detail=''):
+        """비상정지를 기록한다 (patrol_cmd stop 과 cmd_vel 0 속도 burst). 둘 다 못 보냈으면 FAILED, 하나라도 나갔으면 SENT.
+
+        patrol_ok 면 로봇의 STOPPED 를 기다려 '응답 확인' 으로 바꾼다. 응답이 없어도 NO_RESPONSE 로 바꾸지 않는다.
+        """
+        result = SENT if (patrol_ok or vel_ok) else FAILED
+        e = self._new_entry(robot, 'estop', [], sent_str, result, detail)
+        self._pending[robot] = e if patrol_ok else None
+        self._last[robot] = e
+        return e, self._entry_msgs(e)
+
     def _entry_msgs(self, e):
         out = [{'type': 'command', 'entry': dict(e)}]
         for field, table in (('last_command', self._last), ('last_task', self._last_task)):
@@ -132,7 +147,10 @@ class CommandTracker:
         for rid, e in self._pending.items():
             if e is not None and now - e['time'] >= self._no_response:
                 self._pending[rid] = None
-                e['result'] = NO_RESPONSE
+                if e['cmd'] == 'estop':
+                    e['detail'] = (e['detail'] + ' · ' if e['detail'] else '') + ESTOP_NO_STOPPED
+                else:
+                    e['result'] = NO_RESPONSE
                 out += self._entry_msgs(e)
         return out
 

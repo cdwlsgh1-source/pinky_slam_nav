@@ -215,6 +215,29 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 관제 PC 의 백엔드가 `/{id}/patrol_cmd` 로 보내는 명령은 `POST /api/robots/{id}/command` 로만 나가고, 허용 목록 검증을 통과한 `start`, `stop`, `goto:<허용 지점>[,...]` 만 발행한다. 자세한 규칙과 응답 코드는 `README.md` 의 "명령 API" 절, 허용 지점과 홈은 `config/robots.yaml` 의 `robot_settings` 를 본다.
 
+## 6-5. 웹 GUI 구역·비상정지·LiDAR·수동 조작 (Step 4)
+
+관제 PC 백엔드가 `ROS_DOMAIN_ID=50` 에서 쓰는 토픽과 브라우저 메시지다. 자세한 동작은 `README.md` 의 "Step 4" 절을 본다.
+
+| 방향 | 토픽 | 언제 | 비고 |
+|---|---|---|---|
+| 구독 | `/zone_manager/status` (String) | 항상 | `free` \| `occupied_by:<id>` (v1). `occupied_by:<id>:<token>` (v2)도 해석. 점유가 바뀔 때만 발행 |
+| 구독 | `/{id}/scan` (LaserScan) | **브라우저가 켰을 때만** | `qos_profile_sensor_data`(BEST_EFFORT)로 구독하므로 발행자가 RELIABLE 이든 BEST_EFFORT 든 연결된다. 5Hz 제한, 3개당 1개. 모두 끄면 구독 해제 |
+| 발행 | `/{id}/patrol_cmd` (String) | 비상정지 | `stop` (기존 명령) |
+| 발행 | `/{id}/cmd_vel` (Twist) | 비상정지, 수동 조작 | 비상정지: 0 속도 즉시 1회 + 10Hz 로 2초. 수동 조작: 설정 상한(기본 0.1 m/s, 0.5 rad/s, 하드 상한 0.2, 1.0)으로 자른 속도를 10Hz, 입력이 0.5초 없거나 연결이 끊기면 0 속도 |
+
+브라우저 → 서버 (WebSocket 텍스트, JSON):
+
+| 메시지 | 의미 |
+|---|---|
+| `{"type":"scan","robot":id,"on":bool}` | 이 화면의 LiDAR 구독 요청/해제 |
+| `{"type":"drive","robot":id,"linear":m/s,"angular":rad/s}` | 수동 조작 입력 (누르는 동안 10Hz) |
+| `{"type":"drive_stop"}` | 수동 조작 끝 |
+
+서버 → 브라우저 추가 메시지: `scan`(켠 화면에만, 지도 좌표 점), `drive_denied`(조작 거절 사유, 같은 사유는 한 번만), `zone`/`snapshot` 의 해석된 구역 상태(`state`, `holder`, `token`, `held_sec`).
+
+설정: 구역 사각형과 문은 `config/zone.yaml`(초안, `confirmed: false`), 나머지는 `config/robots.yaml` 의 `motion`/`manual`/`scan`.
+
 ## 7. 확인 필요 목록
 
 - `goto`에 같은 지점을 중복해서 보냈을 때의 동작
@@ -225,6 +248,11 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 - 로봇 반경과 점 사이 경로의 통과 가능 여부 (지도 대조는 점 픽셀만 확인)
 - 카메라 토픽 브리지 추가 방법 (기존 파일 수정이 필요)
 - `PinkyPatrolNode.html`의 goto/초기 보정 외 나머지 노드와 코드의 일치 여부
+- (Step 4) 비상정지의 `cmd_vel` 0 속도가 로봇에서 실제로 먹히는지: 관제 PC 의 `lane_follower_node`, Nav2, 순찰 노드의 보정 회전(`spin_in_place`, 4초간 `cmd_vel` 발행)이 같은 토픽을 쓰므로 마지막 발행이 이긴다
+- (Step 4) 로봇 쪽 모터 제어가 `cmd_vel` 타임아웃을 가지는지: 백엔드나 브리지가 갑자기 죽었을 때 로봇이 마지막 속도를 유지하는지 코드로 확인되지 않았다
+- (Step 4) `/{id}/scan` 의 실제 QoS, 주기, 프레임(센서와 로봇 중심의 오프셋), Wi-Fi 에서의 대역폭
+- (Step 4) 화면에 그리는 구역 사각형의 `margin`(0.15 m 는 근거 없는 초안)과 문 위치
+- (Step 4) `/zone_manager/status` 의 늦은 접속: 매니저가 변화 때만 발행(VOLATILE)하므로 점유 중에 백엔드를 켜면 다음 변화 전까지 "상태 수신 전"
 
 해소된 항목: zone manager는 접미사 없는 매니저로 확정(`_v2` 파일은 남기되 미사용), `_v2` 순찰 노드가 현재 버전, 코드의 `POINTS`가 정답, `my_pinky_package/setup.py:30`의 존재하지 않는 모듈 entry point는 빌드에 영향 없음(사용자 확인).
 

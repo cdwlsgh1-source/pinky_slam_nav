@@ -17,7 +17,14 @@ const app = {
   view: { scale: 1, ox: 0, oy: 0, fitScale: 1 },  // 화면 = 이미지px * scale + (ox, oy)
   robots: {},   // id -> {color, online, patrol, pose, battery, disp:{x,y,yaw}|null}
   order: [],
-  zone: null,
+  zone: null,         // 구역 상태 원문 (free | occupied_by:<id>[:<token>])
+  zoneInfo: null,     // 서버가 해석한 구역 상태 {state, holder, token, held_sec}
+  zoneRecv: 0,        // zoneInfo 를 받은 시각(ms). 점유 시간을 화면에서 이어서 세는 데 쓴다
+  zoneCfg: null,      // /api/zone/config (구역 사각형, 문, confirmed)
+  plans: null,        // /api/plans: 'A>B' -> {path:[[x,y],...]}  지점 사이의 벽을 피하는 경로 추정 (Nav2 의 실제 경로가 아니다)
+  plansWarned: false,
+  motion: null,       // /api/motion/config (비상정지 burst, 수동 조작 상한, LiDAR 설정)
+  scan: {},           // 로봇 id -> {on, points, t}: LiDAR 오버레이 (켠 로봇만 서버가 구독한다)
   wsUp: false,
   clicks: [],   // {x, y}
   hover: null,
@@ -184,6 +191,13 @@ function drawMarker(id, r) {
   ctx.closePath();
   ctx.fill(); ctx.stroke();
   ctx.restore();
+  const waiting = r.patrol && r.patrol.state === 'WAITING_ZONE';
+  if (waiting) {  // FR4-3: 구역 진입 대기
+    ctx.save();
+    ctx.strokeStyle = '#e03131'; ctx.lineWidth = 3; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.arc(sx, sy, MARKER_R + 6, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
   ctx.save();
   ctx.globalAlpha = app.wsUp ? 1 : 0.35;
   ctx.font = 'bold 12px ' + getComputedStyle(document.body).fontFamily;
@@ -192,6 +206,12 @@ function drawMarker(id, r) {
   ctx.strokeText(id, sx, sy - MARKER_R - 7);
   ctx.fillStyle = '#fff';
   ctx.fillText(id, sx, sy - MARKER_R - 7);
+  if (waiting) {
+    const t = ZoneView.waitingText(robotCfg(id), r.lastTask, r.patrol);
+    ctx.strokeText(t, sx, sy + MARKER_R + 20);
+    ctx.fillStyle = '#ff8787';
+    ctx.fillText(t, sx, sy + MARKER_R + 20);
+  }
   ctx.restore();
 }
 
@@ -215,8 +235,97 @@ function draw() {
     ctx.font = 'bold 11px monospace'; ctx.fillStyle = '#f2a65a';
     ctx.fillText('C' + (i + 1), sx + 6, sy - 6);
   });
+  drawZone();
+  drawScan();
+  drawRoutes();
   drawPoints();
   for (const id of app.order) drawMarker(id, app.robots[id]);
+}
+
+// FR4-1, FR4-2: 위험 구역 사각형과 진입/이탈 문. 점유 중이면 빨갛게 칠한다.
+function drawZone() {
+  const z = app.zoneCfg;
+  if (!z) return;
+  const occupied = app.zoneInfo && app.zoneInfo.state === 'occupied';
+  const a = worldToScreen(z.rect.x_min, z.rect.y_max), b = worldToScreen(z.rect.x_max, z.rect.y_min);
+  ctx.save();
+  ctx.fillStyle = occupied ? 'rgba(224,49,49,.28)' : 'rgba(240,140,0,.10)';
+  ctx.strokeStyle = occupied ? '#e03131' : '#f08c00';
+  ctx.lineWidth = 2; ctx.setLineDash(z.confirmed ? [] : [6, 4]);  // 미확인 초안은 점선
+  ctx.fillRect(a.sx, a.sy, b.sx - a.sx, b.sy - a.sy);
+  ctx.strokeRect(a.sx, a.sy, b.sx - a.sx, b.sy - a.sy);
+  ctx.setLineDash([]);
+  ctx.font = 'bold 11px ' + getComputedStyle(document.body).fontFamily;
+  const label = '위험 구역' + (z.confirmed ? '' : ' (초안: 미확인)') + (occupied ? ' · ' + app.zoneInfo.holder + ' 점유' : '');
+  drawLabel(label, a.sx + 4, a.sy + 13, 'left');
+  if (!z.confirmed) {  // 초안일 때는 사용자가 지도와 대조할 수 있게 모서리 좌표를 적는다
+    const r = z.rect, f = (v) => v.toFixed(2);
+    drawLabel('(' + f(r.x_min) + ', ' + f(r.y_max) + ')', a.sx + 4, a.sy + 27, 'left');
+    drawLabel('(' + f(r.x_max) + ', ' + f(r.y_min) + ')', b.sx - 4, b.sy - 6, 'right');
+  }
+  // 문: 로봇 색 마름모 (IN 과 OUT 은 같은 위치라 한 번만 그린다)
+  app.order.forEach((id, i) => {
+    const d = z.doors[id], pt = d && app.cfg && app.cfg.points[d.in];
+    if (!pt) return;
+    const { sx, sy } = worldToScreen(pt.x, pt.y), r = 6;
+    ctx.fillStyle = app.robots[id].color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sx, sy - r); ctx.lineTo(sx + r, sy); ctx.lineTo(sx, sy + r); ctx.lineTo(sx - r, sy); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    drawLabel(d.in.replace(/IN$/, '') + ' 문', sx - 9, sy + 4 + i * 12, 'right');
+  });
+  ctx.restore();
+}
+
+// FR4-5, FR4-6: LiDAR 점. 서버가 amcl_pose 기준 지도 좌표로 바꿔서 보낸다. 오래된 스캔(로봇이 끊김 등)은 그리지 않는다.
+const SCAN_STALE_MS = 3000;
+function drawScan() {
+  const now = Date.now();
+  ctx.save();
+  for (const id of app.order) {
+    const s = app.scan[id];
+    if (!s || !s.on || !s.points.length || now - s.t > SCAN_STALE_MS) continue;
+    ctx.fillStyle = app.robots[id].color; ctx.globalAlpha = 0.85;
+    for (const [x, y] of s.points) {
+      const { sx, sy } = worldToScreen(x, y);
+      ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+    }
+  }
+  ctx.restore();
+}
+
+// 선분 하나를 그릴 꺾은선. 서버가 계산한 벽을 피하는 경로(/api/plans)를 쓰고, 없으면(아직 못 받았거나 경로 추정 실패) 직선이다.
+function polylineFor(sg) {
+  const hit = app.plans && app.plans[sg.from + '>' + sg.to];
+  return hit ? hit.path : [[sg.a.x, sg.a.y], [sg.b.x, sg.b.y]];
+}
+
+// FR4-4: 로봇별 경로 선. 지난 구간은 연하게, 현재 목표로 가는 구간은 굵게, 남은 구간은 점선. 현재 목표에는 고리.
+function drawRoutes() {
+  if (!app.cfg || !app.zoneCfg) return;
+  for (const id of app.order) {
+    const r = app.robots[id];
+    const ov = ZoneView.routeOverlay(robotCfg(id), app.zoneCfg.doors[id], app.cfg.points, r.lastTask, r.patrol);
+    if (!ov) continue;
+    ctx.save();
+    ctx.strokeStyle = r.online ? r.color : OFFLINE_COLOR; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    for (const sg of ZoneView.segments(ov, app.cfg.points)) {
+      ctx.globalAlpha = sg.state === 'done' ? 0.25 : sg.state === 'active' ? 1 : 0.7;
+      ctx.lineWidth = sg.state === 'active' ? 5 : 3;
+      ctx.setLineDash(sg.state === 'todo' ? [7, 6] : []);
+      ctx.beginPath();
+      polylineFor(sg).forEach(([x, y], i) => { const s = worldToScreen(x, y); if (i) ctx.lineTo(s.sx, s.sy); else ctx.moveTo(s.sx, s.sy); });
+      ctx.stroke();
+    }
+    ctx.restore();
+    const t = ov.target >= 0 ? app.cfg.points[ov.names[ov.target]] : null;
+    if (t) {
+      const { sx, sy } = worldToScreen(t.x, t.y);
+      ctx.save();
+      ctx.strokeStyle = r.color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(sx, sy, 11, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  }
 }
 
 // goto 가능한 포인트 (구역 문 RED* 는 노드가 알아서 지나가므로 그리지 않는다). 구역 안은 사각형 + 주황.
@@ -329,7 +438,12 @@ function renderCards() {
     const p = r.patrol, state = p && p.state;
     c.stateBadge.textContent = state || '-';
     c.stateBadge.dataset.level = PatrolView.badgeLevel(state);
-    c.prog.textContent = PatrolView.progressText(cfg, r.lastTask, p);
+    if (state === 'WAITING_ZONE') {  // FR4-3
+      const zi = app.zoneInfo, holder = zi && zi.state === 'occupied' && zi.holder !== id ? ' · ' + zi.holder + ' 사용 중' : '';
+      c.prog.textContent = ZoneView.waitingText(cfg, r.lastTask, p) + holder;
+    } else {
+      c.prog.textContent = PatrolView.progressText(cfg, r.lastTask, p);
+    }
     const b = r.battery;
     c.batt.textContent = b && b.percentage != null ? b.percentage.toFixed(1) + ' %' + (b.voltage != null ? ' (' + b.voltage.toFixed(2) + ' V)' : '') : '-';
     c.pos.textContent = r.pose ? '(' + r.pose.x.toFixed(2) + ', ' + r.pose.y.toFixed(2) + ') m' : '-';
@@ -348,6 +462,7 @@ function renderCards() {
     c.btns.goto.disabled = !ready || !PatrolView.canStart(state, r.online) || !route.length || locked(id, 'goto');
     c.btns.goto.textContent = '경로 이동' + (route.length ? ' (' + route.length + ')' : '');
   }
+  renderDrivePanel();
 }
 
 // ---------- 명령 ----------
@@ -461,7 +576,7 @@ function renderHistory() {
   el('historyEmpty').style.display = app.history.length ? 'none' : 'block';
   for (const e of app.history) {
     const tr = document.createElement('tr');
-    const cmdText = e.cmd === 'goto' ? 'goto ' + e.points.join(', ') : e.cmd;
+    const cmdText = e.cmd === 'goto' ? 'goto ' + e.points.join(', ') : e.cmd === 'estop' ? '비상정지 (' + e.sent + ')' : e.cmd;
     const res = PatrolView.resultLabel(e.result) + (e.detail ? ' · ' + e.detail : '');
     for (const [text, cls] of [[hhmmssOf(e.time)], [e.robot], [cmdText, 'cmd'], [res, 'res-' + e.result]]) {
       const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td);
@@ -496,24 +611,34 @@ function applySnapshot(msg) {
     app.robots[id] = m;
   });
   for (const id of Object.keys(app.robots)) if (!ids.includes(id)) delete app.robots[id];
-  setZone(msg.zone);
+  setZone(msg.zone, msg.zone_info);
   app.history = (msg.commands || []).slice().reverse();
   renderHistory();
   setupRoutePanel();
+  setupEstop(); setupScanToggles(); setupDrive();
   app.dirtyCards = true;
 }
 
-function setZone(status) {
+// info: 서버가 해석한 {state, holder, token, held_sec}. 수신 전이면 null.
+function setZone(status, info) {
   app.zone = status;
-  if (status == null) setChip('zoneChip', 'dim', '구역: -');
-  else if (status === 'free') setChip('zoneChip', 'ok', '구역: 비어 있음');
-  else setChip('zoneChip', 'warn', '구역: ' + status.replace('occupied_by:', '') + ' 점유');
+  app.zoneInfo = status == null ? null : info || null;
+  app.zoneRecv = Date.now();
+  renderZoneChip();
+  app.dirtyCards = true;
+}
+
+function renderZoneChip() {
+  const c = ZoneView.chip(app.zoneInfo, Date.now(), app.zoneRecv);
+  setChip('zoneChip', c.level, c.text);
 }
 
 function onMessage(msg) {
   if (msg.type === 'snapshot') { applySnapshot(msg); return; }
-  if (msg.type === 'zone') { setZone(msg.status); return; }
+  if (msg.type === 'zone') { setZone(msg.status, msg); return; }
   if (msg.type === 'command') { upsertHistory(msg.entry); return; }
+  if (msg.type === 'scan') { const s = app.scan[msg.robot]; if (s && s.on) { s.points = msg.points; s.t = Date.now(); } return; }
+  if (msg.type === 'drive_denied') { driveDenied(msg.robot, msg.reason); return; }
   if (msg.type !== 'robot_update') return;
   const r = app.robots[msg.robot];
   if (!r) return;
@@ -541,14 +666,23 @@ function onMessage(msg) {
 }
 
 let attempt = 0;
+let sock = null;
+function sendWs(obj) {
+  if (sock && sock.readyState === WebSocket.OPEN) { sock.send(JSON.stringify(obj)); return true; }
+  return false;
+}
 function connect() {
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  sock = ws;
   ws.onopen = () => {
     if (attempt > 0) addAlarm('ok', '서버에 다시 연결됨');
     attempt = 0; app.wsUp = true; setChip('connChip', 'ok', '연결됨');
+    // 서버는 연결이 끊기면 이 화면의 LiDAR 구독을 지운다. 켜 둔 토글은 다시 요청한다
+    for (const [rid, s] of Object.entries(app.scan)) if (s.on) sendWs({ type: 'scan', robot: rid, on: true });
   };
   ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch (err) { console.error('메시지 처리 오류', err); } };
   ws.onclose = () => {
+    driveHalt();  // 연결이 끊기면 서버도 0 속도를 보내지만, 화면에서도 즉시 조작을 멈춘다
     if (app.wsUp || attempt === 0) addAlarm('bad', '서버 연결 끊김');
     app.wsUp = false; setChip('connChip', 'bad', '연결 끊김');
     attempt += 1;
@@ -654,6 +788,240 @@ el('gridBtn').onclick = () => {
   el('gridBtn').setAttribute('aria-pressed', String(app.showGrid));
 };
 
+// ---------- 비상정지 (FR4-7, FR4-8) ----------
+// 확인 팝업도, 1초 잠금도 없다: 누를 때마다 보낸다 (정지 요청을 막는 일이 없어야 한다). 서버가 stop 과 cmd_vel 0 속도 burst 를 보낸다.
+async function estop(id) {
+  driveHalt();
+  const url = id ? '/api/robots/' + encodeURIComponent(id) + '/estop' : '/api/estop';
+  const who = id || '모두';
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await res.json().catch(() => ({}));
+    const items = data.results || [data];
+    const errs = items.flatMap((r) => (r.errors || []).map((e) => (r.robot ? r.robot + ': ' : '') + e));
+    if (!res.ok) addAlarm('bad', who + ' 비상정지 실패: ' + (errs.join(' / ') || data.error || res.status));
+    else addAlarm(errs.length ? 'warn' : 'ok', who + ' 비상정지 전송' + (errs.length ? ' (일부 실패: ' + errs.join(' / ') + ')' : ' (stop + 0 속도)'));
+  } catch (err) {
+    addAlarm('bad', who + ' 비상정지 전송 오류: ' + err.message);
+  }
+}
+
+function setupEstop() {
+  const box = el('estopButtons');
+  box.replaceChildren();
+  for (const id of app.order) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'danger'; b.textContent = id + ' 정지';
+    b.title = id + ' 에 stop 과 cmd_vel 0 속도를 보냅니다'; b.dataset.robot = id;
+    b.onclick = () => estop(id);
+    box.appendChild(b);
+  }
+}
+el('estopAll').onclick = () => estop(null);
+
+// ---------- LiDAR 토글 (FR4-5) ----------
+function setupScanToggles() {
+  const box = el('scanToggles');
+  box.replaceChildren();
+  for (const id of app.order) {
+    const label = document.createElement('label'); label.className = 'check';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.dataset.robot = id;
+    cb.checked = !!(app.scan[id] && app.scan[id].on);
+    cb.onchange = () => setScan(id, cb.checked);
+    label.append(cb, document.createTextNode(' ' + id + ' LiDAR'));
+    box.appendChild(label);
+  }
+}
+
+function setScan(id, on) {
+  app.scan[id] = { on, points: [], t: 0 };
+  if (!sendWs({ type: 'scan', robot: id, on })) addAlarm('warn', '서버에 연결되면 LiDAR 가 켜집니다');
+}
+
+// ---------- 수동 조작 (FR4-9) ----------
+// 데드맨: 버튼/방향키를 누르는 동안만 조작 입력을 보낸다. 떼기, 포커스 잃음, 탭 숨김, 연결 끊김, 체크 해제, 로봇 변경은 모두 즉시 정지한다.
+// 서버도 입력이 0.5초 없거나 연결이 끊기면 스스로 0 속도를 보낸다 (화면 쪽 정지는 첫 번째 방어선일 뿐이다).
+const DRIVE_KEYS = { ArrowUp: 'fwd', w: 'fwd', W: 'fwd', ArrowDown: 'back', s: 'back', S: 'back',
+                     ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right' };
+const drive = { dirs: new Set(), timer: null, sent: false };
+
+function driveRobotId() { return el('driveRobot').value; }
+
+function driveAllowed(id) {
+  const r = app.robots[id], m = app.motion && app.motion.manual;
+  if (!r || !m || !m.enabled) return '수동 조작이 설정에서 꺼져 있습니다';
+  if (!app.wsUp) return '서버에 연결되어 있지 않습니다';
+  if (!r.online) return id + ' 가 오프라인입니다';
+  if (r.patrol && ZoneView.WORKING.includes(r.patrol.state)) return '순찰 중에는 수동 조작을 할 수 없습니다 (' + r.patrol.state + ')';
+  return null;
+}
+
+function driveVector() {
+  const m = app.motion.manual, d = drive.dirs;
+  return { linear: ((d.has('fwd') ? 1 : 0) - (d.has('back') ? 1 : 0)) * m.max_linear,
+           angular: ((d.has('left') ? 1 : 0) - (d.has('right') ? 1 : 0)) * m.max_angular };
+}
+
+function driveSend() {
+  const id = driveRobotId(), why = driveAllowed(id);
+  if (!el('driveEnable').checked || why || !drive.dirs.size) return driveHalt();
+  const v = driveVector();
+  sendWs({ type: 'drive', robot: id, linear: v.linear, angular: v.angular });
+  drive.sent = true;
+}
+
+function driveUpdate() {
+  for (const b of el('drivePad').children) b.classList.toggle('down', drive.dirs.has(b.dataset.dir));
+  if (!drive.dirs.size) return driveHalt();
+  if (!drive.timer) drive.timer = setInterval(driveSend, 1000 / app.motion.manual.rate_hz);
+  driveSend();
+}
+
+function driveHalt() {
+  drive.dirs.clear();
+  if (drive.timer) { clearInterval(drive.timer); drive.timer = null; }
+  for (const b of el('drivePad').children) b.classList.remove('down');
+  if (drive.sent) { sendWs({ type: 'drive_stop' }); drive.sent = false; }
+}
+
+function driveDenied(id, reason) {
+  driveHalt();
+  el('driveMsg').textContent = '거절됨: ' + reason;
+  addAlarm('warn', id + ' 수동 조작 거절: ' + reason);
+}
+
+function renderDrivePanel() {
+  const id = driveRobotId(), enabled = el('driveEnable').checked;
+  const why = id ? driveAllowed(id) : '로봇 없음';
+  const m = app.motion && app.motion.manual;
+  el('driveEnable').disabled = !!why;
+  if (why && enabled) { el('driveEnable').checked = false; driveHalt(); }
+  for (const b of el('drivePad').children) b.disabled = !!why || !el('driveEnable').checked;
+  el('driveInfo').textContent = m ? '선속도 최대 ' + m.max_linear + ' m/s, 각속도 최대 ' + m.max_angular + ' rad/s. 버튼이나 방향키(WASD)를 누르는 동안만 움직이고, ' + m.input_timeout_sec + '초 동안 입력이 없거나 연결이 끊기면 정지합니다.' : '';
+  if (why) el('driveMsg').textContent = why;
+  else if (el('driveMsg').textContent.startsWith('거절됨') === false) el('driveMsg').textContent = enabled ? '조작 중이 아님' : '';
+}
+
+function setupDrive() {
+  const sel = el('driveRobot'), cur = sel.value;
+  sel.replaceChildren();
+  for (const id of app.order) { const o = document.createElement('option'); o.value = id; o.textContent = id; sel.appendChild(o); }
+  if (app.order.includes(cur)) sel.value = cur;
+}
+
+for (const b of el('drivePad').children) {
+  const dir = b.dataset.dir;
+  b.addEventListener('pointerdown', (e) => {
+    if (b.disabled) return;
+    e.preventDefault();
+    b.setPointerCapture(e.pointerId);
+    drive.dirs.add(dir); driveUpdate();
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave']) {
+    b.addEventListener(ev, () => { if (drive.dirs.delete(dir)) driveUpdate(); });
+  }
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+window.addEventListener('keydown', (e) => {
+  const dir = DRIVE_KEYS[e.key];
+  if (!dir || !el('driveEnable').checked || el('driveEnable').disabled) return;
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) && document.activeElement.id !== 'driveEnable') return;
+  e.preventDefault();
+  if (!drive.dirs.has(dir)) { drive.dirs.add(dir); driveUpdate(); }
+});
+window.addEventListener('keyup', (e) => { const dir = DRIVE_KEYS[e.key]; if (dir && drive.dirs.delete(dir)) driveUpdate(); });
+window.addEventListener('blur', driveHalt);
+window.addEventListener('pagehide', driveHalt);
+document.addEventListener('visibilitychange', () => { if (document.hidden) driveHalt(); });
+el('driveEnable').onchange = () => { driveHalt(); el('driveMsg').textContent = ''; renderDrivePanel(); };
+el('driveRobot').onchange = () => { driveHalt(); el('driveMsg').textContent = ''; renderDrivePanel(); };
+
+// ---------- 패널 크기 조절 ----------
+// 사이드바 너비(SIDE)와 명령 이력 높이(HIST)를 끌어서 바꾼다. 값은 .app 의 CSS 변수(--side-w, --hist-h)이고 브라우저에 저장한다.
+// 지도 캔버스는 ResizeObserver 로 따라간다. 사이드바의 각 섹션은 제목을 눌러 접고 펼친다.
+const LAYOUT_KEY = 'pinky.layout.v1';
+const SIDE = { var: '--side-w', def: 300, min: 220, max: () => Math.min(720, Math.floor(window.innerWidth * 0.55)) };
+const HIST = { var: '--hist-h', def: 170, min: 80, max: () => Math.floor(window.innerHeight * 0.6) };
+const layout = { side: SIDE.def, hist: HIST.def, collapsed: [] };
+
+function loadLayout() {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}');
+    if (Number.isFinite(v.side)) layout.side = v.side;
+    if (Number.isFinite(v.hist)) layout.hist = v.hist;
+    if (Array.isArray(v.collapsed)) layout.collapsed = v.collapsed.filter((x) => typeof x === 'string');
+  } catch (e) { /* 저장소를 못 쓰면 기본값으로 */ }
+}
+function saveLayout() { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch (e) { /* 무시 */ } }
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+function applyLayout() {
+  layout.side = clamp(Math.round(layout.side), SIDE.min, Math.max(SIDE.min, SIDE.max()));
+  layout.hist = clamp(Math.round(layout.hist), HIST.min, Math.max(HIST.min, HIST.max()));
+  const root = document.querySelector('.app').style;
+  root.setProperty(SIDE.var, layout.side + 'px');
+  root.setProperty(HIST.var, layout.hist + 'px');
+}
+
+function setupSplit(handle, axis, cfg, key) {
+  const horizontal = axis === 'x';
+  let drag = null;
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    drag = { start: horizontal ? e.clientX : e.clientY, base: layout[key] };
+    handle.classList.add('active');
+    document.body.classList.add('resizing', horizontal ? 'col' : 'row');
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const d = (horizontal ? e.clientX : e.clientY) - drag.start;
+    layout[key] = drag.base - d;  // 사이드바는 왼쪽으로, 이력은 위쪽으로 끌면 커진다
+    applyLayout();
+  });
+  const end = () => {
+    if (!drag) return;
+    drag = null;
+    handle.classList.remove('active');
+    document.body.classList.remove('resizing', 'col', 'row');
+    saveLayout();
+  };
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, end);
+  handle.addEventListener('dblclick', () => { layout[key] = cfg.def; applyLayout(); saveLayout(); });
+  handle.addEventListener('keydown', (e) => {  // 키보드: 방향키 20px (Shift 는 60px), Home 은 초기화
+    const step = e.shiftKey ? 60 : 20;
+    const grow = horizontal ? 'ArrowLeft' : 'ArrowUp', shrink = horizontal ? 'ArrowRight' : 'ArrowDown';
+    if (e.key === grow) layout[key] += step; else if (e.key === shrink) layout[key] -= step;
+    else if (e.key === 'Home') layout[key] = cfg.def; else return;
+    e.preventDefault(); applyLayout(); saveLayout();
+  });
+}
+
+function setupSections() {
+  document.querySelectorAll('.sidebar section').forEach((sec, i) => {
+    const h = sec.querySelector('h2');
+    if (!h) return;
+    const id = sec.id || 'sec' + i;
+    h.setAttribute('role', 'button'); h.tabIndex = 0;
+    const set = (collapsed) => { sec.classList.toggle('collapsed', collapsed); h.setAttribute('aria-expanded', String(!collapsed)); };
+    set(layout.collapsed.includes(id));
+    const toggle = () => {
+      const c = !sec.classList.contains('collapsed');
+      set(c);
+      layout.collapsed = layout.collapsed.filter((x) => x !== id).concat(c ? [id] : []);
+      saveLayout();
+    };
+    h.addEventListener('click', toggle);
+    h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  });
+}
+
+loadLayout();
+applyLayout();
+setupSplit(el('splitV'), 'x', SIDE, 'side');
+setupSplit(el('splitH'), 'y', HIST, 'hist');
+setupSections();
+window.addEventListener('resize', applyLayout);  // 창이 줄어들면 최대값에 맞춰 다시 자른다
+
 // ---------- 시작 ----------
 window.addEventListener('resize', resizeCanvas);
 new ResizeObserver(resizeCanvas).observe(canvas);
@@ -663,6 +1031,15 @@ connect();
 fetch('/api/commands/config').then((r) => { if (!r.ok) throw new Error('명령 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((cfg) => { app.cfg = cfg; setupRoutePanel(); app.dirtyCards = true; })
   .catch((err) => addAlarm('bad', String(err.message || err)));
-setInterval(() => { app.dirtyCards = true; }, 500); // STARTING 5초 안내처럼 시간이 지나야 바뀌는 표시용
+fetch('/api/zone/config').then((r) => { if (!r.ok) throw new Error('구역 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
+  .then((z) => { app.zoneCfg = z; el('zoneChip').title = z.confirmed ? '' : '구역 영역은 초안입니다 (config/zone.yaml 의 confirmed: false)'; })
+  .catch((err) => addAlarm('bad', String(err.message || err)));
+fetch('/api/plans').then((r) => { if (!r.ok) throw new Error('경로 추정을 받지 못해 경로 선을 직선으로 그립니다 (' + r.status + ')'); return r.json(); })
+  .then((d) => { app.plans = d.plans; })
+  .catch((err) => addAlarm('warn', String(err.message || err)));
+fetch('/api/motion/config').then((r) => { if (!r.ok) throw new Error('모션 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
+  .then((m) => { app.motion = m; app.dirtyCards = true; })
+  .catch((err) => addAlarm('bad', String(err.message || err)));
+setInterval(() => { app.dirtyCards = true; renderZoneChip(); }, 500); // STARTING 5초 안내처럼 시간이 지나야 바뀌는 표시용
 loadMap().catch((err) => { el('stageNote').textContent = String(err.message || err); addAlarm('bad', String(err.message || err)); });
 requestAnimationFrame(frame);
