@@ -211,6 +211,10 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 - 회전 루프는 `_stop_requested`를 보지 않는다 (:376-378). 보정 중의 `stop`은 회전이 끝난 뒤에야 반영된다 (**이후 동작은 확인 필요**).
 - 이 단계는 `STARTING` 발행 직후이며 `waitUntilNav2Active()`보다 먼저 실행된다 (:517-519).
 
+## 6-4. 웹 GUI 명령 API (Step 3)
+
+관제 PC 의 백엔드가 `/{id}/patrol_cmd` 로 보내는 명령은 `POST /api/robots/{id}/command` 로만 나가고, 허용 목록 검증을 통과한 `start`, `stop`, `goto:<허용 지점>[,...]` 만 발행한다. 자세한 규칙과 응답 코드는 `README.md` 의 "명령 API" 절, 허용 지점과 홈은 `config/robots.yaml` 의 `robot_settings` 를 본다.
+
 ## 7. 확인 필요 목록
 
 - `goto`에 같은 지점을 중복해서 보냈을 때의 동작

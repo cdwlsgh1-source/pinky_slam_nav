@@ -25,7 +25,14 @@ const app = {
   dirtyCards: true,
   fitted: false,
   showGrid: true,
+  cfg: null,          // /api/commands/config (로봇별 허용 지점, 홈, 대기, 지점 좌표, 임계 시간)
+  routes: {},         // 로봇 id -> 경로 이름 목록 (goto 로 보낼 지점들)
+  routeTarget: null,  // 지도에서 포인트를 클릭하면 경로가 추가되는 로봇
+  history: [],        // 명령 이력, 최신이 앞 (서버가 보낸 command 이벤트로 갱신)
+  locks: {},          // 'id:cmd' -> 연타 방지 해제 시각(ms)
 };
+const POINT_HIT_R = 14;      // 포인트 클릭 판정 반경 (화면 px)
+const BTN_LOCK_MS = 1000;    // FR3-7: 같은 버튼 연타 방지
 
 // ---------- 유틸 ----------
 const hhmmss = () => new Date().toTimeString().slice(0, 8);
@@ -208,7 +215,51 @@ function draw() {
     ctx.font = 'bold 11px monospace'; ctx.fillStyle = '#f2a65a';
     ctx.fillText('C' + (i + 1), sx + 6, sy - 6);
   });
+  drawPoints();
   for (const id of app.order) drawMarker(id, app.robots[id]);
+}
+
+// goto 가능한 포인트 (구역 문 RED* 는 노드가 알아서 지나가므로 그리지 않는다). 구역 안은 사각형 + 주황.
+function gotoPoints() {
+  if (!app.cfg) return [];
+  const names = new Set();
+  for (const r of Object.values(app.cfg.robots)) r.goto_allowed.forEach((n) => names.add(n));
+  return [...names].filter((n) => app.cfg.points[n] && !app.cfg.points[n].door).map((n) => ({ name: n, ...app.cfg.points[n] }));
+}
+
+function drawPoints() {
+  const route = app.routeTarget ? app.routes[app.routeTarget] || [] : [];
+  ctx.save();
+  ctx.font = 'bold 11px ' + getComputedStyle(document.body).fontFamily;
+  for (const p of gotoPoints()) {
+    const { sx, sy } = worldToScreen(p.x, p.y);
+    const color = p.in_zone ? '#e8590c' : '#1971c2';
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (p.in_zone) ctx.rect(sx - 6, sy - 6, 12, 12); else ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    const label = p.name + (p.in_zone ? ' (구역 안)' : '');
+    const order = route.reduce((acc, n, i) => (n === p.name ? acc.concat(i + 1) : acc), []);
+    const text = label + (order.length ? '  [' + order.join(',') + ']' : '');
+    const flip = sx + 9 + ctx.measureText(text).width > cssSize().w - 4; // 화면 오른쪽 끝이면 라벨을 왼쪽에
+    ctx.textAlign = flip ? 'right' : 'left';
+    const tx = flip ? sx - 9 : sx + 9;
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)';
+    ctx.strokeText(text, tx, sy + 4);
+    ctx.fillStyle = order.length ? '#d9480f' : color;
+    ctx.fillText(text, tx, sy + 4);
+  }
+  ctx.restore();
+}
+
+function pointAt(sx, sy) {
+  let best = null, bd = POINT_HIT_R;
+  for (const p of gotoPoints()) {
+    const q = worldToScreen(p.x, p.y);
+    const d = Math.hypot(q.sx - sx, q.sy - sy);
+    if (d <= bd) { bd = d; best = p; }
+  }
+  return best;
 }
 
 let lastT = performance.now();
@@ -234,39 +285,205 @@ function ensureCard(id) {
   if (cardEls[id]) return cardEls[id];
   const root = document.createElement('div'); root.className = 'card';
   root.style.borderLeftColor = app.robots[id].color;
+  root.addEventListener('click', () => selectRouteTarget(id));
   const head = document.createElement('div'); head.className = 'card-head';
   const name = document.createElement('span'); name.className = 'card-name'; name.textContent = id;
+  const badges = document.createElement('span');
   const badge = document.createElement('span'); badge.className = 'badge';
-  head.append(name, badge);
+  const stateBadge = document.createElement('span'); stateBadge.className = 'state-badge';
+  badges.append(badge, stateBadge);
+  head.append(name, badges);
   const dl = document.createElement('dl');
   const f = {};
-  for (const [key, label] of [['state', '상태'], ['batt', '배터리'], ['pos', '좌표']]) {
+  for (const [key, label] of [['prog', '진행'], ['batt', '배터리'], ['pos', '좌표']]) {
     const dt = document.createElement('dt'); dt.textContent = label;
     const dd = document.createElement('dd'); f[key] = dd;
     dl.append(dt, dd);
   }
-  root.append(head, dl);
+  const meta = document.createElement('p'); meta.className = 'meta';
+  const notice = document.createElement('p'); notice.className = 'notice';
+  const noResp = document.createElement('p'); noResp.className = 'notice';
+  const row = document.createElement('div'); row.className = 'cmd-row';
+  const btns = {};
+  for (const [cmd, label] of [['start', '순찰 시작'], ['stop', '정지'], ['goto', '경로 이동']]) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+    b.addEventListener('click', (e) => { e.stopPropagation(); onCommandClick(id, cmd); });
+    btns[cmd] = b; row.appendChild(b);
+  }
+  root.append(head, dl, meta, notice, noResp, row);
   el('robotCards').appendChild(root);
-  return (cardEls[id] = { badge, ...f });
+  return (cardEls[id] = { root, badge, stateBadge, meta, notice, noResp, btns, ...f });
 }
 
+function robotCfg(id) { return app.cfg && app.cfg.robots[id]; }
+
+function locked(id, cmd) { return (app.locks[id + ':' + cmd] || 0) > Date.now(); }
+
 function renderCards() {
+  const now = Date.now();
   for (const id of app.order) {
-    const r = app.robots[id], c = ensureCard(id);
+    const r = app.robots[id], c = ensureCard(id), cfg = robotCfg(id);
     c.badge.textContent = r.online ? 'online' : 'offline';
     c.badge.classList.toggle('on', r.online);
-    const p = r.patrol;
-    c.state.textContent = p && p.state ? p.state + (p.waypoint >= 0 ? ' #' + p.waypoint : '') + (p.detail ? ' ' + p.detail : '') : '-';
+    c.root.classList.toggle('target', app.routeTarget === id);
+    const p = r.patrol, state = p && p.state;
+    c.stateBadge.textContent = state || '-';
+    c.stateBadge.dataset.level = PatrolView.badgeLevel(state);
+    c.prog.textContent = PatrolView.progressText(cfg, r.lastTask, p);
     const b = r.battery;
     c.batt.textContent = b && b.percentage != null ? b.percentage.toFixed(1) + ' %' + (b.voltage != null ? ' (' + b.voltage.toFixed(2) + ' V)' : '') : '-';
     c.pos.textContent = r.pose ? '(' + r.pose.x.toFixed(2) + ', ' + r.pose.y.toFixed(2) + ') m' : '-';
+    c.meta.textContent = cfg ? '완료 후 복귀: ' + cfg.home + ' · ' + (cfg.wait_every_point ? '지점마다 ' : '마지막 지점에서 ') + cfg.goto_wait_sec + '초 대기' : '';
+    const starting = app.cfg && PatrolView.startingNotice(state, r.stateSince, now, app.cfg.starting_notice_sec);
+    c.notice.style.display = starting ? 'block' : 'none';
+    c.notice.textContent = starting ? '시작 준비 중 (첫 작업은 초기 위치 보정으로 로봇이 제자리에서 회전합니다)' : '';
+    const lc = r.lastCommand;
+    const noResp = lc && lc.result === 'no_response' && r.noRespDismissed !== lc.id;
+    c.noResp.style.display = noResp ? 'block' : 'none';
+    c.noResp.textContent = noResp ? '로봇이 응답하지 않았거나 무시했을 수 있음 (' + (lc.sent || lc.cmd) + ')' : '';
+    const ready = !!app.cfg && app.wsUp;
+    const route = app.routes[id] || [];
+    c.btns.start.disabled = !ready || !PatrolView.canStart(state, r.online) || locked(id, 'start');
+    c.btns.stop.disabled = !ready || !PatrolView.canStop(state, r.online) || locked(id, 'stop');
+    c.btns.goto.disabled = !ready || !PatrolView.canStart(state, r.online) || !route.length || locked(id, 'goto');
+    c.btns.goto.textContent = '경로 이동' + (route.length ? ' (' + route.length + ')' : '');
   }
+}
+
+// ---------- 명령 ----------
+function confirmDialog(text) {
+  const dlg = el('confirmDlg');
+  el('confirmText').textContent = text;
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    dlg.returnValue = 'cancel';
+    dlg.showModal();
+  });
+}
+
+function lockButton(id, cmd) {
+  app.locks[id + ':' + cmd] = Date.now() + BTN_LOCK_MS;
+  app.dirtyCards = true;
+  setTimeout(() => { app.dirtyCards = true; }, BTN_LOCK_MS + 30);
+}
+
+async function onCommandClick(id, cmd) {
+  const cfg = robotCfg(id);
+  if (!cfg || locked(id, cmd)) return;
+  let points;
+  if (cmd === 'goto') {
+    points = (app.routes[id] || []).slice();
+    if (!points.length) return;
+    if (!(await confirmDialog(PatrolView.routeSummary(id, cfg, points)))) return;
+  } else if (cmd === 'start') {
+    if (!(await confirmDialog(PatrolView.startSummary(id, cfg)))) return;
+  }
+  lockButton(id, cmd); // stop 은 확인 없이 즉시 보내므로 눌렀을 때 바로 잠근다
+  await sendCommand(id, cmd, points);
+}
+
+async function sendCommand(id, cmd, points) {
+  const body = { cmd };
+  if (points) body.points = points;
+  try {
+    const res = await fetch('/api/robots/' + encodeURIComponent(id) + '/command', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) addAlarm('bad', id + ' ' + cmd + ' 실패: ' + (data.error || res.status));
+  } catch (err) {
+    addAlarm('bad', id + ' ' + cmd + ' 전송 오류: ' + err.message);
+  }
+}
+
+// ---------- 경로 목록 ----------
+function selectRouteTarget(id) {
+  app.routeTarget = id;
+  el('routeRobot').value = id;
+  renderRoute();
+  app.dirtyCards = true;
+}
+
+function addRoutePoint(name) {
+  const id = app.routeTarget, cfg = robotCfg(id);
+  if (!cfg) return;
+  if (!cfg.goto_allowed.includes(name)) { addAlarm('warn', id + ' 는 ' + name + ' 로 이동할 수 없습니다'); return; }
+  const route = app.routes[id] || (app.routes[id] = []);
+  if (route.length >= app.cfg.max_goto_points) { addAlarm('warn', '경로는 최대 ' + app.cfg.max_goto_points + '개 지점까지입니다'); return; }
+  route.push(name);
+  renderRoute();
+  app.dirtyCards = true;
+}
+
+function renderRoute() {
+  const id = app.routeTarget, ul = el('routeList');
+  ul.replaceChildren();
+  const route = (id && app.routes[id]) || [];
+  el('routeEmpty').style.display = route.length ? 'none' : 'block';
+  route.forEach((name, i) => {
+    const li = document.createElement('li');
+    li.append(document.createTextNode(name));
+    const pt = app.cfg && app.cfg.points[name];
+    if (pt && pt.in_zone) { const z = document.createElement('span'); z.className = 'zone-tag'; z.textContent = '구역 안'; li.appendChild(z); }
+    const mk = (label, fn, dis) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.disabled = !!dis;
+      b.onclick = fn; return b;
+    };
+    li.append(' ', mk('▲', () => { route.splice(i - 1, 0, route.splice(i, 1)[0]); renderRoute(); app.dirtyCards = true; }, i === 0),
+      mk('▼', () => { route.splice(i + 1, 0, route.splice(i, 1)[0]); renderRoute(); app.dirtyCards = true; }, i === route.length - 1),
+      mk('삭제', () => { route.splice(i, 1); renderRoute(); app.dirtyCards = true; }));
+    ul.appendChild(li);
+  });
+  const cfg = id && robotCfg(id);
+  el('routeMeta').textContent = cfg ? '완료 후 ' + cfg.home + ' 복귀 · 최대 ' + app.cfg.max_goto_points + '개 · ' + route.length + '개 선택' : '';
+  el('routeClearBtn').disabled = !route.length;
+}
+
+function setupRoutePanel() {
+  const sel = el('routeRobot');
+  sel.replaceChildren();
+  for (const id of app.order) {
+    const o = document.createElement('option'); o.value = id; o.textContent = id; sel.appendChild(o);
+  }
+  if (!app.routeTarget || !app.order.includes(app.routeTarget)) app.routeTarget = app.order[0] || null;
+  sel.value = app.routeTarget || '';
+  renderRoute();
+}
+el('routeRobot').onchange = (e) => selectRouteTarget(e.target.value);
+el('routeClearBtn').onclick = () => { if (app.routeTarget) { app.routes[app.routeTarget] = []; renderRoute(); app.dirtyCards = true; } };
+
+// ---------- 명령 이력 ----------
+const hhmmssOf = (t) => new Date(t * 1000).toTimeString().slice(0, 8);
+
+function renderHistory() {
+  const body = el('historyBody');
+  body.replaceChildren();
+  el('historyEmpty').style.display = app.history.length ? 'none' : 'block';
+  for (const e of app.history) {
+    const tr = document.createElement('tr');
+    const cmdText = e.cmd === 'goto' ? 'goto ' + e.points.join(', ') : e.cmd;
+    const res = PatrolView.resultLabel(e.result) + (e.detail ? ' · ' + e.detail : '');
+    for (const [text, cls] of [[hhmmssOf(e.time)], [e.robot], [cmdText, 'cmd'], [res, 'res-' + e.result]]) {
+      const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+}
+
+function upsertHistory(entry) {
+  const i = app.history.findIndex((e) => e.id === entry.id);
+  if (i >= 0) app.history[i] = entry; else app.history.unshift(entry);
+  app.history.sort((a, b) => b.id - a.id);
+  const max = app.cfg ? app.cfg.history_size : 50;
+  if (app.history.length > max) app.history.length = max;
+  renderHistory();
 }
 
 // ---------- WebSocket ----------
 function robotModel(id, i, data) {
   return { color: PALETTE[i % PALETTE.length], online: !!data.online, patrol: data.patrol, pose: data.pose,
-           battery: data.battery, disp: null };
+           battery: data.battery, disp: null, lastCommand: data.last_command || null, lastTask: data.last_task || null, noRespDismissed: null,
+           stateSince: data.patrol ? Date.now() : null };
 }
 
 function applySnapshot(msg) {
@@ -275,11 +492,14 @@ function applySnapshot(msg) {
   ids.forEach((id, i) => {
     const prev = app.robots[id];
     const m = robotModel(id, i, msg.robots[id]);
-    if (prev) m.disp = prev.disp;
+    if (prev) { m.disp = prev.disp; if (prev.patrol && m.patrol && prev.patrol.state === m.patrol.state) m.stateSince = prev.stateSince; }
     app.robots[id] = m;
   });
   for (const id of Object.keys(app.robots)) if (!ids.includes(id)) delete app.robots[id];
   setZone(msg.zone);
+  app.history = (msg.commands || []).slice().reverse();
+  renderHistory();
+  setupRoutePanel();
   app.dirtyCards = true;
 }
 
@@ -293,6 +513,7 @@ function setZone(status) {
 function onMessage(msg) {
   if (msg.type === 'snapshot') { applySnapshot(msg); return; }
   if (msg.type === 'zone') { setZone(msg.status); return; }
+  if (msg.type === 'command') { upsertHistory(msg.entry); return; }
   if (msg.type !== 'robot_update') return;
   const r = app.robots[msg.robot];
   if (!r) return;
@@ -303,9 +524,16 @@ function onMessage(msg) {
     const prevState = r.patrol && r.patrol.state;
     r.patrol = msg.data;
     const s = msg.data && msg.data.state;
+    if (s !== prevState) r.stateSince = Date.now();
+    // "응답 없음" 이 표시된 뒤에 상태가 바뀌면(늦은 응답이거나 다른 작업의 진행) 그 안내는 더 이상 맞지 않는다
+    if (r.lastCommand && r.lastCommand.result === 'no_response') r.noRespDismissed = r.lastCommand.id;
     if (s !== prevState && (s === 'FAILED' || s === 'RETRY' || s === 'STOPPED')) {
-      addAlarm(s === 'STOPPED' ? 'warn' : 'bad', msg.robot + ' ' + s + (msg.data.detail ? ': ' + msg.data.detail : ''));
+      addAlarm(s === 'STOPPED' ? 'warn' : 'bad', msg.robot + ' ' + s + (msg.data.detail ? ': ' + (PatrolView.failReason(msg.data.detail) || msg.data.detail) : ''));
     }
+  } else if (msg.field === 'last_command') {
+    r.lastCommand = msg.data;
+  } else if (msg.field === 'last_task') {
+    r.lastTask = msg.data;
   } else if (msg.field === 'pose' || msg.field === 'battery') {
     r[msg.field] = msg.data;
   }
@@ -363,7 +591,10 @@ canvas.addEventListener('pointerup', (e) => {
   canvas.classList.remove('dragging');
   if (drag && !drag.moved && app.meta) { // 이동 없이 뗐으면 클릭
     const p = evPos(e), { px, py } = toPixel(p.sx, p.sy);
-    if (px >= 0 && py >= 0 && px < app.meta.width && py < app.meta.height) {
+    const hit = pointAt(p.sx, p.sy);
+    if (hit) { // goto 포인트를 눌렀으면 경로에 추가하고, 그 밖은 기존처럼 좌표를 기록한다
+      if (app.routeTarget) addRoutePoint(hit.name);
+    } else if (px >= 0 && py >= 0 && px < app.meta.width && py < app.meta.height) {
       const w = app.tf.pixelToWorld(px, py);
       app.clicks.push({ x: w.x, y: w.y });
       renderClicks();
@@ -429,5 +660,9 @@ new ResizeObserver(resizeCanvas).observe(canvas);
 resizeCanvas();
 renderClicks();
 connect();
+fetch('/api/commands/config').then((r) => { if (!r.ok) throw new Error('명령 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
+  .then((cfg) => { app.cfg = cfg; setupRoutePanel(); app.dirtyCards = true; })
+  .catch((err) => addAlarm('bad', String(err.message || err)));
+setInterval(() => { app.dirtyCards = true; }, 500); // STARTING 5초 안내처럼 시간이 지나야 바뀌는 표시용
 loadMap().catch((err) => { el('stageNote').textContent = String(err.message || err); addAlarm('bad', String(err.message || err)); });
 requestAnimationFrame(frame);

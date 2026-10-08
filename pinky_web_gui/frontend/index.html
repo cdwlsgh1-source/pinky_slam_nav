@@ -49,13 +49,13 @@
     </section>
 
     <section>
-      <h2>명령어</h2>
-      <div class="cmd-grid">
-        <button type="button" disabled>순찰 시작</button>
-        <button type="button" disabled>정지</button>
-        <button type="button" disabled>지점 이동</button>
-      </div>
-      <p class="hint">명령 전송은 Step 3에서 활성화됩니다.</p>
+      <h2>경로 이동 <small>(goto)</small></h2>
+      <label class="field">대상 로봇 <select id="routeRobot"></select></label>
+      <p class="hint">지도의 포인트(P1~P7)를 클릭하면 경로 끝에 추가됩니다. 구역 문(RED*)과 락은 로봇이 알아서 처리합니다.</p>
+      <ol class="route" id="routeList"></ol>
+      <p class="hint" id="routeEmpty">경로가 비어 있습니다.</p>
+      <div class="row-actions"><button type="button" id="routeClearBtn">경로 비우기</button></div>
+      <p class="hint" id="routeMeta"></p>
     </section>
 
     <section>
@@ -69,8 +69,32 @@
     </section>
   </aside>
 
+  <!-- 아래: 명령 이력 -->
+  <section class="history" aria-label="명령 이력">
+    <h2>명령 이력 <small>(최근 50건)</small></h2>
+    <div class="history-scroll">
+      <table>
+        <thead><tr><th>시각</th><th>로봇</th><th>명령</th><th>결과</th></tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+      <p class="hint" id="historyEmpty">보낸 명령이 없습니다.</p>
+    </div>
+  </section>
+
 </div>
+
+<dialog id="confirmDlg">
+  <form method="dialog">
+    <p id="confirmText"></p>
+    <div class="row-actions">
+      <button value="ok" id="confirmOk" class="primary">보내기</button>
+      <button value="cancel">취소</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="mapmath.js"></script>
+<script src="patrolview.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

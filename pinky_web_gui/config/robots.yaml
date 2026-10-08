@@ -15,3 +15,32 @@ pose_max_hz: 10
 
 # 지도 yaml (robots.yaml 이 있는 폴더 기준 상대 경로). 해상도, origin, 임계값은 이 파일에서 읽어 /api/map 으로 내려준다.
 map_yaml: ../../map_view_pc/my_pinky_map10.yaml
+
+# ---- 명령 패널 (Step 3) ----
+# 점 좌표 yaml (robots.yaml 이 있는 폴더 기준 상대 경로)
+points_yaml: points.yaml
+
+# 명령 검증과 표시 규칙
+max_goto_points: 10        # goto 한 번에 보낼 수 있는 최대 지점 수
+no_response_sec: 5.0       # 명령 후 patrol_status 변화가 없으면 "응답 없음" 으로 표시하기까지의 시간
+starting_notice_sec: 5.0   # STARTING 이 이 시간을 넘기면 "시작 준비 중" 안내 (첫 작업의 초기 위치 보정)
+command_history_size: 50   # 명령 이력 보관 개수
+
+# 로봇별 설정. 키는 robots 와 같아야 한다.
+#   goto_allowed : 백엔드가 허용하는 goto 지점. RED* (구역 문)는 넣을 수 없다 (노드가 문 경유와 락을 처리한다).
+#   home         : goto 완료 후 복귀하는 지점 (노드의 HOME_NAME)
+#   goto_wait_sec: 지점 도착 후 대기 시간 (노드의 GOTO_WAIT_SEC), wait_every_point: 모든 지점에서 대기하는지
+#   start_route  : start 순찰 경로 (노드의 WAYPOINTS 이름). 화면의 waypoint 번호 해석과 mock 이 쓴다.
+robot_settings:
+  pinky1:
+    goto_allowed: [P1, P2, P3, P4, P5, P6, P7]
+    home: P1
+    goto_wait_sec: 10
+    wait_every_point: true
+    start_route: [P2, RED1IN, P3, P6, RED1OUT, P1]
+  pinky2:
+    goto_allowed: [P1, P2, P3, P4, P5, P6, P7]
+    home: P7
+    goto_wait_sec: 10
+    wait_every_point: true
+    start_route: [RED2IN, P3, P6, RED2OUT, P7]

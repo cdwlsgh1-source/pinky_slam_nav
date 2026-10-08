@@ -1,4 +1,4 @@
-"""관제 PC(ROS_DOMAIN_ID=50)의 rclpy 노드. 구독 전용이며 발행은 하지 않는다.
+"""관제 PC(ROS_DOMAIN_ID=50)의 rclpy 노드. 구독과, 로봇별 /{id}/patrol_cmd 발행(publish_cmd) 만 한다.
 
 rclpy 는 별도 스레드에서 spin 하고, 콜백은 값만 뽑아 asyncio 루프에 call_soon_threadsafe 로
 넘긴다. 상태 변경은 전부 루프 스레드에서만 일어난다.
@@ -7,6 +7,7 @@ rclpy 는 mock 모드에서 설치되어 있지 않아도 되도록 이 모듈 �
 import logging
 import threading
 
+from .commands import CommandUnavailable
 from .state import quat_to_yaw
 
 log = logging.getLogger('backend.ros')
@@ -20,6 +21,8 @@ class RosBridge:
         self._thread = None
         self._node = None
         self._rclpy = None
+        self._cmd_pubs = {}  # 로봇 id -> /{id}/patrol_cmd 퍼블리셔 (시작할 때 한 번만 만든다)
+        self._String = None
 
     def _put(self, event):
         # 루프가 닫힌 뒤(종료 중)에 들어오는 콜백은 무시한다
@@ -36,6 +39,7 @@ class RosBridge:
         from std_msgs.msg import Float32, String
 
         self._rclpy = rclpy
+        self._String = String
         rclpy.init()
         node = Node('pinky_web_gui_backend')
         self._node = node
@@ -63,9 +67,26 @@ class RosBridge:
             String, self._cfg.zone_status_topic,
             lambda m: self._put(('zone', m.data)), 10)
 
+        # 명령 퍼블리셔는 서버 시작 시 한 번만 만든다 (기존 CLI 클라이언트의 1초 대기가 필요 없다).
+        # 이름은 설정의 robots 에서만 나온다. 허용 목록 검증은 백엔드(commands.validate)가 이미 끝낸 뒤다.
+        for rid in self._cfg.robots:
+            self._cmd_pubs[rid] = node.create_publisher(String, f'/{rid}/patrol_cmd', 10)
+
         self._thread = threading.Thread(target=self._spin, name='rclpy-spin', daemon=True)
         self._thread.start()
         log.info('rclpy 시작: 로봇 %s, zone 토픽 %s', list(self._cfg.robots), self._cfg.zone_status_topic)
+
+    def publish_cmd(self, rid, data):
+        """검증이 끝난 명령 문자열을 /{rid}/patrol_cmd 로 발행한다. 구독자(domain_bridge)가 없으면 CommandUnavailable.
+
+        브리지가 꺼져 있으면 발행해도 아무도 받지 않아 명령이 조용히 사라지므로, 먼저 막아서 알린다.
+        """
+        pub = self._cmd_pubs.get(rid)
+        if pub is None:
+            raise CommandUnavailable(f'{rid} 의 명령 퍼블리셔가 없습니다')
+        if pub.get_subscription_count() == 0:
+            raise CommandUnavailable(f'/{rid}/patrol_cmd 를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다)')
+        pub.publish(self._String(data=data))
 
     def _on_pose(self, rid, msg):
         p = msg.pose.pose

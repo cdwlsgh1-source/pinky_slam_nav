@@ -27,8 +27,8 @@ h2 small { font-weight: 400; }
 /* 전체 배치: 메뉴바 | (알람 / 지도 | 사이드바) */
 .app { display: grid; height: 100%; gap: 8px; padding: 8px;
   grid-template-columns: 92px minmax(0, 1fr) 300px;
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-areas: "menu alarm alarm" "menu map side"; }
+  grid-template-rows: auto minmax(0, 1fr) 170px;
+  grid-template-areas: "menu alarm alarm" "menu map side" "menu hist hist"; }
 .menubar { grid-area: menu; display: flex; flex-direction: column; gap: 6px; padding: 10px 8px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .brand { font-weight: 700; text-align: center; padding: 4px 0 8px; color: var(--accent); }
@@ -76,6 +76,47 @@ h2 small { font-weight: 400; }
 .card dt { color: var(--dim); }
 .card dd { margin: 0; word-break: break-all; }
 
+/* 카드: 진행 문구, 경고, 명령 버튼 */
+.card .cmd-row { display: flex; gap: 6px; margin-top: 8px; }
+.card .cmd-row button { flex: 1; padding: 5px 4px; font-size: 12px; }
+.card .meta { margin: 6px 0 0; font-size: 11px; color: var(--dim); }
+.card .notice { margin: 6px 0 0; padding: 4px 6px; font-size: 11px; border-radius: 4px; border: 1px solid var(--warn); color: var(--warn); }
+.card.target { box-shadow: 0 0 0 1px var(--accent); }
+.state-badge { font-size: 11px; padding: 1px 8px; border-radius: 4px; color: #fff; background: #8a8a8a; margin-left: 6px; }
+.state-badge[data-level="run"] { background: #2f9e44; }
+.state-badge[data-level="wait"] { background: #e03131; }
+.state-badge[data-level="arrived"] { background: #f2c230; color: #3a2e00; }
+.state-badge[data-level="failed"] { background: #8b1a1a; }
+button.primary { border-color: var(--accent); color: var(--accent); }
+
+/* 경로 이동 패널 */
+.field { display: flex; gap: 8px; align-items: center; color: var(--dim); }
+.field select { flex: 1; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px; }
+.route { margin: 8px 0 0; padding-left: 22px; }
+.route li { padding: 3px 0; }
+.route li .zone-tag { color: var(--warn); font-size: 11px; margin-left: 4px; }
+.route li button { padding: 0 6px; font-size: 11px; margin-left: 2px; }
+
+/* 명령 이력 */
+.history { grid-area: hist; min-height: 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; }
+.history h2 { margin-bottom: 4px; }
+.history-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.history table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.history th { text-align: left; color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+.history td, .history th { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.history td.cmd { word-break: break-all; }
+.res-sent { color: var(--dim); }
+.res-acknowledged { color: var(--ok); }
+.res-no_response { color: var(--warn); }
+.res-rejected, .res-failed { color: var(--bad); }
+
+dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text);
+  font: inherit; max-width: 440px; }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog p { margin: 0 0 12px; line-height: 1.6; }
+
 .cmd-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
 .row-actions { display: flex; gap: 6px; }
 .points { list-style: none; margin: 8px 0 0; padding: 0; max-height: 180px; overflow-y: auto; }
@@ -86,8 +127,9 @@ h2 small { font-weight: 400; }
 /* 좁은 화면: 메뉴는 위 가로 줄, 사이드바는 지도 아래 */
 @media (max-width: 860px) {
   html, body { height: auto; }
-  .app { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto;
-    grid-template-areas: "menu" "alarm" "map" "side"; }
+  .app { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto auto auto;
+    grid-template-areas: "menu" "alarm" "map" "side" "hist"; }
+  .history { height: 240px; }
   .menubar { flex-direction: row; align-items: center; overflow-x: auto; }
   .brand { padding: 0 8px; }
   .menu-item { width: auto; }

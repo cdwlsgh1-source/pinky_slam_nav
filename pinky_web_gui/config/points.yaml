@@ -1,0 +1,15 @@
+# 지도에 표시하고 mock 이동에 쓰는 포인트 좌표 (map 프레임, m). 화면 표시용이며 명령 검증에는 쓰지 않는다.
+# 값의 근거: my_pinky_package/my_pinky_package/pinky_patrol_node_pinky1_v2.py 의 POINTS (pinky2 도 같음).
+# in_zone: 위험 구역 안(P3~P6, ZONE_POINTS). door: 구역 문(RED*). 문은 직접 goto 금지라 지도에서 클릭 대상이 아니다.
+points:
+  P1: {x: 0.00, y: 0.00}
+  P2: {x: 0.65, y: 0.15}
+  P3: {x: 1.55, y: -0.40, in_zone: true}
+  P4: {x: 1.00, y: -0.40, in_zone: true}
+  P5: {x: 1.00, y: 0.10, in_zone: true}
+  P6: {x: 1.55, y: 0.06, in_zone: true}
+  P7: {x: 0.00, y: -0.60}
+  RED1IN: {x: 0.60, y: -0.50, door: true}
+  RED1OUT: {x: 0.60, y: -0.50, door: true}
+  RED2IN: {x: 0.55, y: -0.60, door: true}
+  RED2OUT: {x: 0.55, y: -0.60, door: true}
