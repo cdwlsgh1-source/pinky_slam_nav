@@ -102,7 +102,7 @@ curl -s -X POST localhost:8000/api/robots/pinky1/command -H 'Content-Type: appli
 
 **비상정지** (`POST /api/robots/{id}/estop`, `POST /api/estop`; 본문 `{}`): ① `patrol_cmd` 로 `stop` ② `/{id}/cmd_vel` 에 0 속도를 즉시 1회, 이어서 10Hz 로 2초. 확인이 없고 오프라인이거나 구독자가 없어도 시도한다. 응답: `{"accepted", "patrol_stop", "cmd_vel", "errors"}` (둘 중 하나라도 나가면 200, 둘 다 못 나가면 503). 이력(`cmd: "estop"`)은 `stop` 에 `STOPPED` 가 오면 `acknowledged` 이고, 오지 않아도 `no_response` 가 아니라 "이미 멈춰 있었거나 stop 이 반영되지 않았을 수 있음 (cmd_vel 0 속도는 전송됨)" 설명이 붙는다. 이 기능은 **소프트웨어 정지**이며 하드웨어 비상정지를 대체하지 않는다.
 
-**LiDAR**: 브라우저가 `{"type":"scan","robot":id,"on":true|false}` 를 보내면, 한 화면이라도 켠 로봇만 서버가 `/{id}/scan` 을 구독한다 (`qos_profile_sensor_data`, 5Hz 제한, 3개당 1개). 마지막 화면이 끄거나 끊기면 구독을 해제한다. 서버가 `amcl_pose` 기준 지도 좌표로 바꿔 켠 화면에만 `{"type":"scan","robot","pose","points":[[x,y],...]}` 를 보낸다 (`backend/scan.py`). 센서와 로봇 중심의 오프셋은 무시한다.
+**LiDAR**: 브라우저가 `{"type":"scan","robot":id,"on":true|false}` 를 보내면, 한 화면이라도 켠 로봇만 서버가 `/{id}/scan` 을 구독한다 (`qos_profile_sensor_data`, 5Hz 제한, 3개당 1개). 마지막 화면이 끄거나 끊기면 구독을 해제한다. 서버가 지도 좌표로 바꿔 켠 화면에만 `{"type":"scan","robot","source","frame","offset_deg","pose","points":[[x,y],...]}` 를 보낸다 (`backend/scan.py`). 센서의 위치와 방향은 로봇의 `/{id}/tf`(켠 동안만 구독), `/{id}/tf_static`(시작할 때부터, TRANSIENT_LOCAL)에서 map → odom → base → 센서(scan 헤더의 `frame_id`) 변환을 합성해 구한다 (`source: "tf"`, 3D 회전이라 돌려 달았거나 뒤집힌 센서도 맞는다). 변환을 못 구하면 `amcl_pose` + `config/robots.yaml` 의 `scan.yaw_offset_deg`(로봇별 보정 각도)로 대신 그린다 (`source: "amcl"`). 화면의 LiDAR 줄에 어느 쪽인지 표시된다. 점이 로봇 정면과 다른 방향으로 어긋나 보이는데 `amcl` 로 표시된다면 `yaw_offset_deg` 에 그 각도(예: `pinky1: 180`)를 적는다.
 
 **수동 조작** (데드맨): 브라우저는 누르는 동안 `{"type":"drive","robot":id,"linear":v,"angular":w}` 를 10Hz 로 보내고, 떼면 `{"type":"drive_stop"}` 을 보낸다. 서버(`backend/motion.py`)는 속도를 설정 상한으로 자르고 10Hz 로 `cmd_vel` 을 발행하며, **입력이 0.5초 없거나, WebSocket 이 끊기거나, 순찰이 시작되거나, 오프라인이 되거나, 비상정지가 오면 즉시 0 속도**를 보낸다. 순찰 중(작업 중 상태)·오프라인·비상정지 burst 중에는 입력을 거절하고(`drive_denied`), 한 로봇은 한 화면만 조작한다. 서버를 종료할 때도 마지막 0 속도를 보낸다.
 
@@ -137,7 +137,7 @@ curl -s -X POST localhost:8000/api/robots/pinky1/command -H 'Content-Type: appli
 .venv/bin/python tests/verify_step4_ui.py --shot docs/step4_screenshot.png --zone-shot docs/step4_zone_draft.png --scan-shot docs/step4_lidar.png
 ```
 
-`RosBridge` 의 ROS 경로(스캔 구독/해제, `cmd_vel`, 종료 시 0 속도)는 **실제 로봇 도메인과 분리된** 격리 도메인에서만 확인한다. 이 스크립트는 `ROS_DOMAIN_ID=77`, `ROS_LOCALHOST_ONLY=1` 이 아니면 실행을 거부한다 (이 PC 의 기본 `ROS_DOMAIN_ID` 는 관제 도메인 50 이다).
+`RosBridge` 의 ROS 경로(스캔 구독/해제, tf 로 센서 방향 구하기, `cmd_vel`, 종료 시 0 속도)는 **실제 로봇 도메인과 분리된** 격리 도메인에서만 확인한다. 이 스크립트는 `ROS_DOMAIN_ID=77`, `ROS_LOCALHOST_ONLY=1` 이 아니면 실행을 거부한다 (이 PC 의 기본 `ROS_DOMAIN_ID` 는 관제 도메인 50 이다).
 
 ```bash
 bash -c 'source /opt/ros/jazzy/setup.bash && ROS_DOMAIN_ID=77 ROS_LOCALHOST_ONLY=1 .venv/bin/python tests/verify_step4_ros.py'
@@ -236,8 +236,8 @@ Step 3 에서 카드에 `순찰 시작`/`정지`/`경로 이동` 버튼과 상�
 스크린샷: `docs/step4_screenshot.png`(구역 점유와 진입 대기), `docs/step4_lidar.png`(LiDAR 점이 벽 위에 겹침), 구역 영역 초안 확인용 `docs/step4_zone_draft.png`.
 
 - **상단**: 구역 배지("구역: 비어 있음" / "구역: pinky1 점유 중 (42초)" / "구역: 상태 수신 전")와 **항상 보이는 비상정지 줄**(로봇별 `pinky1 정지` 와 `모두 정지`). 확인 팝업도 연타 잠금도 없다. 좁은 화면에서는 상단이 고정된다.
-- **지도**: 구역 사각형(점유 중이면 빨갛게, 초안이면 점선과 모서리 좌표), 진입·이탈 문(로봇 색 마름모), 작업 중인 로봇의 경로 선(지난 구간은 연하게, 현재 목표로 가는 구간은 굵게, 남은 구간은 점선, 현재 목표는 고리). `goto` 는 `lastTask.points` + `patrol_status` 의 `waypoint`/`detail` 로, `start` 는 `start_route` + `waypoint` 번호로 그린다. 지점 사이의 선은 직선이 아니라 **지도의 벽을 피하는 최단 경로 추정**이다 (`backend/planner.py`, `GET /api/plans`, 벽에서 `planner_inflation_m` 0.08 m 이상 떨어진 칸만 지난다). 이것은 지도 점유 격자 위의 A* 계산이며 **Nav2 의 실제 경로가 아니다** (`/plan` 토픽은 브리지에 없다). 실제 경로는 코스트맵 팽창과 평활화 때문에 조금 다를 수 있다. mock 로봇도 같은 경로를 따라 움직이고 수동 조작으로 벽 안에 들어가지 않는다. `waypoint` 가 -1 이면 강조하지 않는다 (예외: `RETURNING` 은 `detail` 이 홈 이름이라 홈을 강조). 경로 선은 이 서버가 기억하는 명령(`last_task`)만 그린다 (서버를 껐다 켠 뒤 CLI 로 시작한 작업은 그리지 않는다).
+- **지도**: 구역 사각형(점유 중이면 빨갛게, 초안이면 점선과 모서리 좌표), 진입·이탈 문(로봇 색 마름모), 작업 중인 로봇의 경로 선(**기본 꺼짐**, 지도 오른쪽 위의 `경로` 버튼으로 켠다. 지난 구간은 연하게, 현재 목표로 가는 구간은 굵게, 남은 구간은 점선, 현재 목표는 고리). `goto` 는 `lastTask.points` + `patrol_status` 의 `waypoint`/`detail` 로, `start` 는 `start_route` + `waypoint` 번호로 그린다. 지점 사이의 선은 직선이 아니라 **지도의 벽을 피하는 최단 경로 추정**이다 (`backend/planner.py`, `GET /api/plans`, 벽에서 `planner_inflation_m` 0.08 m 이상 떨어진 칸만 지난다). 이것은 지도 점유 격자 위의 A* 계산이며 **Nav2 의 실제 경로가 아니다** (`/plan` 토픽은 브리지에 없다). 실제 경로는 코스트맵 팽창과 평활화 때문에 조금 다를 수 있다. mock 로봇도 같은 경로를 따라 움직이고 수동 조작으로 벽 안에 들어가지 않는다. `waypoint` 가 -1 이면 강조하지 않는다 (예외: `RETURNING` 은 `detail` 이 홈 이름이라 홈을 강조). 경로 선은 이 서버가 기억하는 명령(`last_task`)만 그린다 (서버를 껐다 켠 뒤 CLI 로 시작한 작업은 그리지 않는다).
 - **패널 크기 조절**: 지도와 사이드바 사이의 틈, 지도와 명령 이력 사이의 틈을 끌면 사이드바 너비(220~720px, 창의 55% 이내)와 이력 높이(80px~창의 60%)가 바뀌고 지도가 따라간다. 더블클릭(또는 손잡이에서 `Home`)은 기본값(300px, 170px)으로 되돌리고, 손잡이에 포커스를 둔 채 방향키를 누르면 20px(Shift 는 60px)씩 조절된다. 사이드바의 섹션 제목(▾)을 누르면 그 섹션이 접힌다. 크기와 접힘 상태는 브라우저(`localStorage`)에 저장된다. 860px 이하 좁은 화면에서는 손잡이가 없다.
 - **구역 진입 대기**: `WAITING_ZONE` 이면 카드와 마커에 "구역 진입 대기 (P3)" 와 점유 중인 로봇, 마커에 빨간 점선 고리.
-- **오버레이 (LiDAR)**: 로봇별 체크박스. 켠 로봇만 서버가 `/scan` 을 구독한다.
+- **오버레이 (LiDAR)**: 로봇별 체크박스. 켠 로봇만 서버가 `/scan` 을 구독한다. 로봇 이름 옆에 그리는 기준(`tf: 센서 프레임 …` 또는 `amcl 위치 + 보정 N°, tf 없음`)이 표시된다.
 - **수동 조작**: "수동 조작 켜기"를 체크하면 방향 버튼(또는 방향키/WASD)이 활성화되고 누르는 동안만 움직인다. 버튼을 뗌, 창이 포커스를 잃음, 탭이 숨겨짐, 연결 끊김, 체크 해제, 로봇 변경은 즉시 정지한다. 순찰 중·오프라인이면 체크박스가 비활성이다.

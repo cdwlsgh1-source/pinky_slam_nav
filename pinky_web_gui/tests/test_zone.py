@@ -111,3 +111,16 @@ def test_zone_yaml_loads_and_margin_changes_rect(tmp_path):
 def test_zone_yaml_validation(tmp_path, mutate, msg):
     with pytest.raises(ValueError, match=msg):
         load_config(_cfg(tmp_path, mutate(GOOD)))
+
+
+def test_scan_yaw_offset_config(tmp_path):
+    import shutil
+    from pathlib import Path
+    cfgp = _cfg(tmp_path, GOOD)
+    raw = cfgp.read_text(encoding='utf-8')
+    cfgp.write_text(raw.replace('yaw_offset_deg: {}', 'yaw_offset_deg: {pinky1: 180}'), encoding='utf-8')
+    assert load_config(cfgp).motion.scan_yaw_offset_deg == {'pinky1': 180.0}
+    for bad in ('{ghost: 90}', '{pinky1: 400}', '{pinky1: x}', '[1]'):
+        cfgp.write_text(raw.replace('yaw_offset_deg: {}', f'yaw_offset_deg: {bad}'), encoding='utf-8')
+        with pytest.raises(ValueError, match='yaw_offset_deg'):
+            load_config(cfgp)

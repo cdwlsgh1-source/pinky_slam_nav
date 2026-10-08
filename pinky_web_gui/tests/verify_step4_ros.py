@@ -28,6 +28,8 @@ from rclpy.node import Node  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data  # noqa: E402
 from sensor_msgs.msg import LaserScan  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
+from geometry_msgs.msg import TransformStamped  # noqa: E402
+from tf2_msgs.msg import TFMessage  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT = 8017
@@ -55,8 +57,9 @@ def http(method, path, body=None):
 class FakeRobot(Node):
     """pinky1 역할: 스캔과 amcl_pose 를 발행하고, patrol_cmd 와 cmd_vel 을 받아 기록한다. pinky2 는 아무 구독자도 없다."""
 
-    def __init__(self, scan_reliable):
+    def __init__(self, scan_reliable, with_tf=False):
         super().__init__('fake_pinky1')
+        self.with_tf = with_tf
         self.vel, self.cmd = [], []
         self.create_subscription(Twist, '/pinky1/cmd_vel', lambda m: self.vel.append((time.time(), m.linear.x, m.angular.z)), 10)
         self.create_subscription(String, '/pinky1/patrol_cmd', lambda m: self.cmd.append((time.time(), m.data)), 10)
@@ -71,8 +74,25 @@ class FakeRobot(Node):
         self._pose_pub = pose_pub
         self._pose_msg = m
         self.online = True
+        if with_tf:
+            # 센서가 로봇 정면에서 180도 돌아 달려 있다: base_link -> laser (yaw 180, 앞쪽 0.1 m). tf_static 은 TRANSIENT_LOCAL 로 한 번만 발행
+            self._tf_pub = self.create_publisher(TFMessage, '/pinky1/tf', 100)
+            static_pub = self.create_publisher(TFMessage, '/pinky1/tf_static',
+                                               QoSProfile(depth=100, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+            static_pub.publish(TFMessage(transforms=[self._tfm('base_link', 'laser', 0.1, 0.0, math.pi)]))
+            self._static_pub = static_pub
+            self.create_timer(0.05, lambda: self._tf_pub.publish(TFMessage(transforms=[
+                self._tfm('map', 'odom', 0.0, 0.0, 0.0), self._tfm('odom', 'base_link', 1.0, 2.0, 0.0)])))
         self.create_timer(0.05, self._scan)  # 20Hz 로 발행해서 백엔드의 5Hz 제한을 시험한다
         self.create_timer(1.0, self._alive)  # 로봇이 살아 있다는 신호 (아무 토픽이든 오면 online, 5초 없으면 offline)
+
+    @staticmethod
+    def _tfm(parent, child, x, y, yaw):
+        t = TransformStamped()
+        t.header.frame_id, t.child_frame_id = parent, child
+        t.transform.translation.x, t.transform.translation.y = x, y
+        t.transform.rotation.z, t.transform.rotation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+        return t
 
     def _alive(self):
         if self.online:
@@ -82,7 +102,11 @@ class FakeRobot(Node):
         m = LaserScan()
         m.angle_min, m.angle_increment = 0.0, 2 * math.pi / 360
         m.range_min, m.range_max = 0.05, 12.0
-        m.ranges = [1.0] * 360
+        if self.with_tf:
+            m.header.frame_id = 'laser'
+            m.ranges = [1.0] + [float('inf')] * 359   # 센서 정면(각도 0) 1 m 에만 물체가 있다
+        else:
+            m.ranges = [1.0] * 360
         self.scan_pub.publish(m)
 
 
@@ -107,10 +131,10 @@ async def wait_for(cond, sec):
     return False
 
 
-async def scenario(scan_reliable):
-    label = 'RELIABLE' if scan_reliable else 'BEST_EFFORT'
+async def scenario(scan_reliable, with_tf=False):
+    label = ('RELIABLE' if scan_reliable else 'BEST_EFFORT') + (' + tf' if with_tf else '')
     rclpy.init()
-    robot = FakeRobot(scan_reliable)
+    robot = FakeRobot(scan_reliable, with_tf)
     spin = threading.Thread(target=lambda: rclpy.spin(robot), daemon=True)
     spin.start()
     log_out = open(os.environ['STEP4_SERVER_LOG'], 'a') if os.environ.get('STEP4_SERVER_LOG') else subprocess.DEVNULL  # 디버깅용
@@ -139,11 +163,18 @@ async def scenario(scan_reliable):
                 if m:
                     got.append(m)
             check(f'[{label}] 스캔이 5Hz 안팎으로 온다 (발행은 20Hz)', 6 <= len(got) <= 12, len(got))
-            if got:
+            if got and with_tf:
+                m = got[-1]
+                # 센서는 (1.1, 2.0) 에서 뒤(-x)를 보고 있고, 정면 1 m 의 물체는 (0.1, 2.0) 이다. amcl 위치만 쓰면 (2.0, 2.0) 에 그려졌을 것이다
+                check(f'[{label}] tf 로 그리고 센서 프레임이 laser', m['source'] == 'tf' and m['frame'] == 'laser', (m['source'], m['frame']))
+                check(f'[{label}] 센서가 180도 돌아 있어도 점이 로봇 뒤쪽 (0.1, 2.0) 에 찍힌다',
+                      len(m['points']) == 1 and abs(m['points'][0][0] - 0.1) < 0.002 and abs(m['points'][0][1] - 2.0) < 0.002, m['points'])
+                check(f'[{label}] 메시지의 센서 pose 가 (1.1, 2.0, 180도)', abs(m['pose']['x'] - 1.1) < 0.002 and abs(abs(m['pose']['yaw']) - math.pi) < 0.01, m['pose'])
+            elif got:
                 m = got[-1]
                 r = [math.hypot(x - 1.0, y - 2.0) for x, y in m['points']]
-                check(f'[{label}] 점이 amcl_pose(1,2) 를 중심으로 반지름 1 m 에 있다 (3개당 1개)',
-                      len(m['points']) == 120 and all(abs(v - 1.0) < 0.002 for v in r), (len(m['points']), r[:3]))
+                check(f'[{label}] tf 가 없으면 amcl_pose(1,2) 를 중심으로 반지름 1 m 에 그린다 (3개당 1개)',
+                      m['source'] == 'amcl' and len(m['points']) == 120 and all(abs(v - 1.0) < 0.002 for v in r), (m['source'], len(m['points']), r[:3]))
             await ws.send(json.dumps({'type': 'scan', 'robot': 'pinky1', 'on': False}))
             check(f'[{label}] 끄면 구독이 해제된다 (구독자 0)', await wait_for(lambda: n_scan() == 0, 3), n_scan())
 
@@ -159,7 +190,7 @@ async def scenario(scan_reliable):
         # 화면(WS)이 닫히면 구독이 해제된다
         check(f'[{label}] 화면이 닫히면 구독 해제', await wait_for(lambda: n_scan() == 0, 3), n_scan())
 
-        if scan_reliable:
+        if scan_reliable or with_tf:
             return
         # ---- 비상정지: patrol_cmd stop + cmd_vel 0 속도 burst ----
         robot.vel.clear(); robot.cmd.clear()
@@ -241,6 +272,8 @@ async def main():
     await scenario(scan_reliable=False)   # 센서 데이터의 일반적인 QoS
     time.sleep(1.5)
     await scenario(scan_reliable=True)    # 발행자가 RELIABLE 이어도 (BEST_EFFORT 구독과) 연결되는지
+    time.sleep(1.5)
+    await scenario(scan_reliable=False, with_tf=True)   # 센서가 180도 돌아 달린 로봇: tf_static/tf 로 센서 위치와 방향을 구한다
     print('ALL PASS' if not FAILS else 'FAILED: ' + ', '.join(FAILS))
     return 1 if FAILS else 0
 

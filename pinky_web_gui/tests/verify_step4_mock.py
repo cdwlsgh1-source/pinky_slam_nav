@@ -89,6 +89,43 @@ def near_wall_ratio(points, meta, pixels, radius_px=3):
     return good / len(points) if points else 0.0
 
 
+async def mounted_scan(extra_args, config_text=None):
+    """센서가 180도 돌아 달린 mock 서버를 따로 띄워 켠 LiDAR 의 첫 스캔 메시지와 벽 일치율을 돌려준다."""
+    import tempfile
+    port = PORT + 10
+    args = [sys.executable, '-m', 'backend.main', '--mock', '--port', str(port), '--mock-scan-mount-deg', '180'] + extra_args
+    tmp = None
+    if config_text is not None:
+        tmp = Path(tempfile.mkdtemp())
+        src = ROOT / 'config'
+        for f in ('points.yaml', 'zone.yaml'):
+            (tmp / f).write_text((src / f).read_text(encoding='utf-8'), encoding='utf-8')
+        raw = (src / 'robots.yaml').read_text(encoding='utf-8').replace('../../map_view_pc', str(ROOT.parent / 'map_view_pc'))
+        (tmp / 'robots.yaml').write_text(raw.replace('yaw_offset_deg: {}', config_text), encoding='utf-8')
+        args += ['--config', str(tmp / 'robots.yaml')]
+    srv = subprocess.Popen(args, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health')
+                break
+            except Exception:
+                time.sleep(0.1)
+        cfg = load_config()
+        meta, pixels = load_grid(cfg.map_yaml)
+        async with websockets.connect(f'ws://127.0.0.1:{port}/ws') as ws:
+            await ws.recv()
+            await ws.send(json.dumps({'type': 'scan', 'robot': 'pinky1', 'on': True}))
+            sc = await until(ws, lambda x: x['type'] == 'scan', 4)
+        return sc, (near_wall_ratio(sc['points'], meta, pixels) if sc else 0.0)
+    finally:
+        srv.terminate()
+        try:
+            srv.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            srv.kill()
+
+
 async def main():
     cfg = load_config()
     meta, pixels = load_grid(cfg.map_yaml)
@@ -151,6 +188,15 @@ async def main():
             await a.send(json.dumps([1, 2]))
             await asyncio.sleep(0.2)
             check('이상한 WS 메시지는 무시', health()['ok'] and health()['scan_subscribed'] == [])
+
+        # ---- 센서가 로봇 정면에서 180도 돌아 달린 경우 (LiDAR 방향) ----
+        sc, ratio = await mounted_scan([])
+        check('센서가 180도 돌아 있어도 tf 로 그리면 점이 벽 위에 떨어짐 (>=95%)', sc is not None and sc['source'] == 'tf' and ratio >= 0.95, (sc and sc['source'], ratio))
+        check('tf 로 그릴 때 메시지에 센서 프레임이 실림', sc is not None and sc['frame'] == 'mock_laser' and sc['offset_deg'] is None)
+        sc, ratio = await mounted_scan(['--mock-scan-no-tf'])
+        check('(대조) tf 도 보정도 없으면 방향이 어긋나 벽과 거의 안 맞음 (<50%)', sc is not None and sc['source'] == 'amcl' and ratio < 0.5, (sc and sc['source'], ratio))
+        sc, ratio = await mounted_scan(['--mock-scan-no-tf'], 'yaw_offset_deg: {pinky1: 180}')
+        check('tf 가 없어도 설정의 보정 각도(180)를 주면 벽 위에 떨어짐 (>=95%)', sc is not None and sc['source'] == 'amcl' and sc['offset_deg'] == 180.0 and ratio >= 0.95, (sc and (sc['source'], sc['offset_deg']), ratio))
 
         # ---- 출처 검사 ----
         s, _ = http('POST', '/api/robots/pinky1/estop', {}, {'Origin': 'http://evil.example'})

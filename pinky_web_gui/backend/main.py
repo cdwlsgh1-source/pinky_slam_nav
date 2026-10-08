@@ -18,7 +18,9 @@ from .hub import Hub
 from .map_loader import load_grid, load_map
 from .motion import Motion
 from .planner import GridPlanner, NoPath, path_length
-from .scan import to_world
+import math
+
+from .scan import to_world, to_world_tf, yaw_of
 from .state import StateStore
 
 log = logging.getLogger('backend')
@@ -97,6 +99,24 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
         except Exception:
             log.exception('지도 로드 실패: %s', cfg.map_yaml)
 
+    def scan_message(rid, event):
+        """('scan', rid, tf|None, frame, angle_min, angle_inc, ranges, range_min, range_max) -> 켠 화면에 보낼 메시지.
+
+        tf(센서 프레임 -> map) 가 있으면 그것으로 그리고(source 'tf'), 없으면 amcl_pose + 설정의 보정 각도로 그린다(source 'amcl').
+        """
+        tf, frame, scan = event[2], event[3], event[4:]
+        if tf is not None:
+            pts = to_world_tf(tf, *scan)
+            R, t = tf
+            return {'type': 'scan', 'robot': rid, 'source': 'tf', 'frame': frame, 'offset_deg': None,
+                    'pose': {'x': round(t[0], 3), 'y': round(t[1], 3), 'yaw': round(yaw_of(R), 4)}, 'points': pts}
+        pose = store.pose(rid)
+        if not pose:
+            return None
+        off = cfg.motion.scan_yaw_offset_deg.get(rid, 0.0)
+        return {'type': 'scan', 'robot': rid, 'source': 'amcl', 'frame': frame, 'offset_deg': off, 'pose': pose,
+                'points': to_world(pose, *scan, yaw_offset=math.radians(off))}
+
     async def consume(queue):
         """큐에서 이벤트를 꺼내 상태에 반영하고 변경분을 브로드캐스트한다 (상태를 바꾸는 유일한 곳)."""
         while True:
@@ -104,10 +124,11 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
             try:
                 if event[0] == 'scan':  # 스캔은 켠 브라우저에만 보낸다 (상태가 아니라 흘려보내는 데이터)
                     store.apply(event)
-                    pose = store.pose(event[1])
-                    if pose and hub.scan_count(event[1]):
-                        pts = to_world(pose, *event[2:])
-                        hub.send_scan(event[1], {'type': 'scan', 'robot': event[1], 'pose': pose, 'points': pts})
+                    rid = event[1]
+                    if hub.scan_count(rid):
+                        msg = scan_message(rid, event)
+                        if msg:
+                            hub.send_scan(rid, msg)
                     continue
                 msgs = store.apply(event)
                 hub.broadcast(msgs)
@@ -426,6 +447,10 @@ def main():
     ap.add_argument('--port', type=int, default=8000)
     ap.add_argument('--mock-wait-scale', type=float, default=1.0,
                     help='--mock 에서 goto 지점 대기 시간 배율 (기본 1.0 = 설정값 그대로, 0.2 면 2초)')
+    ap.add_argument('--mock-scan-mount-deg', type=float, default=0.0,
+                    help='--mock 에서 가짜 LiDAR 가 로봇 정면에서 돌아 달린 각도(도). 0 이 아니면 map->센서 변환(tf)으로 그린다 (센서 방향 보정 시험용)')
+    ap.add_argument('--mock-scan-no-tf', action='store_true',
+                    help='--mock-scan-mount-deg 와 함께: 센서가 돌려 달렸어도 tf 를 주지 않는다 (amcl + yaw_offset_deg 대체 경로 시험용)')
     ap.add_argument('--config', default=None, help='robots.yaml 경로 (기본 config/robots.yaml)')
     args = ap.parse_args()
 
@@ -437,7 +462,8 @@ def main():
             args.host, '와 수동 조작(cmd_vel) ' if cfg.motion.manual_enabled else ' ')
 
     import uvicorn
-    uvicorn.run(create_app(cfg, args.mock, {'wait_scale': args.mock_wait_scale}), host=args.host, port=args.port, log_level='info')
+    uvicorn.run(create_app(cfg, args.mock, {'wait_scale': args.mock_wait_scale, 'scan_mount_yaw': math.radians(args.mock_scan_mount_deg),
+                                                 'scan_mount_tf': not args.mock_scan_no_tf}), host=args.host, port=args.port, log_level='info')
 
 
 if __name__ == '__main__':

@@ -72,3 +72,7 @@ manual:
 scan:
   max_hz: 5
   decimate: 3            # 3개당 1개
+  # 점의 위치와 방향은 로봇의 /tf, /tf_static (map -> odom -> base -> 센서) 에서 구한다. 센서가 돌려 달려 있어도 그대로 맞는다.
+  # tf 를 못 구해서 amcl_pose 로 대신 그릴 때만 아래 보정 각도(도)를 쓴다. 센서가 로봇 정면과 다른 방향이면 로봇별로 적는다 (예: pinky1: 180).
+  # 화면의 LiDAR 줄에 "tf" 인지 "amcl + 보정 N°" 인지 표시된다.
+  yaw_offset_deg: {}

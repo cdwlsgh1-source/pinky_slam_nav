@@ -222,6 +222,8 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | 방향 | 토픽 | 언제 | 비고 |
 |---|---|---|---|
 | 구독 | `/zone_manager/status` (String) | 항상 | `free` \| `occupied_by:<id>` (v1). `occupied_by:<id>:<token>` (v2)도 해석. 점유가 바뀔 때만 발행 |
+| 구독 | `/{id}/tf` (TFMessage) | **LiDAR 를 켠 동안만** | map → odom(AMCL) → base(오도메트리) 변환. 점을 지도 좌표로 옮기는 데 쓴다 |
+| 구독 | `/{id}/tf_static` (TFMessage) | 시작할 때부터 | base → 센서(scan `frame_id`) 같은 고정 변환. 한 번만 발행되므로 TRANSIENT_LOCAL 로 받는다 (브리지가 이 QoS 를 넘겨 주는지는 **확인 필요**) |
 | 구독 | `/{id}/scan` (LaserScan) | **브라우저가 켰을 때만** | `qos_profile_sensor_data`(BEST_EFFORT)로 구독하므로 발행자가 RELIABLE 이든 BEST_EFFORT 든 연결된다. 5Hz 제한, 3개당 1개. 모두 끄면 구독 해제 |
 | 발행 | `/{id}/patrol_cmd` (String) | 비상정지 | `stop` (기존 명령) |
 | 발행 | `/{id}/cmd_vel` (Twist) | 비상정지, 수동 조작 | 비상정지: 0 속도 즉시 1회 + 10Hz 로 2초. 수동 조작: 설정 상한(기본 0.1 m/s, 0.5 rad/s, 하드 상한 0.2, 1.0)으로 자른 속도를 10Hz, 입력이 0.5초 없거나 연결이 끊기면 0 속도 |

@@ -50,6 +50,7 @@ class MotionConfig:
     manual_rate_hz: float = 10.0
     scan_max_hz: float = 5.0
     scan_decimate: int = 3
+    scan_yaw_offset_deg: dict = field(default_factory=dict)  # 로봇 id -> 센서 보정 각도(도). tf 를 못 구했을 때만 쓴다
 
 
 @dataclass(frozen=True)
@@ -153,7 +154,7 @@ def _load_zone(path, robots, points):
     return ZoneConfig(tuple(names), margin, rect, doors, confirmed)
 
 
-def _load_motion(path, raw_motion, raw_manual, raw_scan):
+def _load_motion(path, raw_motion, raw_manual, raw_scan, robots=()):
     def section(raw, name):
         if raw is None:
             return {}
@@ -176,6 +177,12 @@ def _load_motion(path, raw_motion, raw_manual, raw_scan):
     enabled = man.get('enabled', d.manual_enabled)
     if not isinstance(enabled, bool):
         raise ValueError(f'{path}: manual.enabled 는 true/false 여야 한다')
+    offsets = sc.get('yaw_offset_deg', {})
+    if not isinstance(offsets, dict) or not set(offsets) <= set(robots):
+        raise ValueError(f'{path}: scan.yaw_offset_deg 는 robots {list(robots)} 의 일부를 키로 가진 매핑이어야 한다')
+    for rid, v in offsets.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not -360 <= v <= 360:
+            raise ValueError(f'{path}: scan.yaw_offset_deg.{rid} 는 -360~360 도의 숫자여야 한다')
     return MotionConfig(
         estop_burst_hz=num(m, 'estop_burst_hz', d.estop_burst_hz, 'motion', hi=50),
         estop_burst_sec=num(m, 'estop_burst_sec', d.estop_burst_sec, 'motion', hi=30),
@@ -186,6 +193,7 @@ def _load_motion(path, raw_motion, raw_manual, raw_scan):
         manual_rate_hz=num(man, 'rate_hz', d.manual_rate_hz, 'manual', hi=50),
         scan_max_hz=num(sc, 'max_hz', d.scan_max_hz, 'scan', hi=20),
         scan_decimate=num(sc, 'decimate', d.scan_decimate, 'scan', lo=0, hi=20, cast=int),
+        scan_yaw_offset_deg={rid: float(v) for rid, v in offsets.items()},
     )
 
 
@@ -234,7 +242,7 @@ def load_config(path=None) -> Config:
         if not points:
             raise ValueError(f'{path}: zone_yaml 을 쓰려면 points_yaml 이 필요하다')
         zone = _load_zone((path.resolve().parent / zone_yaml).resolve(), robots, points)
-    motion = _load_motion(path, raw.get('motion'), raw.get('manual'), raw.get('scan'))
+    motion = _load_motion(path, raw.get('motion'), raw.get('manual'), raw.get('scan'), robots)
 
     def positive(key, default, cast):
         v = cast(raw.get(key, default))

@@ -21,6 +21,7 @@ const app = {
   zoneInfo: null,     // 서버가 해석한 구역 상태 {state, holder, token, held_sec}
   zoneRecv: 0,        // zoneInfo 를 받은 시각(ms). 점유 시간을 화면에서 이어서 세는 데 쓴다
   zoneCfg: null,      // /api/zone/config (구역 사각형, 문, confirmed)
+  showRoutes: false,  // 로봇 경로 선(Step 4 FR4-4 오버레이). 우선 꺼 두고, 지도의 '경로' 버튼으로 켠다
   plans: null,        // /api/plans: 'A>B' -> {path:[[x,y],...]}  지점 사이의 벽을 피하는 경로 추정 (Nav2 의 실제 경로가 아니다)
   plansWarned: false,
   motion: null,       // /api/motion/config (비상정지 burst, 수동 조작 상한, LiDAR 설정)
@@ -237,7 +238,7 @@ function draw() {
   });
   drawZone();
   drawScan();
-  drawRoutes();
+  if (app.showRoutes) drawRoutes();
   drawPoints();
   for (const id of app.order) drawMarker(id, app.robots[id]);
 }
@@ -463,6 +464,7 @@ function renderCards() {
     c.btns.goto.textContent = '경로 이동' + (route.length ? ' (' + route.length + ')' : '');
   }
   renderDrivePanel();
+  renderScanInfo();
 }
 
 // ---------- 명령 ----------
@@ -637,7 +639,11 @@ function onMessage(msg) {
   if (msg.type === 'snapshot') { applySnapshot(msg); return; }
   if (msg.type === 'zone') { setZone(msg.status, msg); return; }
   if (msg.type === 'command') { upsertHistory(msg.entry); return; }
-  if (msg.type === 'scan') { const s = app.scan[msg.robot]; if (s && s.on) { s.points = msg.points; s.t = Date.now(); } return; }
+  if (msg.type === 'scan') {
+    const s = app.scan[msg.robot];
+    if (s && s.on) { s.points = msg.points; s.t = Date.now(); s.source = msg.source; s.frame = msg.frame; s.offset = msg.offset_deg; }
+    return;
+  }
   if (msg.type === 'drive_denied') { driveDenied(msg.robot, msg.reason); return; }
   if (msg.type !== 'robot_update') return;
   const r = app.robots[msg.robot];
@@ -827,9 +833,21 @@ function setupScanToggles() {
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.dataset.robot = id;
     cb.checked = !!(app.scan[id] && app.scan[id].on);
     cb.onchange = () => setScan(id, cb.checked);
-    label.append(cb, document.createTextNode(' ' + id + ' LiDAR'));
+    const info = document.createElement('small'); info.className = 'scan-info'; info.dataset.robot = id;
+    label.append(cb, document.createTextNode(' ' + id + ' LiDAR '), info);
     box.appendChild(label);
   }
+}
+
+// LiDAR 점을 어떤 기준으로 그리는지 보여 준다. tf 면 센서의 실제 위치/방향, amcl 이면 로봇 pose + 설정의 보정 각도다.
+function scanInfoText(s) {
+  if (!s || !s.on) return '';
+  if (!s.source) return '(수신 대기)';
+  if (s.source === 'tf') return '(tf: 센서 프레임 ' + s.frame + ')';
+  return '(amcl 위치 + 보정 ' + (s.offset || 0) + '°, tf 없음: 프레임 ' + s.frame + ')';
+}
+function renderScanInfo() {
+  document.querySelectorAll('#scanToggles .scan-info').forEach((n) => { n.textContent = scanInfoText(app.scan[n.dataset.robot]); });
 }
 
 function setScan(id, on) {
@@ -1034,9 +1052,21 @@ fetch('/api/commands/config').then((r) => { if (!r.ok) throw new Error('명령 �
 fetch('/api/zone/config').then((r) => { if (!r.ok) throw new Error('구역 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((z) => { app.zoneCfg = z; el('zoneChip').title = z.confirmed ? '' : '구역 영역은 초안입니다 (config/zone.yaml 의 confirmed: false)'; })
   .catch((err) => addAlarm('bad', String(err.message || err)));
-fetch('/api/plans').then((r) => { if (!r.ok) throw new Error('경로 추정을 받지 못해 경로 선을 직선으로 그립니다 (' + r.status + ')'); return r.json(); })
-  .then((d) => { app.plans = d.plans; })
-  .catch((err) => addAlarm('warn', String(err.message || err)));
+// 경로 선을 켰을 때만 경로 추정(/api/plans)을 받는다 (서버는 첫 요청에서 계산해 캐시한다)
+function ensurePlans() {
+  if (app.plans || app.plansLoading) return;
+  app.plansLoading = true;
+  fetch('/api/plans').then((r) => { if (!r.ok) throw new Error('경로 추정을 받지 못해 경로 선을 직선으로 그립니다 (' + r.status + ')'); return r.json(); })
+    .then((d) => { app.plans = d.plans; })
+    .catch((err) => addAlarm('warn', String(err.message || err)))
+    .finally(() => { app.plansLoading = false; });
+}
+function setShowRoutes(on) {
+  app.showRoutes = on;
+  el('routeLinesBtn').setAttribute('aria-pressed', String(on));
+  if (on) ensurePlans();
+}
+el('routeLinesBtn').onclick = () => setShowRoutes(!app.showRoutes);
 fetch('/api/motion/config').then((r) => { if (!r.ok) throw new Error('모션 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((m) => { app.motion = m; app.dirtyCards = true; })
   .catch((err) => addAlarm('bad', String(err.message || err)));

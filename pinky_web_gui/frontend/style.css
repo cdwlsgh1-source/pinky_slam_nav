@@ -156,6 +156,9 @@ button.danger:hover:not(:disabled) { color: #fff; filter: brightness(1.12); bord
 .pad button[data-dir="back"] { grid-area: back; } .pad button[data-dir="right"] { grid-area: right; }
 .pad button.down { background: var(--accent); color: #fff; border-color: var(--accent); }
 code { font-family: var(--mono); }
+/* LiDAR 상태 문구는 항상 자기 줄을 확보한다 (문구가 생기거나 길어져도 아래 패널이 밀리지 않게) */
+#scanToggles .check { flex-wrap: wrap; row-gap: 0; }
+.scan-info { color: var(--dim); font-size: 11px; flex-basis: 100%; min-height: 15px; margin-left: 20px; line-height: 15px; }
 
 /* 좁은 화면: 메뉴는 위 가로 줄, 사이드바는 지도 아래 */
 @media (max-width: 860px) {

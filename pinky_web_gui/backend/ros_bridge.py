@@ -8,7 +8,7 @@ import logging
 import threading
 
 from .commands import CommandUnavailable
-from .scan import RateLimiter, compact
+from .scan import RateLimiter, TfTree, compact, quat_to_rot
 from .state import quat_to_yaw
 
 log = logging.getLogger('backend.ros')
@@ -29,6 +29,9 @@ class RosBridge:
         self._sensor_qos = None
         self._vel_pubs = {}   # 로봇 id -> /{id}/cmd_vel 퍼블리셔
         self._scan_subs = {}  # 로봇 id -> /{id}/scan 구독 (브라우저가 켰을 때만 존재한다)
+        self._tf = {rid: TfTree() for rid in cfg.robots}  # 로봇 id -> tf 변환 모음 (map -> odom -> base -> 센서)
+        self._tf_dyn = {}     # 로봇 id -> /{id}/tf 구독 (LiDAR 를 켠 동안만)
+        self._TFMessage = None
         self._scan_lock = threading.Lock()
 
     def _put(self, event):
@@ -45,11 +48,13 @@ class RosBridge:
         from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
         from sensor_msgs.msg import LaserScan
         from std_msgs.msg import Float32, String
+        from tf2_msgs.msg import TFMessage
 
         self._rclpy = rclpy
         self._String = String
         self._Twist = Twist
         self._LaserScan = LaserScan
+        self._TFMessage = TFMessage
         self._sensor_qos = qos_profile_sensor_data  # BEST_EFFORT: 센서 발행자(RELIABLE/BEST_EFFORT)와 모두 연결된다
         # rclpy 기본값은 SIGINT/SIGTERM 에서 컨텍스트를 곧바로 shutdown 한다. 그러면 uvicorn 이 종료 절차를 시작하기 전에
         # 발행이 막혀서, 수동 조작/비상정지 중에 서버를 끄면 마지막 0 속도를 보낼 수 없다 (격리 도메인에서 확인).
@@ -80,6 +85,12 @@ class RosBridge:
         node.create_subscription(
             String, self._cfg.zone_status_topic,
             lambda m: self._put(('zone', m.data)), 10)
+
+        # /tf_static 은 시작 때부터 받는다 (센서 장착 위치 같은 고정 변환, 한 번만 발행되므로 TRANSIENT_LOCAL 로 받아야 늦게 붙어도 얻는다).
+        # 동적 /tf 는 LiDAR 를 켠 동안만 받는다 (scan_enable).
+        static_qos = QoSProfile(depth=100, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        for rid in self._cfg.robots:
+            node.create_subscription(TFMessage, f'/{rid}/tf_static', lambda m, rid=rid: self._on_tf(rid, m), static_qos)
 
         # 명령 퍼블리셔는 서버 시작 시 한 번만 만든다 (기존 CLI 클라이언트의 1초 대기가 필요 없다).
         # 이름은 설정의 robots 에서만 나온다. 허용 목록 검증은 백엔드(commands.validate)가 이미 끝낸 뒤다.
@@ -118,6 +129,12 @@ class RosBridge:
         pub.publish(msg)
         return pub.get_subscription_count() > 0
 
+    def _on_tf(self, rid, msg):
+        tree = self._tf[rid]
+        for t in msg.transforms:
+            q, v = t.transform.rotation, t.transform.translation
+            tree.set(t.header.frame_id, t.child_frame_id, quat_to_rot(q.x, q.y, q.z, q.w), (v.x, v.y, v.z))
+
     def scan_enable(self, rid, on):
         """LiDAR 구독을 켜거나 끈다 (FR4-5). 켤 때만 /{rid}/scan 을 구독하고, 끄면 구독을 해제해서 브리지가 더는 중계하지 않게 한다."""
         if rid not in self._vel_pubs or self._node is None:
@@ -126,17 +143,35 @@ class RosBridge:
         with self._scan_lock:
             if on and rid not in self._scan_subs:
                 limiter = RateLimiter(m.scan_max_hz)
+                tree = self._tf[rid]
+                warned = [None]
 
                 def cb(msg, rid=rid):
                     if not limiter.allow():
                         return
-                    self._put(('scan', rid) + compact(msg.angle_min, msg.angle_increment, msg.ranges,
-                                                       m.scan_decimate, msg.range_min, msg.range_max))
+                    frame = msg.header.frame_id
+                    # 센서 프레임 -> map 변환. 구하지 못하면 None 이고, 소비하는 쪽이 amcl_pose + 보정 각도로 그린다
+                    tf = tree.lookup('map', frame) if frame else None
+                    if tf is None and warned[0] != frame:
+                        warned[0] = frame
+                        log.warning('%s: map -> %r 변환을 tf 에서 구하지 못해 amcl_pose 로 그린다 (알고 있는 프레임: %s)',
+                                    rid, frame, tree.frames())
+                    elif tf is not None and warned[0] != ('ok', frame):
+                        warned[0] = ('ok', frame)
+                        log.info('%s: LiDAR 프레임 %r 의 map 변환을 tf 에서 구했다', rid, frame)
+                    self._put(('scan', rid, tf, frame) + compact(msg.angle_min, msg.angle_increment, msg.ranges,
+                                                                  m.scan_decimate, msg.range_min, msg.range_max))
+
+                # map -> odom -> base 는 계속 바뀌므로 LiDAR 를 켠 동안 /tf 도 받는다
+                self._tf_dyn[rid] = self._node.create_subscription(self._TFMessage, f'/{rid}/tf', lambda mm, rid=rid: self._on_tf(rid, mm), 100)
 
                 self._scan_subs[rid] = self._node.create_subscription(self._LaserScan, f'/{rid}/scan', cb, self._sensor_qos)
                 log.info('%s LiDAR 구독 시작', rid)
             elif not on and rid in self._scan_subs:
                 self._node.destroy_subscription(self._scan_subs.pop(rid))
+                dyn = self._tf_dyn.pop(rid, None)
+                if dyn is not None:
+                    self._node.destroy_subscription(dyn)
                 log.info('%s LiDAR 구독 해제', rid)
 
     def scan_subscribed(self):

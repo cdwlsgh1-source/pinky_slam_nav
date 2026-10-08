@@ -35,6 +35,7 @@
       <canvas id="mapCanvas"></canvas>
       <div class="stage-note" id="stageNote">지도 불러오는 중...</div>
       <div class="map-tools">
+        <button id="routeLinesBtn" type="button" aria-pressed="false" title="로봇 경로 선과 현재 목표 표시 켜기/끄기 (기본 꺼짐)">경로</button>
         <button id="gridBtn" type="button" aria-pressed="true" title="x, y 좌표 그리드 켜기/끄기">그리드</button>
         <button id="fitBtn" type="button" title="지도를 화면에 맞춤">맞춤</button>
       </div>
@@ -56,7 +57,7 @@
     <section>
       <h2>경로 이동 <small>(goto)</small></h2>
       <label class="field">대상 로봇 <select id="routeRobot"></select></label>
-      <p class="hint">지도의 포인트(P1~P7)를 클릭하면 경로 끝에 추가됩니다. 구역 문(RED*)과 락은 로봇이 알아서 처리합니다. 지도 위의 선은 지도의 벽을 피하는 최단 경로를 계산한 <b>추정</b>이며, 실제 경로는 Nav2 가 정하므로 조금 다를 수 있습니다.</p>
+      <p class="hint">지도의 포인트(P1~P7)를 클릭하면 경로 끝에 추가됩니다. 구역 문(RED*)과 락은 로봇이 알아서 처리합니다. 지도의 <b>경로</b> 버튼을 켜면 로봇의 경로 선을 그리며(기본 꺼짐), 이 선은 지도의 벽을 피하는 최단 경로를 계산한 <b>추정</b>이라 Nav2 의 실제 경로와 조금 다를 수 있습니다.</p>
       <ol class="route" id="routeList"></ol>
       <p class="hint" id="routeEmpty">경로가 비어 있습니다.</p>
       <div class="row-actions"><button type="button" id="routeClearBtn">경로 비우기</button></div>
@@ -66,7 +67,7 @@
     <section>
       <h2>오버레이 <small>(LiDAR)</small></h2>
       <div id="scanToggles"></div>
-      <p class="hint">켠 로봇만 서버가 <code>/scan</code> 을 구독합니다 (5Hz, 점 3개당 1개). 점은 AMCL 위치를 기준으로 지도에 그리며, 센서와 로봇 중심의 오프셋은 무시하므로 실제와 몇 cm 어긋날 수 있습니다.</p>
+      <p class="hint">켠 로봇만 서버가 <code>/scan</code> 을 구독합니다 (5Hz, 점 3개당 1개). 점은 로봇의 tf(map → 센서)로 지도에 그립니다. tf 를 못 구하면 AMCL 위치와 설정의 보정 각도(<code>scan.yaw_offset_deg</code>)로 대신 그리며, 이때는 센서 방향이 어긋날 수 있습니다. 어느 쪽인지는 로봇 이름 옆에 표시됩니다.</p>
     </section>
 
     <section id="drivePanel">

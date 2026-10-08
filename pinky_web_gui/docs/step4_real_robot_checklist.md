@@ -34,7 +34,7 @@ mock 으로는 `pytest`, `tests/verify_step4_mock.py`, `tests/verify_step4_ui.py
 |---|---|---|---|---|
 | 1 | LiDAR 구독 수 | `ros2 topic info /pinky1/scan` (도메인 50) → 화면에서 pinky1 LiDAR 켬 → 다시 확인 → 끔 → 다시 확인 | 켜면 `Subscription count` 가 1 늘고(`pinky_web_gui_backend`), 끄면 원래대로. 브라우저 탭을 닫아도 원래대로 | |
 | 2 | LiDAR 주기 | LiDAR 를 켠 채 `ros2 topic hz /pinky1/scan` | 로봇이 내는 주기 (백엔드는 5Hz 로 줄여 화면에 보낼 뿐 구독은 전체) | |
-| 3 | 점과 벽 | 지도 위에서 로봇을 손으로 움직이지 말고(정지 상태) 점이 벽 윤곽과 겹치는지 본다 | 대체로 겹침. 센서와 로봇 중심의 오프셋은 무시하므로 몇 cm 어긋날 수 있음. **크게 어긋나면(방향 반대, 회전) 알려 주세요** | |
+| 3 | 점과 벽, 방향 | LiDAR 를 켜고 로봇 이름 옆 표시(그리는 기준)를 읽는다. 정지 상태에서 점이 벽 윤곽과 겹치는지 본다. 로봇을 제자리에서 천천히 돌려 점이 벽에 붙어 따라오는지도 본다 | 표시가 `tf: 센서 프레임 …` 이고 점이 벽과 겹친다. **`amcl … tf 없음` 으로 나오면** 로봇의 `/tf_static` 이 브리지를 지나오지 않은 것이다 (`ros2 topic echo /pinky1/tf_static --once`, 백엔드 로그의 `알고 있는 프레임`). 이때 점이 정면과 다른 방향으로 어긋나면 `config/robots.yaml` 의 `scan.yaw_offset_deg: {pinky1: 각도}` 로 보정한다. 방향이 맞는데 로봇이 움직일 때만 밀리면 AMCL 위치가 늦게 갱신되는 것이니 알려 주세요 | |
 | 4 | LiDAR 켠 채 로봇 끔 | 로봇 전원을 끈다 | 3초 뒤 점이 사라지고(오래된 스캔은 그리지 않음), 카드가 offline | |
 | 5 | 구역 배지 (움직임 없이) | `ros2 topic pub --once /zone_manager/status std_msgs/msg/String "{data: 'occupied_by:pinky1'}"` 후 `"{data: 'free'}"` | 배지가 "구역: pinky1 점유 중 (n초)" → "구역: 비어 있음", 구역 사각형이 빨강 → 원래대로. (로봇은 이 토픽을 구독하지 않는다. 진짜 매니저 값을 덮어쓰므로 확인 뒤 다른 시험 전에 `free` 로 되돌린다) | |
 | 6 | 구독자 없음 | 브리지를 끄고 비상정지 | 503, 알람바에 두 가지 실패 사유, 이력에 "전송 실패". **그래도 `cmd_vel` 발행은 시도된다.** 끝나면 브리지를 다시 켠다 | |

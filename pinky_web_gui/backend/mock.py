@@ -21,7 +21,7 @@ import time
 from collections import deque
 
 from .map_loader import load_grid
-from .scan import compact
+from .scan import compact, rot_z
 
 log = logging.getLogger('backend.mock')
 
@@ -40,9 +40,11 @@ class _Stopped(Exception):
 
 
 class MockFleet:
-    def __init__(self, cfg, queue, wait_scale=1.0, speed=0.5, calib_sec=6.0, planner=None):
+    def __init__(self, cfg, queue, wait_scale=1.0, speed=0.5, calib_sec=6.0, planner=None, scan_mount_yaw=0.0, scan_mount_tf=True):
         self._cfg = cfg
         self._queue = queue
+        self._scan_mount_tf = scan_mount_tf    # False 면 센서가 돌려 달렸어도 tf 를 주지 않는다 (amcl + 보정 각도 대체 경로 시험용)
+        self._scan_mount_yaw = scan_mount_yaw  # 가짜 센서가 로봇 정면에서 돌아 달린 각도(rad). 0 이 아니면 tf 경로로 보낸다
         self._planner = planner      # 있으면 지점 사이를 벽을 피하는 경로로 이동한다 (없으면 직선)
         self._wait_scale = wait_scale
         self._speed = speed          # m/s
@@ -162,8 +164,11 @@ class MockFleet:
                 continue
             x, y, yaw = pose
             inc = 2 * math.pi / SCAN_BEAMS
-            ranges = [self._raycast(x, y, yaw + i * inc) for i in range(SCAN_BEAMS)]  # 로봇 앞(+x)이 각도 0
-            self._queue.put_nowait(('scan', rid) + compact(0.0, inc, ranges, step, SCAN_RANGE_MIN, SCAN_RANGE_MAX))
+            sensor_yaw = yaw + self._scan_mount_yaw
+            ranges = [self._raycast(x, y, sensor_yaw + i * inc) for i in range(SCAN_BEAMS)]  # 각도 0 = 센서 앞(+x)
+            # 센서가 돌려 달려 있으면 map -> 센서 변환(tf)을 같이 보낸다. 아니면 None (amcl_pose 로 그린다)
+            tf = (rot_z(sensor_yaw), (x, y, 0.0)) if self._scan_mount_yaw and self._scan_mount_tf else None
+            self._queue.put_nowait(('scan', rid, tf, 'mock_laser') + compact(0.0, inc, ranges, step, SCAN_RANGE_MIN, SCAN_RANGE_MAX))
 
     def _drift(self):
         """순찰 중이 아닌 로봇은 마지막 cmd_vel 로 움직인다."""

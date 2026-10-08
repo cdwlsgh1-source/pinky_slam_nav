@@ -183,7 +183,18 @@ async def run(shot, zone_shot, scan_shot):
                   seg == ['P2>RED1IN:done', 'RED1IN>P3:done', 'P3>P6:active', 'P6>RED1OUT:todo', 'RED1OUT>P1:todo'], seg)
 
             # ---- 경로 선이 벽을 뚫지 않는다 (지점 사이는 서버가 계산한 벽을 피하는 경로) ----
-            check('경로 추정을 받음', await pg.js("app.plans && Object.keys(app.plans).length >= 100"))
+            check('경로 선은 기본으로 꺼져 있고 경로 추정도 아직 받지 않음', await pg.js("app.showRoutes === false && app.plans === null && document.getElementById('routeLinesBtn').getAttribute('aria-pressed') === 'false'"))
+            # 기본 꺼짐: goto 진행 중에도 경로 선이 그려지지 않는다 (polylineFor 호출이 없다)
+            await pg.js("window.__poly = 0; const _pf = polylineFor; polylineFor = (sg) => { window.__poly++; return _pf(sg); };")
+            api('POST', '/api/robots/pinky1/command', {'cmd': 'goto', 'points': ['P2']})
+            await pg.wait("app.robots.pinky1.patrol && app.robots.pinky1.patrol.state === 'MOVING'", 10)
+            await asyncio.sleep(0.6)
+            check('꺼져 있으면 goto 진행 중에도 경로 선을 그리지 않음', await pg.js("window.__poly") == 0 and await pg.js("app.plans") is None)
+            api('POST', '/api/robots/pinky1/estop', {})
+            await pg.wait("app.robots.pinky1.patrol.state === 'STOPPED'", 15)
+            await asyncio.sleep(2.6)
+            await pg.click_sel('#routeLinesBtn')
+            check('경로 버튼을 누르면 켜지고 경로 추정을 받음', await pg.wait("app.showRoutes === true && app.plans && Object.keys(app.plans).length >= 100", 10))
             walls = await pg.js("""(() => {
               // 지도 칸이 벽/미지인지 (app.gray 는 pgm 값). 경로를 1 cm 간격으로 훑어 벽/미지 칸에 닿는 점의 수를 센다
               const bad = (x, y) => { const p = app.tf.worldToPixel(x, y), c = Math.floor(p.px), r = Math.floor(p.py);
@@ -198,13 +209,17 @@ async def run(shot, zone_shot, scan_shot):
             check('모든 지점 쌍의 추정 경로가 벽/미지 칸을 지나지 않음', walls['plannedBad'] == 0 and walls['pairs'] >= 100, walls)
             check('(전제) P3→P6 직선은 벽을 뚫는다', walls['straightP3P6'] > 0, walls)
             api('POST', '/api/robots/pinky1/command', {'cmd': 'goto', 'points': ['P3', 'P6']})
+            await pg.js("window.__poly = 0")
             check('goto P3,P6 진행 중 그려지는 꺾은선이 추정 경로이고 P3→P6 구간은 직선이 아님',
                   await pg.wait("""(() => { const r = app.robots.pinky1, ov = ZoneView.routeOverlay(app.cfg.robots.pinky1, app.zoneCfg.doors.pinky1, app.cfg.points, r.lastTask, r.patrol);
                     if (!ov) return false; const sg = ZoneView.segments(ov, app.cfg.points).find(s => s.from === 'P3' && s.to === 'P6');
                     return !!sg && polylineFor(sg).length > 2; })()""", 25))
+            check('켜져 있으면 경로 선을 그림', await pg.js("window.__poly") > 0)
             api('POST', '/api/robots/pinky1/estop', {})
             await pg.wait("app.robots.pinky1.patrol.state === 'STOPPED'", 15)
             await asyncio.sleep(2.6)
+            await pg.click_sel('#routeLinesBtn')
+            check('경로 버튼을 다시 누르면 꺼짐', await pg.js("app.showRoutes === false"))
 
             # ---- start 경로 강조 (waypoint 번호 해석) ----
             await pg.js("window.__mis.length = 0")
@@ -220,6 +235,9 @@ async def run(shot, zone_shot, scan_shot):
             check('LiDAR 토글이 로봇별로 있음', await pg.js("document.querySelectorAll('#scanToggles input').length") == 2)
             await pg.click_sel('#scanToggles input[data-robot="pinky1"]')
             check('켜면 점이 들어옴', await pg.wait("app.scan.pinky1 && app.scan.pinky1.points.length > 10", 5))
+            check('LiDAR 줄에 그리는 기준(tf 없음 -> amcl + 보정 0°)이 표시됨',
+                  await pg.wait("document.querySelector('#scanToggles .scan-info[data-robot=\"pinky1\"]').textContent.includes('amcl') && document.querySelector('#scanToggles .scan-info[data-robot=\"pinky1\"]').textContent.includes('보정 0')", 5),
+                  await pg.js("document.querySelector('#scanToggles .scan-info').textContent"))
             h = api('GET', '/api/health')
             check('켠 로봇만 서버가 구독', h['scan_subscribed'] == ['pinky1'] and h['scan_clients']['pinky2'] == 0, h)
             pt = await pg.js("""(() => { const [x, y] = app.scan.pinky1.points[0]; const s = worldToScreen(x, y);
@@ -227,6 +245,9 @@ async def run(shot, zone_shot, scan_shot):
             check('점이 화면에 그려짐 (로봇 색 계열)', pt[2] > pt[4] + 40, pt)
             if scan_shot:
                 await screenshot(pg, scan_shot)
+            h_before = await pg.js("document.getElementById('scanToggles').getBoundingClientRect().height")
+            await pg.js("app.scan.pinky1.source = 'tf'; app.scan.pinky1.frame = 'a_very_long_sensor_frame_name_for_wrapping_check'; renderScanInfo();")
+            check('LiDAR 상태 문구가 길어져도 레이아웃 높이가 변하지 않음 (아래 패널이 밀리지 않음)', await pg.js("document.getElementById('scanToggles').getBoundingClientRect().height") == h_before)
             # 연결이 끊겼다 복구되면 켜 둔 토글이 자동으로 다시 요청된다
             await pg.js("sock.close()")
             await asyncio.sleep(0.5)
