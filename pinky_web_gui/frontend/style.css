@@ -41,7 +41,7 @@ h2 small { font-weight: 400; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .brand { font-weight: 700; text-align: center; padding: 4px 0 8px; color: var(--accent); }
 .menu-item { width: 100%; text-align: center; }
-#themeBtn { white-space: pre-line; }  /* theme.js 의 \n 으로 두 줄 표시 */
+#themeBtn, #addRobotBtn { white-space: pre-line; }  /* theme.js 의 \n 으로 두 줄 표시 */
 .menu-item.active { border-color: var(--accent); color: var(--accent); }
 .alarmbar { grid-area: alarm; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-height: 44px; }
@@ -260,3 +260,34 @@ body.resizing { user-select: none; -webkit-user-select: none; }
 body.resizing.col { cursor: col-resize; } body.resizing.row { cursor: row-resize; }
 body.resizing #mapCanvas { cursor: inherit; }
 @media (max-width: 860px) { .split { display: none; } }
+
+/* 로봇 추가 안내 팝업. 오른쪽 아래 모서리를 끌어 크기를 바꾼다. 입력값이 들어간 자리는 입력칸과 같은 색 */
+dialog.wide { --c-name: #1f8f66; --c-domain: #c9701f; --c-ip: #1c7ed6; --c-user: #ae3ec9;
+  width: min(820px, 94vw); max-width: 98vw; min-width: 340px; min-height: 260px; max-height: 94vh;
+  overflow: auto; resize: both; }
+:root[data-theme="dark"] dialog.wide { --c-name: #5fd3a3; --c-domain: #f2a65a; --c-ip: #74b9ff; --c-user: #d0a2f7; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) dialog.wide { --c-name: #5fd3a3; --c-domain: #f2a65a; --c-ip: #74b9ff; --c-user: #d0a2f7; } }
+.ar-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 8px; }
+.ar-fields .field { display: flex; flex-direction: column; align-items: stretch; gap: 3px; font-size: 13px; font-weight: 600; }
+.ar-fields input { font: inherit; font-weight: 400; color: var(--text); background: var(--bg); border: 2px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.ar-fields .f-name { color: var(--c-name); }   .ar-fields .f-name input { border-color: var(--c-name); }
+.ar-fields .f-domain { color: var(--c-domain); } .ar-fields .f-domain input { border-color: var(--c-domain); }
+.ar-fields .f-ip { color: var(--c-ip); }       .ar-fields .f-ip input { border-color: var(--c-ip); }
+.ar-fields .f-user { color: var(--c-user); }   .ar-fields .f-user input { border-color: var(--c-user); }
+.ar-v { font-weight: 700; border-radius: 3px; padding: 0 2px; }
+.ar-v-name { color: var(--c-name); background: color-mix(in srgb, var(--c-name) 16%, transparent); }
+.ar-v-domain { color: var(--c-domain); background: color-mix(in srgb, var(--c-domain) 16%, transparent); }
+.ar-v-ip { color: var(--c-ip); background: color-mix(in srgb, var(--c-ip) 16%, transparent); }
+.ar-v-user { color: var(--c-user); background: color-mix(in srgb, var(--c-user) 16%, transparent); }
+#arOut h3 { font-size: 14px; margin: 16px 0 6px; color: var(--dim); }
+.ar-head { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 13px; }
+.ar-head button { padding: 1px 8px; font-size: 13px; }
+#arOut pre { margin: 4px 0 0; padding: 8px; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.ar-steps { list-style: none; counter-reset: ar; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ar-steps li { counter-increment: ar; position: relative; padding: 8px 10px 8px 42px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.ar-steps li::before { content: counter(ar); position: absolute; left: 10px; top: 8px; width: 22px; height: 22px; line-height: 22px; text-align: center;
+  border-radius: 50%; background: var(--accent); color: var(--bg); font-weight: 700; font-size: 13px; }
+.ar-step-title { font-weight: 700; }
+.ar-step-desc { color: var(--dim); font-size: 13px; margin: 2px 0 4px; }
+.ar-steps code { display: block; margin-top: 4px; padding: 3px 8px; font-size: 12.5px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow-wrap: anywhere; }

@@ -24,7 +24,9 @@
         <button type="button" id="layoutCancel" title="Esc">취소</button>
       </div>
     </div>
-    <button type="button" class="menu-item" id="themeBtn" style="margin-top:auto">다크</button>
+    <button type="button" class="menu-item" id="addRobotBtn" style="margin-top:auto" title="새 로봇을 추가할 때 필요한 설정과 절차를 보여 줍니다">로봇
+추가</button>
+    <button type="button" class="menu-item" id="themeBtn">다크</button>
     <div class="authbox" id="authBox" hidden>
       <span id="authRole" class="dim"></span>
       <button type="button" id="switchBtn" title="로그아웃하지 않고 다른 계정(manager / operator)의 비밀번호로 전환합니다">계정 전환</button>
@@ -170,6 +172,20 @@
   </form>
 </dialog>
 
+<dialog id="addRobotDlg" class="wide">
+  <p><b>새 로봇 추가 안내</b></p>
+  <p class="hint">값을 넣으면 설정 파일에 붙여 넣을 내용과 GUI 밖에서 할 일이 만들어집니다. 이 창은 설정을 바꾸지 않습니다. 입력에 따라 바뀌는 자리는 입력칸과 같은 색으로 표시됩니다. 오른쪽 아래 모서리를 끌면 크기를 바꿀 수 있습니다.</p>
+  <div class="ar-fields">
+    <label class="field f-name">이름 <input type="text" id="arName" value="pinky3" spellcheck="false"></label>
+    <label class="field f-domain">도메인 ID <input type="text" id="arDomain" value="24" inputmode="numeric" spellcheck="false"></label>
+    <label class="field f-ip">IP <input type="text" id="arIp" value="192.168.45.24" spellcheck="false"></label>
+    <label class="field f-user">SSH 사용자 <input type="text" id="arUser" value="pinky" spellcheck="false"></label>
+  </div>
+  <p class="notice-bad" id="arErr"></p>
+  <div id="arOut"></div>
+  <div class="row-actions"><button type="button" id="arClose" class="primary">닫기</button></div>
+</dialog>
+
 <dialog id="confirmDlg">
   <form method="dialog">
     <p id="confirmText"></p>
@@ -185,6 +201,7 @@
 <script src="zoneview.js"></script>
 <script src="procview.js"></script>
 <script src="logview.js"></script>
+<script src="addrobot.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
