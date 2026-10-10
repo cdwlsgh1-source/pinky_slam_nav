@@ -69,7 +69,7 @@ def _cfg(tmp_path, zone_text):
     import shutil
     from pathlib import Path
     src = Path(__file__).resolve().parent.parent / 'config'
-    for f in ('robots.yaml', 'points.yaml'):
+    for f in ('robots.yaml', 'points.yaml', 'processes.yaml'):
         shutil.copy(src / f, tmp_path / f)
     (tmp_path / 'zone.yaml').write_text(zone_text, encoding='utf-8')
     raw = (tmp_path / 'robots.yaml').read_text(encoding='utf-8').replace('../../map_view_pc', str(src.parent.parent / 'map_view_pc'))

@@ -15,6 +15,10 @@
     <button class="menu-item active" data-view="main">메인</button>
     <button class="menu-item" disabled title="준비 중">로그</button>
     <button class="menu-item" disabled title="준비 중">포인트</button>
+    <div class="authbox" id="authBox" hidden>
+      <span id="authRole" class="dim"></span>
+      <button type="button" id="logoutBtn" title="로그아웃">로그아웃</button>
+    </div>
   </nav>
 
   <!-- 위: 시스템 알람 -->
@@ -52,6 +56,18 @@
     <section>
       <h2>로봇</h2>
       <div id="robotCards"></div>
+    </section>
+
+    <section id="procPanel">
+      <h2>시스템 <small>(프로세스)</small></h2>
+      <div class="row-actions">
+        <button type="button" id="procStartAll" class="primary">전체 시작</button>
+        <button type="button" id="procStopAll">전체 정지</button>
+      </div>
+      <p class="hint" id="procSeq"></p>
+      <p class="hint" id="procNote"></p>
+      <ul class="procs" id="procList"></ul>
+      <p class="hint">브릿지와 zone_manager 는 이 PC 에서, bringup 과 map 은 SSH 로 로봇에서 실행합니다. 터미널에서 직접 켠 프로세스는 여기서 끌 수 없습니다. 로그인(operator)이 필요합니다.</p>
     </section>
 
     <section>
@@ -115,6 +131,15 @@
 
 </div>
 
+<dialog id="loginDlg">
+  <form id="loginForm" method="post" action="#">
+    <p><b>Pinky 관제 로그인</b></p>
+    <label class="field">비밀번호 <input type="password" id="loginPw" autocomplete="current-password" required></label>
+    <p class="notice-bad" id="loginErr"></p>
+    <div class="row-actions"><button type="submit" class="primary" id="loginBtn">로그인</button></div>
+  </form>
+</dialog>
+
 <dialog id="confirmDlg">
   <form method="dialog">
     <p id="confirmText"></p>
@@ -128,6 +153,7 @@
 <script src="mapmath.js"></script>
 <script src="patrolview.js"></script>
 <script src="zoneview.js"></script>
+<script src="procview.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

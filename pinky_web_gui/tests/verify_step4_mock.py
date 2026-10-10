@@ -98,7 +98,7 @@ async def mounted_scan(extra_args, config_text=None):
     if config_text is not None:
         tmp = Path(tempfile.mkdtemp())
         src = ROOT / 'config'
-        for f in ('points.yaml', 'zone.yaml'):
+        for f in ('points.yaml', 'zone.yaml', 'processes.yaml'):
             (tmp / f).write_text((src / f).read_text(encoding='utf-8'), encoding='utf-8')
         raw = (src / 'robots.yaml').read_text(encoding='utf-8').replace('../../map_view_pc', str(ROOT.parent / 'map_view_pc'))
         (tmp / 'robots.yaml').write_text(raw.replace('yaw_offset_deg: {}', config_text), encoding='utf-8')

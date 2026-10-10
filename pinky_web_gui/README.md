@@ -42,8 +42,10 @@ export ROS_DOMAIN_ID=50
 | `--port` | `8000` | |
 | `--mock-wait-scale` | `1.0` | `--mock` 에서 goto 지점 대기 시간 배율 (0.2 면 10초 대신 2초) |
 | `--config` | `config/robots.yaml` | 설정 파일 경로 |
+| `--mock-proc-fail` | 없음 | `--mock` 에서 시작 직후 실패하는 프로세스 id (쉼표 구분, 시스템 패널 시험용) |
+| `--mock-proc-external` | 없음 | `--mock` 에서 이미 다른 곳에서 실행 중인 것으로 보이는 프로세스 id |
 
-`--host 0.0.0.0` 은 인증이 없으므로 신뢰할 수 있는 네트워크에서만 쓴다 (Step 4 부터는 같은 네트워크의 누구나 비상정지와 수동 조작도 보낼 수 있다. 시작할 때 경고를 로그로 낸다). 다른 사이트의 페이지가 localhost 의 제어 API 를 부르지 못하도록 POST 는 `Content-Type: application/json` + 같은 Origin 만, WebSocket 은 같은 Origin 만 받는다 (Origin 헤더가 없는 curl 등은 통과).
+`--host 0.0.0.0` 은 `PINKY_OPERATOR_PASSWORD`/`PINKY_VIEWER_PASSWORD` 를 설정하지 않으면 인증이 없으므로 신뢰할 수 있는 네트워크에서만 쓴다 (같은 네트워크의 누구나 start/goto 와 수동 조작을 보낼 수 있다. 시작할 때 경고를 로그로 낸다. 비밀번호를 설정하면 로그인이 필요하다. 아래 "인증과 프로세스 제어" 참고). 다른 사이트의 페이지가 localhost 의 제어 API 를 부르지 못하도록 POST 는 `Content-Type: application/json` + 같은 Origin 만, WebSocket 은 같은 Origin 만 받는다 (Origin 헤더가 없는 curl 등은 통과).
 
 ## 설정 (`config/robots.yaml`)
 
@@ -130,7 +132,9 @@ curl -s -X POST localhost:8000/api/robots/pinky1/command -H 'Content-Type: appli
 ## 테스트
 
 ```bash
-.venv/bin/python -m pytest tests -q        # 단위 테스트 (상태, 명령 검증, mock 흐름, 구역 파싱, 스캔 변환, 비상정지/데드맨)
+.venv/bin/python -m pytest tests -q        # 단위 테스트 (상태, 명령 검증, mock 흐름, 구역 파싱, 스캔 변환, 비상정지/데드맨, 인증, 프로세스 관리)
+.venv/bin/python tests/verify_proc_mock.py    # 인증 + 프로세스 제어 API (가짜 실행기, ros2/ssh 를 실행하지 않음)
+.venv/bin/python tests/verify_proc_ui.py --shot docs/process_panel.png   # 로그인, 시스템 패널 (Chrome 필요)
 .venv/bin/python tests/verify_step3_mock.py   # Step 3 API (mock 서버를 띄워 확인)
 .venv/bin/python tests/verify_step4_mock.py   # Step 4 API/WS: LiDAR 구독 수, 비상정지, 데드맨, 출처 검사
 .venv/bin/python tests/verify_step3_ui.py     # headless Chrome (Chrome 필요)
@@ -174,6 +178,37 @@ mock 모드에서 두 마커가 지도 오른쪽 방 안의 사각형을 돌고,
 1. `ros2 topic echo /pinky1/amcl_pose` 의 값과 `/api/state` 의 `pose` 가 일치하는지 본다 (yaw 는 쿼터니언 → rad).
 2. 로봇 전원을 끄고 5초쯤 뒤 `/api/state` 의 `online` 이 `false` 가 되는지 본다.
 3. `ros2 topic pub /pinky1/patrol_status std_msgs/msg/String "{data: 'not json'}"` 후에도 서버가 살아 있고 `detail` 에 원문이 담기는지 본다. 이 발행은 실제 로봇 상태 표시를 덮어쓰므로 로봇이 꺼져 있거나 테스트 중일 때만 한다.
+
+## 인증과 프로세스 제어 (시스템 패널)
+
+환경 변수로 비밀번호를 정해 서버를 실행하면 로그인이 필요해진다. 비밀번호는 코드, 설정 파일, 로그에 남기지 않는다.
+
+```bash
+export PINKY_OPERATOR_PASSWORD='...'   # operator: 명령(start/stop/goto), 수동 조작, 프로세스 제어
+export PINKY_VIEWER_PASSWORD='...'     # viewer: 보기 전용 (비상정지 버튼은 누를 수 있다)
+.venv/bin/python -m backend.main
+```
+
+| 설정 | 동작 |
+|---|---|
+| 둘 다 없음 | 로그인 없음 (기존 동작). **프로세스 제어(원격 실행)는 꺼진다.** |
+| viewer 만 있음 | 로그인 필요, 모두 보기 전용. 프로세스 제어는 꺼진다. |
+| operator 있음 | 로그인 필요, 프로세스 제어 켜짐. |
+
+로그인은 서버 세션 쿠키(HttpOnly, SameSite=Strict, 12시간, 서버 재시작 시 만료)로 유지한다. 같은 주소에서 1분 안에 5번 틀리면 잠시 막는다. 평문 HTTP 로 비밀번호가 전달되므로 외부 네트워크에는 HTTPS 프록시나 VPN 없이 열지 않는다. 정적 화면 파일과 `/api/health`, `/api/me`, `/api/login` 외의 `/api/*` 와 `/ws` 는 로그인이 필요하다.
+
+### 시스템 패널: 브릿지, zone_manager, 로봇 bringup/map 을 버튼으로
+
+사이드바의 **시스템** 패널에서 프로세스 목록을 보고 시작/정지/로그 보기와 **전체 시작/정지**(브릿지 → zone_manager → bringup → map → 순찰 노드 순서, 정지는 반대)를 한다. 스크린샷: `docs/process_panel.png`.
+
+- 실행할 수 있는 것은 `config/processes.yaml` 에 적힌 프로세스뿐이다 (브라우저가 보낸 것은 id 로만 쓰고 명령으로 쓰지 않는다). 관제 PC 쪽(`kind: local`)은 `bash -c 'source ... && export ROS_DOMAIN_ID=.. && exec <command>'` 로, 로봇 쪽(`kind: ssh`)은 SSH 로 같은 스크립트를 원격에서 실행한다.
+- **pinky1 의 `bringup`/`map` 은 채워져 있고(`192.168.45.20`, `pinky`), pinky2 는 비어 있다.** `processes.yaml` 에서 `ssh.host`, `ssh.user`, `cwd`, `source`, `command`, `detect` 를 채우면 활성화된다 (비어 있으면 "명령 미설정"). `cwd` 는 로봇에서 `cd` 할 절대 경로(`~` 불가)로 `source: ./install/setup.bash` 와 `map:=my_pinky_map10.yaml` 같은 상대 경로의 기준이다. **SSH 의 비대화형 셸은 `~/.bashrc` 를 읽지 않으므로** 로봇의 ROS 배포판(`/opt/ros/jazzy/setup.bash`)도 `source` 에 적는다. pinky1 의 `cwd` 는 `/home/pinky`(터미널의 기본 위치. 지도 `my_pinky_map10.yaml` 이 여기서 찾아진다)이고 `pinky_slam_nav/install/setup.bash` 는 절대 경로로 source 한다. `/opt/ros/jazzy` 와 `pinky_slam_nav` 폴더는 로봇에서 `ls` 로 확인했다.
+- **SSH 는 키 로그인이 기본이다** (`BatchMode=yes`, `StrictHostKeyChecking=yes`). 비밀번호를 설정 파일에 두지 않는다. 키를 한 번 등록한다: `ssh-copy-id <user>@<host>` (비밀번호는 이때 터미널에 직접 입력). 꼭 비밀번호가 필요하면 `ssh.password_env: PINKY1_SSH_PASSWORD` 처럼 환경 변수 **이름**을 적고 서버를 그 변수와 함께 실행한다 (`sshpass` 설치 필요, `sshpass -e` 로 쓰므로 명령줄에 값이 나타나지 않는다).
+- 시작 전에 같은 프로세스가 이미 도는지(`detect` 의 pgrep 패턴) 확인해서, 터미널에서 직접 켠 것과 겹치면 시작하지 않는다. 그런 프로세스는 GUI 로 끌 수 없다. 전체 시작은 이런 프로세스를 "건너뜀"으로 처리한다.
+- 정지는 프로세스 그룹에 SIGINT → (5초 후) SIGTERM → SIGKILL 이다. SSH 는 pty 에 Ctrl-C 를 보내고, 안 되면 로봇에서 `pkill -INT`, 그래도 안 되면 SSH 를 끊고, 마지막에 로봇에서 아직 도는지 다시 확인해서 남아 있으면 "실패"로 표시한다.
+- 로봇 프로세스를 정지하거나 전체 정지에 포함되면 확인 팝업과 서버의 `confirm: true` 가 필요하다. **서버를 종료하면(Ctrl-C, 터미널 닫기=SIGHUP, SIGTERM) 이 GUI 가 켠 프로세스를 모두 정지한다** (브릿지, zone_manager, 로봇의 bringup/map. 비상정지의 마지막 0 속도를 먼저 보낸 뒤 정지한다). 특정 프로세스만 남기려면 `processes.yaml` 에 `stop_on_exit: false`. 종료는 로봇 프로세스를 정지하느라 몇 초 걸릴 수 있다. `kill -9` 나 전원 차단은 정리하지 못하므로 다음 실행에서 "이미 실행 중" 으로 거절된다 (아래 한계 참고).
+- 배지는 두 겹이다. 초록 "실행 중"은 프로세스가 떠 있고(`health: true` 인 것은 그 로봇의 토픽도 오는 것), 노랑 "실행 중 · 토픽 없음"은 프로세스만 떠 있고 로봇 토픽이 안 오는 것이다.
+- 실제 절차와 한계는 `docs/process_control_real_checklist.md`.
 
 ## 구조
 

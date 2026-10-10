@@ -38,12 +38,16 @@ const app = {
   routeTarget: null,  // 지도에서 포인트를 클릭하면 경로가 추가되는 로봇
   history: [],        // 명령 이력, 최신이 앞 (서버가 보낸 command 이벤트로 갱신)
   locks: {},          // 'id:cmd' -> 연타 방지 해제 시각(ms)
+  me: null,           // /api/me: {auth, role, procs_allowed, procs_configured}. role 이 operator 일 때만 명령·수동 조작·프로세스 제어 버튼이 켜진다
+  procs: null,        // 서버가 보낸 프로세스 상태 {enabled, procs:[...], sequence}
+  procLogOpen: null,  // 로그를 펼친 프로세스 id
 };
 const POINT_HIT_R = 14;      // 포인트 클릭 판정 반경 (화면 px)
 const BTN_LOCK_MS = 1000;    // FR3-7: 같은 버튼 연타 방지
 
 // ---------- 유틸 ----------
 const hhmmss = () => new Date().toTimeString().slice(0, 8);
+const isOperator = () => !!app.me && app.me.role === 'operator';
 function normAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 
 function addAlarm(level, text) {
@@ -140,7 +144,7 @@ function drawGrid() {
   const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
 
   ctx.save();
-  ctx.font = '10px ' + getComputedStyle(document.body).fontFamily;
+  ctx.font = '11px ' + getComputedStyle(document.body).fontFamily;
   ctx.lineWidth = 1;
   for (let i = Math.ceil(xMin / step); i * step <= xMax; i++) {
     const x = i * step, { sx } = worldToScreen(x, yMin);
@@ -201,7 +205,7 @@ function drawMarker(id, r) {
   }
   ctx.save();
   ctx.globalAlpha = app.wsUp ? 1 : 0.35;
-  ctx.font = 'bold 12px ' + getComputedStyle(document.body).fontFamily;
+  ctx.font = 'bold 13px ' + getComputedStyle(document.body).fontFamily;
   ctx.textAlign = 'center';
   ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.55)';
   ctx.strokeText(id, sx, sy - MARKER_R - 7);
@@ -233,7 +237,7 @@ function draw() {
     const { sx, sy } = worldToScreen(c.x, c.y);
     ctx.fillStyle = '#f2a65a'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.font = 'bold 11px monospace'; ctx.fillStyle = '#f2a65a';
+    ctx.font = 'bold 12px monospace'; ctx.fillStyle = '#f2a65a';
     ctx.fillText('C' + (i + 1), sx + 6, sy - 6);
   });
   drawZone();
@@ -256,7 +260,7 @@ function drawZone() {
   ctx.fillRect(a.sx, a.sy, b.sx - a.sx, b.sy - a.sy);
   ctx.strokeRect(a.sx, a.sy, b.sx - a.sx, b.sy - a.sy);
   ctx.setLineDash([]);
-  ctx.font = 'bold 11px ' + getComputedStyle(document.body).fontFamily;
+  ctx.font = 'bold 12px ' + getComputedStyle(document.body).fontFamily;
   const label = '위험 구역' + (z.confirmed ? '' : ' (초안: 미확인)') + (occupied ? ' · ' + app.zoneInfo.holder + ' 점유' : '');
   drawLabel(label, a.sx + 4, a.sy + 13, 'left');
   if (!z.confirmed) {  // 초안일 때는 사용자가 지도와 대조할 수 있게 모서리 좌표를 적는다
@@ -340,7 +344,7 @@ function gotoPoints() {
 function drawPoints() {
   const route = app.routeTarget ? app.routes[app.routeTarget] || [] : [];
   ctx.save();
-  ctx.font = 'bold 11px ' + getComputedStyle(document.body).fontFamily;
+  ctx.font = 'bold 12px ' + getComputedStyle(document.body).fontFamily;
   for (const p of gotoPoints()) {
     const { sx, sy } = worldToScreen(p.x, p.y);
     const color = p.in_zone ? '#e8590c' : '#1971c2';
@@ -456,7 +460,7 @@ function renderCards() {
     const noResp = lc && lc.result === 'no_response' && r.noRespDismissed !== lc.id;
     c.noResp.style.display = noResp ? 'block' : 'none';
     c.noResp.textContent = noResp ? '로봇이 응답하지 않았거나 무시했을 수 있음 (' + (lc.sent || lc.cmd) + ')' : '';
-    const ready = !!app.cfg && app.wsUp;
+    const ready = !!app.cfg && app.wsUp && isOperator();   // 보기 전용(viewer)은 명령 버튼이 꺼진다
     const route = app.routes[id] || [];
     c.btns.start.disabled = !ready || !PatrolView.canStart(state, r.online) || locked(id, 'start');
     c.btns.stop.disabled = !ready || !PatrolView.canStop(state, r.online) || locked(id, 'stop');
@@ -507,7 +511,8 @@ async function sendCommand(id, cmd, points) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) addAlarm('bad', id + ' ' + cmd + ' 실패: ' + (data.error || res.status));
+    if (res.status === 401) showLogin('세션이 만료됐습니다. 다시 로그인하세요');
+    else if (!res.ok) addAlarm('bad', id + ' ' + cmd + ' 실패: ' + (data.error || res.status));
   } catch (err) {
     addAlarm('bad', id + ' ' + cmd + ' 전송 오류: ' + err.message);
   }
@@ -614,6 +619,7 @@ function applySnapshot(msg) {
   });
   for (const id of Object.keys(app.robots)) if (!ids.includes(id)) delete app.robots[id];
   setZone(msg.zone, msg.zone_info);
+  if (msg.procs) setProcs(msg.procs);
   app.history = (msg.commands || []).slice().reverse();
   renderHistory();
   setupRoutePanel();
@@ -639,6 +645,7 @@ function onMessage(msg) {
   if (msg.type === 'snapshot') { applySnapshot(msg); return; }
   if (msg.type === 'zone') { setZone(msg.status, msg); return; }
   if (msg.type === 'command') { upsertHistory(msg.entry); return; }
+  if (msg.type === 'procs') { setProcs(msg); return; }
   if (msg.type === 'scan') {
     const s = app.scan[msg.robot];
     if (s && s.on) { s.points = msg.points; s.t = Date.now(); s.source = msg.source; s.frame = msg.frame; s.offset = msg.offset_deg; }
@@ -692,6 +699,7 @@ function connect() {
     if (app.wsUp || attempt === 0) addAlarm('bad', '서버 연결 끊김');
     app.wsUp = false; setChip('connChip', 'bad', '연결 끊김');
     attempt += 1;
+    checkSession();  // 인증이 켜져 있고 세션이 사라졌다면(만료, 서버 재시작) 로그인 화면을 띄운다
     setTimeout(connect, Math.min(5000, 1000 * attempt)); // 1초 -> 5초까지 1초씩 늘려가며 재연결
   };
   ws.onerror = () => ws.close();
@@ -866,6 +874,7 @@ function driveRobotId() { return el('driveRobot').value; }
 
 function driveAllowed(id) {
   const r = app.robots[id], m = app.motion && app.motion.manual;
+  if (!isOperator()) return '보기 전용 계정은 수동 조작할 수 없습니다';
   if (!r || !m || !m.enabled) return '수동 조작이 설정에서 꺼져 있습니다';
   if (!app.wsUp) return '서버에 연결되어 있지 않습니다';
   if (!r.online) return id + ' 가 오프라인입니다';
@@ -956,6 +965,171 @@ el('driveRobot').onchange = () => { driveHalt(); el('driveMsg').textContent = ''
 // ---------- 패널 크기 조절 ----------
 // 사이드바 너비(SIDE)와 명령 이력 높이(HIST)를 끌어서 바꾼다. 값은 .app 의 CSS 변수(--side-w, --hist-h)이고 브라우저에 저장한다.
 // 지도 캔버스는 ResizeObserver 로 따라간다. 사이드바의 각 섹션은 제목을 눌러 접고 펼친다.
+// ---------- 로그인 ----------
+function renderAuth() {
+  const me = app.me, box = el('authBox');
+  box.hidden = !(me && me.auth && me.role);
+  el('authRole').textContent = me && me.role ? (me.role === 'operator' ? '명령 가능' : '보기 전용') : '';
+  app.dirtyCards = true;
+  renderProcs();
+}
+
+function showLogin(message) {
+  const dlg = el('loginDlg');
+  el('loginErr').textContent = message || '';
+  if (!dlg.open) dlg.showModal();
+  setTimeout(() => el('loginPw').focus(), 0);
+}
+
+async function checkSession() {
+  if (!app.me || !app.me.auth) return;
+  try {
+    const me = await (await fetch('/api/me')).json();
+    if (!me.role) { app.me = me; renderAuth(); showLogin('세션이 만료됐습니다. 다시 로그인하세요'); }
+  } catch (e) { /* 서버가 내려가 있으면 다시 연결될 때까지 기다린다 */ }
+}
+
+el('loginDlg').addEventListener('cancel', (e) => e.preventDefault());  // 로그인 전에는 닫을 수 없다
+el('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = el('loginBtn');
+  btn.disabled = true; el('loginErr').textContent = '';
+  try {
+    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: el('loginPw').value }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) { el('loginPw').value = ''; location.reload(); return; }
+    el('loginErr').textContent = data.error || '로그인 실패 (' + res.status + ')';
+    el('loginPw').select();
+  } catch (err) {
+    el('loginErr').textContent = '서버에 연결하지 못했습니다: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+el('logoutBtn').onclick = async () => {
+  driveHalt();
+  try { await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) { /* 무시 */ }
+  location.reload();
+};
+
+// ---------- 시스템 패널: 프로세스 시작/정지 ----------
+function setProcs(msg) { app.procs = msg; app.procsRecv = Date.now(); renderProcs(); }
+
+// 서버는 상태가 바뀔 때만 보내므로, 실행 시간은 화면에서 1초마다 흘려 보낸다
+function procSubText(p) {
+  const up = ProcView.uptimeText(ProcView.uptimeNow(p, Date.now(), app.procsRecv || Date.now()));
+  return [p.kind === 'ssh' ? 'SSH ' + (p.host || '(host 미설정)') : '이 PC', up].filter(Boolean).join(' · ');
+}
+function tickProcUptimes() {
+  if (!app.procs) return;
+  for (const p of app.procs.procs) {
+    const li = document.querySelector('#procList li[data-id="' + p.id + '"]');
+    if (li) { const sub = li.querySelector('.proc-sub'), t = procSubText(p); if (sub.textContent !== t) sub.textContent = t; }
+  }
+}
+
+function procCtx() {
+  return { enabled: !!(app.procs && app.procs.enabled), role: app.me && app.me.role, seqRunning: !!(app.procs && app.procs.sequence && app.procs.sequence.state === 'running') };
+}
+
+async function procPost(path, body) {
+  try {
+    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) showLogin('세션이 만료됐습니다. 다시 로그인하세요');
+    else if (!res.ok) addAlarm('bad', (data.error || '요청 실패 (' + res.status + ')'));
+    return res.ok;
+  } catch (err) {
+    addAlarm('bad', '프로세스 제어 요청 오류: ' + err.message);
+    return false;
+  }
+}
+
+async function procStart(p) {
+  await procPost('/api/procs/' + encodeURIComponent(p.id) + '/start');
+}
+
+async function procStop(p) {
+  if (p.confirm_stop && !(await confirmDialog(ProcView.stopSummary(p)))) return;
+  await procPost('/api/procs/' + encodeURIComponent(p.id) + '/stop', { confirm: !!p.confirm_stop });
+}
+
+async function loadProcLog(id) {
+  try {
+    const res = await fetch('/api/procs/' + encodeURIComponent(id) + '/log');
+    if (!res.ok) return;
+    const data = await res.json();
+    const pre = document.querySelector('.proc-log[data-id="' + id + '"]');
+    if (pre) {
+      const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+      pre.textContent = data.lines.join('\n') || '(출력 없음)';
+      if (atEnd) pre.scrollTop = pre.scrollHeight;
+    }
+  } catch (e) { /* 다음 갱신에서 다시 시도 */ }
+}
+
+const procLogN = {};   // 로그를 마지막으로 받았을 때의 줄 수 (줄이 늘었을 때만 다시 받는다)
+function renderProcs() {
+  const pp = app.procs, list = el('procList');
+  if (!pp) return;
+  const ctx = procCtx(), procs = pp.procs;
+  const note = !pp.enabled ? '프로세스 제어가 꺼져 있습니다. 서버를 PINKY_OPERATOR_PASSWORD 환경 변수와 함께 실행해야 켜집니다.'
+    : ctx.role !== 'operator' ? '보기 전용 계정입니다. 상태만 볼 수 있습니다.' : '';
+  el('procNote').textContent = note;
+  const sa = ProcView.startAllBlocked(procs, ctx), oa = ProcView.stopAllBlocked(procs, ctx);
+  el('procStartAll').disabled = !!sa; el('procStartAll').title = sa || '브릿지 → zone_manager → bringup → map 순서로 시작';
+  el('procStopAll').disabled = !!oa; el('procStopAll').title = oa || '시작의 반대 순서로 정지';
+  const seq = pp.sequence;
+  const labelOf = (id) => (procs.find((p) => p.id === id) || { label: id }).label;
+  el('procSeq').textContent = ProcView.sequenceText(seq, labelOf);
+  el('procSeq').style.color = seq && seq.state === 'failed' ? 'var(--bad)' : '';
+  // 행이 이미 있으면 내용만 고친다 (로그를 보고 있는 도중에 목록이 다시 그려져 스크롤이 튀지 않게)
+  const have = new Map([...list.children].map((li) => [li.dataset.id, li]));
+  for (const p of procs) {
+    let li = have.get(p.id);
+    if (!li) {
+      li = document.createElement('li'); li.dataset.id = p.id;
+      li.innerHTML = '<div class="proc-head"><span class="proc-name"></span><span class="proc-state"></span><span class="proc-sub"></span>' +
+        '<span class="proc-actions"><button type="button" data-act="start">시작</button><button type="button" data-act="stop">정지</button><button type="button" data-act="log">로그</button></span></div>' +
+        '<p class="proc-msg"></p><pre class="proc-log" hidden></pre>';
+      li.querySelector('[data-act="start"]').onclick = () => procStart(app.procs.procs.find((x) => x.id === li.dataset.id));
+      li.querySelector('[data-act="stop"]').onclick = () => procStop(app.procs.procs.find((x) => x.id === li.dataset.id));
+      li.querySelector('[data-act="log"]').onclick = () => {
+        app.procLogOpen = app.procLogOpen === li.dataset.id ? null : li.dataset.id;
+        procLogN[li.dataset.id] = -1;
+        renderProcs();
+      };
+      li.querySelector('.proc-log').dataset.id = p.id;
+      list.appendChild(li);
+    }
+    have.delete(p.id);
+    const b = ProcView.badge(p);
+    li.querySelector('.proc-name').textContent = p.label;
+    const st = li.querySelector('.proc-state'); st.textContent = b.text; st.dataset.level = b.level;
+    li.querySelector('.proc-sub').textContent = procSubText(p);
+    const sb = ProcView.startBlocked(p, ctx), tb = ProcView.stopBlocked(p, ctx);
+    const start = li.querySelector('[data-act="start"]'), stop = li.querySelector('[data-act="stop"]');
+    start.disabled = !!sb; start.title = sb || '';
+    stop.disabled = !!tb; stop.title = tb || '';
+    li.querySelector('.proc-msg').textContent = p.message && p.state !== 'running' ? p.message : '';
+    const pre = li.querySelector('.proc-log'), open = app.procLogOpen === p.id;
+    pre.hidden = !open;
+    if (open && pp.enabled && ctx.role === 'operator' && procLogN[p.id] !== p.log_n) { procLogN[p.id] = p.log_n; loadProcLog(p.id); }
+  }
+  for (const li of have.values()) li.remove();
+}
+
+el('procStartAll').onclick = async () => {
+  const procs = app.procs.procs;
+  if (!(await confirmDialog(ProcView.startAllSummary(procs)))) return;
+  await procPost('/api/procs/start_all');
+};
+el('procStopAll').onclick = async () => {
+  const procs = app.procs.procs;
+  if (!(await confirmDialog(ProcView.stopAllSummary(procs)))) return;
+  await procPost('/api/procs/stop_all', { confirm: true });
+};
+
 const LAYOUT_KEY = 'pinky.layout.v1';
 const SIDE = { var: '--side-w', def: 300, min: 220, max: () => Math.min(720, Math.floor(window.innerWidth * 0.55)) };
 const HIST = { var: '--hist-h', def: 170, min: 80, max: () => Math.floor(window.innerHeight * 0.6) };
@@ -1045,6 +1219,7 @@ window.addEventListener('resize', resizeCanvas);
 new ResizeObserver(resizeCanvas).observe(canvas);
 resizeCanvas();
 renderClicks();
+function boot() {
 connect();
 fetch('/api/commands/config').then((r) => { if (!r.ok) throw new Error('명령 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((cfg) => { app.cfg = cfg; setupRoutePanel(); app.dirtyCards = true; })
@@ -1070,6 +1245,12 @@ el('routeLinesBtn').onclick = () => setShowRoutes(!app.showRoutes);
 fetch('/api/motion/config').then((r) => { if (!r.ok) throw new Error('모션 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((m) => { app.motion = m; app.dirtyCards = true; })
   .catch((err) => addAlarm('bad', String(err.message || err)));
-setInterval(() => { app.dirtyCards = true; renderZoneChip(); }, 500); // STARTING 5초 안내처럼 시간이 지나야 바뀌는 표시용
 loadMap().catch((err) => { el('stageNote').textContent = String(err.message || err); addAlarm('bad', String(err.message || err)); });
+}
+setInterval(() => { app.dirtyCards = true; renderZoneChip(); tickProcUptimes(); }, 500); // STARTING 5초 안내처럼 시간이 지나야 바뀌는 표시용
 requestAnimationFrame(frame);
+// 로그인 상태를 먼저 확인한다: 인증이 켜져 있는데 로그인하지 않았다면 로그인 후에 화면을 불러온다 (서버 API 가 전부 401 이라서)
+fetch('/api/me').then((r) => r.json()).then((me) => {
+  app.me = me; renderAuth();
+  if (me.auth && !me.role) showLogin(); else boot();
+}).catch((err) => { addAlarm('bad', '로그인 상태를 확인하지 못했습니다: ' + err.message); boot(); });

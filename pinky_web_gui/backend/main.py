@@ -5,6 +5,7 @@ import contextlib
 import itertools
 import json
 import logging
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -12,11 +13,13 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from .auth import COOKIE, OPERATOR, SESSION_SEC, VIEWER, Auth
 from .commands import CommandRejected, CommandTracker, CommandUnavailable, FAILED, validate
 from .config import Config, load_config
 from .hub import Hub
 from .map_loader import load_grid, load_map
 from .motion import Motion
+from .procs import ProcError, ProcessManager, SystemRunner
 from .planner import GridPlanner, NoPath, path_length
 import math
 
@@ -45,7 +48,12 @@ def same_origin(headers) -> bool:
     return urlparse(origin).netloc == headers.get('host')
 
 
-def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
+PROC_STATUS = {'unknown': 404, 'unset': 409, 'busy': 409, 'external': 409, 'confirm': 409, 'fail': 502}
+PUBLIC_API = ('/api/health', '/api/login', '/api/logout', '/api/me')  # 로그인 없이 부를 수 있는 API
+
+
+def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None) -> FastAPI:
+    auth = auth if auth is not None else Auth.from_env(os.environ)
     store = StateStore(cfg.robots, cfg.zone_status_topic, cfg.online_timeout_sec, cfg.pose_max_hz)
     tracker = CommandTracker(cfg.robots, cfg.command_history_size, cfg.no_response_sec)
     hub = Hub()
@@ -57,6 +65,19 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
         if commander is None:
             raise CommandUnavailable('서버가 아직 준비되지 않았습니다')
         return commander.publish_twist(rid, linear, angular)
+
+    bg['procs_dirty'] = False
+
+    def procs_changed():
+        bg['procs_dirty'] = True  # ticker 가 모아서 한 번에 보낸다 (로그가 많이 나와도 WS 가 넘치지 않게)
+
+    if proc_runner is None and mock:
+        from .mock_runner import MockRunner
+        proc_runner = MockRunner(**(mock_opts or {}).get('proc_opts', {}))
+    procs = ProcessManager(cfg.processes, proc_runner or SystemRunner(), lambda robot: store.is_online(robot), procs_changed)
+
+    def procs_message():
+        return {'type': 'procs', 'enabled': auth.procs_allowed, **procs.status()}
 
     motion = Motion(cfg.robots, cfg.motion, _publish_twist, store.patrol_state, store.is_online)
 
@@ -84,6 +105,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
             r['last_command'] = tracker.last_command(rid)
             r['last_task'] = tracker.last_task(rid)
         snap['commands'] = tracker.history()
+        snap['procs'] = procs_message()
         return snap
 
     # 지도는 시작할 때 한 번 읽는다. 실패해도 서버는 뜨고 /api/map 만 503 을 돌려준다.
@@ -145,6 +167,9 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
             try:
                 hub.broadcast(store.tick())
                 hub.broadcast(tracker.tick())
+                if bg['procs_dirty']:
+                    bg['procs_dirty'] = False
+                    hub.broadcast([procs_message()])
             except Exception:
                 log.exception('tick 실패(무시하고 계속)')
 
@@ -165,7 +190,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
         ros = None
         if mock:
             from .mock import MockFleet
-            fleet = MockFleet(cfg, queue, planner=planner, **(mock_opts or {}))
+            fleet = MockFleet(cfg, queue, planner=planner, **{k: v for k, v in (mock_opts or {}).items() if k != 'proc_opts'})
             bg['commander'] = fleet
             tasks.append(asyncio.create_task(fleet.run()))
             log.info('mock 모드: ROS 를 사용하지 않는다')
@@ -178,16 +203,77 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
         try:
             yield
         finally:
-            motion.shutdown()  # 비상정지 중이거나 수동 조작 중이던 로봇에 마지막 0 속도
+            motion.shutdown()  # 비상정지 중이거나 수동 조작 중이던 로봇에 마지막 0 속도. 브릿지를 끄기 전에 먼저 보낸다
             if ros:
                 # publish() 는 DDS 가 따로 내보내므로, 곧바로 rclpy 를 종료하면 마지막 0 속도가 나가기 전에 사라진다 (격리 도메인에서 확인)
                 await asyncio.sleep(SHUTDOWN_FLUSH_SEC)
+            await procs.shutdown()  # 이 GUI 가 켠 프로세스(브릿지, zone_manager, 로봇의 bringup/map)를 모두 정지한다
+            if ros:
                 ros.stop()
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(title='Pinky web GUI backend', lifespan=lifespan)
+
+    def role_of(request):
+        return auth.role_of(request.cookies.get(COOKIE))
+
+    def require(request, need):
+        """권한이 부족하면 거절 응답을, 충분하면 None 을 돌려준다. 인증이 꺼져 있으면 항상 통과 (기존 동작)."""
+        role = role_of(request)
+        if role is None:
+            return JSONResponse({'accepted': False, 'error': '로그인이 필요합니다'}, status_code=401)
+        if not Auth.allows(role, need):
+            return JSONResponse({'accepted': False, 'error': '보기 전용 계정은 사용할 수 없습니다 (operator 로 로그인하세요)'}, status_code=403)
+        return None
+
+    @app.middleware('http')
+    async def api_login_gate(request: Request, call_next):
+        """인증이 켜져 있으면 /api/ 는 로그인해야 쓸 수 있다 (정적 화면 파일은 로그인 화면을 보여줘야 하므로 열어 둔다)."""
+        path = request.url.path
+        if auth.enabled and path.startswith('/api/') and path not in PUBLIC_API and role_of(request) is None:
+            return JSONResponse({'error': '로그인이 필요합니다'}, status_code=401)
+        return await call_next(request)
+
+    @app.get('/api/me')
+    async def me(request: Request):
+        return {'auth': auth.enabled, 'role': role_of(request), 'procs_allowed': auth.procs_allowed,
+                'procs_configured': bool(cfg.processes)}
+
+    @app.post('/api/login')
+    async def login(request: Request):
+        denied = guard_post(request)
+        if denied:
+            return denied
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        who = request.client.host if request.client else '-'
+        if not auth.enabled:
+            return JSONResponse({'ok': False, 'error': '인증이 설정돼 있지 않습니다'}, status_code=400)
+        token, role = auth.login(body.get('password') if isinstance(body, dict) else None, who)
+        if token is None:
+            if role == 'locked':
+                log.warning('로그인 시도 제한: %s', who)
+                return JSONResponse({'ok': False, 'error': '실패가 너무 많습니다. 잠시 후 다시 시도하세요'}, status_code=429)
+            log.warning('로그인 실패: %s', who)
+            return JSONResponse({'ok': False, 'error': '비밀번호가 맞지 않습니다'}, status_code=401)
+        log.info('로그인: %s (%s)', who, role)
+        resp = JSONResponse({'ok': True, 'role': role})
+        resp.set_cookie(COOKIE, token, max_age=SESSION_SEC, httponly=True, samesite='strict', path='/')
+        return resp
+
+    @app.post('/api/logout')
+    async def logout(request: Request):
+        denied = guard_post(request)
+        if denied:
+            return denied
+        auth.logout(request.cookies.get(COOKIE))
+        resp = JSONResponse({'ok': True})
+        resp.delete_cookie(COOKIE, path='/')
+        return resp
 
     @app.get('/api/health')
     async def health():
@@ -295,7 +381,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
 
         본문은 직접 파싱해서 모든 입력 오류를 400 으로 통일한다 (허용 목록 밖은 400, 알 수 없는 로봇은 404).
         """
-        denied = guard_post(request)
+        denied = guard_post(request) or require(request, OPERATOR)
         if denied:
             return denied
         if robot_id not in cfg.robot_settings:
@@ -328,6 +414,91 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
         hub.broadcast(msgs)
         log.info('%s 명령 발행: %s', robot_id, sent)
         return {'accepted': True, 'sent': sent, 'id': entry['id']}
+
+    def procs_guard(request):
+        """프로세스 제어(원격 실행) 공통 검사: 출처·형식, operator 권한, 그리고 operator 비밀번호가 설정돼 있어야 한다."""
+        if request.method == 'POST':
+            denied = guard_post(request)
+            if denied:
+                return denied
+        denied = require(request, OPERATOR)
+        if denied:
+            return denied
+        if not auth.procs_allowed:
+            return JSONResponse({'accepted': False, 'error': '프로세스 제어는 PINKY_OPERATOR_PASSWORD 환경 변수를 설정해야 켜집니다 (인증 없이 원격 실행을 열지 않습니다)'}, status_code=403)
+        return None
+
+    def proc_error(e):
+        return JSONResponse({'accepted': False, 'error': str(e), 'needs_confirm': e.code == 'confirm'}, status_code=PROC_STATUS.get(e.code, 502))
+
+    async def confirm_flag(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return False
+        return isinstance(body, dict) and body.get('confirm') is True
+
+    @app.get('/api/procs')
+    async def api_procs():
+        return procs_message()
+
+    @app.post('/api/procs/start_all')
+    async def procs_start_all(request: Request):
+        denied = procs_guard(request)
+        if denied:
+            return denied
+        try:
+            procs.start_all()
+        except ProcError as e:
+            return proc_error(e)
+        log.info('프로세스 전체 시작 요청')
+        return {'accepted': True}
+
+    @app.post('/api/procs/stop_all')
+    async def procs_stop_all(request: Request):
+        denied = procs_guard(request)
+        if denied:
+            return denied
+        try:
+            procs.stop_all(await confirm_flag(request))
+        except ProcError as e:
+            return proc_error(e)
+        log.info('프로세스 전체 정지 요청')
+        return {'accepted': True}
+
+    @app.post('/api/procs/{proc_id}/start')
+    async def procs_start(proc_id: str, request: Request):
+        denied = procs_guard(request)
+        if denied:
+            return denied
+        try:
+            await procs.start(proc_id)
+        except ProcError as e:
+            log.warning('%s 시작 거절: %s', proc_id, e)
+            return proc_error(e)
+        return {'accepted': True}
+
+    @app.post('/api/procs/{proc_id}/stop')
+    async def procs_stop(proc_id: str, request: Request):
+        denied = procs_guard(request)
+        if denied:
+            return denied
+        try:
+            await procs.stop(proc_id, await confirm_flag(request))
+        except ProcError as e:
+            log.warning('%s 정지 거절/실패: %s', proc_id, e)
+            return proc_error(e)
+        return {'accepted': True}
+
+    @app.get('/api/procs/{proc_id}/log')
+    async def procs_log(proc_id: str, request: Request):
+        denied = procs_guard(request)
+        if denied:
+            return denied
+        try:
+            return {'id': proc_id, 'lines': procs.log_lines(proc_id)}
+        except ProcError as e:
+            return proc_error(e)
 
     @app.get('/api/plans')
     async def api_plans():
@@ -377,6 +548,9 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
         if not same_origin(ws.headers):  # 다른 사이트의 페이지가 로봇 제어 소켓을 여는 것을 막는다
             await ws.close(code=1008)
             return
+        if auth.role_of(ws.cookies.get(COOKIE)) is None:  # 인증이 켜져 있는데 로그인하지 않았다
+            await ws.close(code=1008)
+            return
         await ws.accept()
         q = hub.register(full_snapshot())
         client = next(client_ids)
@@ -397,6 +571,12 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None) -> FastAPI:
                 hub.set_scan(q, rid, msg['on'])
                 sync_scans()
             elif kind == 'drive' and rid in cfg.robots:
+                if not Auth.allows(auth.role_of(ws.cookies.get(COOKIE)), OPERATOR):  # 보기 전용은 조작할 수 없다 (매 메시지 확인: 세션 만료 대비)
+                    motion.release(client)
+                    if last_denied.get(rid) != 'viewer':
+                        last_denied[rid] = 'viewer'
+                        q.put_nowait({'type': 'drive_denied', 'robot': rid, 'reason': '보기 전용 계정은 수동 조작할 수 없습니다'})
+                    return
                 ok, reason = motion.drive(client, rid, msg.get('linear'), msg.get('angular'))
                 if ok:
                     last_denied.pop(rid, None)
@@ -451,19 +631,35 @@ def main():
                     help='--mock 에서 가짜 LiDAR 가 로봇 정면에서 돌아 달린 각도(도). 0 이 아니면 map->센서 변환(tf)으로 그린다 (센서 방향 보정 시험용)')
     ap.add_argument('--mock-scan-no-tf', action='store_true',
                     help='--mock-scan-mount-deg 와 함께: 센서가 돌려 달렸어도 tf 를 주지 않는다 (amcl + yaw_offset_deg 대체 경로 시험용)')
+    ap.add_argument('--mock-proc-fail', default='', help='--mock 에서 시작 직후 실패하는 프로세스 id (쉼표로 구분)')
+    ap.add_argument('--mock-proc-external', default='', help='--mock 에서 이미 다른 곳에서 실행 중인 것으로 보이는 프로세스 id (쉼표로 구분)')
     ap.add_argument('--config', default=None, help='robots.yaml 경로 (기본 config/robots.yaml)')
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     cfg = load_config(args.config)
-    if args.host not in LOOPBACK:
+    auth = Auth.from_env(os.environ)
+    if not auth.enabled:
         logging.getLogger('backend').warning(
-            '--host %s: 이 서버는 인증이 없습니다 (Step 5 에서 추가). 같은 네트워크의 누구나 비상정지 외에 start/goto%s를 보낼 수 있습니다',
-            args.host, '와 수동 조작(cmd_vel) ' if cfg.motion.manual_enabled else ' ')
+            '인증이 꺼져 있습니다 (PINKY_OPERATOR_PASSWORD, PINKY_VIEWER_PASSWORD 미설정). 프로세스 제어(원격 실행)는 꺼진 채로 시작합니다')
+        if args.host not in LOOPBACK:
+            logging.getLogger('backend').warning(
+                '--host %s: 인증 없이 같은 네트워크의 누구나 start/goto%s를 보낼 수 있습니다',
+                args.host, '와 수동 조작(cmd_vel) ' if cfg.motion.manual_enabled else ' ')
+    elif not auth.procs_allowed:
+        logging.getLogger('backend').warning('PINKY_OPERATOR_PASSWORD 가 없어 프로세스 제어는 꺼진 채로 시작합니다')
+    if args.host not in LOOPBACK and auth.enabled:
+        logging.getLogger('backend').warning('--host %s: 로그인 비밀번호가 암호화되지 않은 HTTP 로 전달됩니다. 신뢰하는 내부망에서만 쓰세요', args.host)
 
+    import signal
     import uvicorn
+    # 터미널 창을 닫으면 SIGHUP 이 온다. 기본 동작은 정리 없이 즉시 종료라서 켜 둔 프로세스가 남는다 -> Ctrl-C(SIGTERM)와 같은 정상 종료로 바꾼다
+    signal.signal(signal.SIGHUP, lambda *_: os.kill(os.getpid(), signal.SIGTERM))
     uvicorn.run(create_app(cfg, args.mock, {'wait_scale': args.mock_wait_scale, 'scan_mount_yaw': math.radians(args.mock_scan_mount_deg),
-                                                 'scan_mount_tf': not args.mock_scan_no_tf}), host=args.host, port=args.port, log_level='info')
+                                                 'scan_mount_tf': not args.mock_scan_no_tf,
+                                                 'proc_opts': {'fail_start': [x for x in args.mock_proc_fail.split(',') if x],
+                                                               'external': [x for x in args.mock_proc_external.split(',') if x]}},
+                                            auth=auth), host=args.host, port=args.port, log_level='info')
 
 
 if __name__ == '__main__':

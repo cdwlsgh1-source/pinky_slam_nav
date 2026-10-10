@@ -71,7 +71,7 @@ class Page:
 
     async def click_sel(self, sel):
         # 사이드바는 스크롤되므로, 화면 밖에 있으면 먼저 화면 안으로 가져온다 (좌표 클릭이 빗나가지 않게)
-        await self.js(f"document.querySelector({json.dumps(sel)}).scrollIntoView({{block: 'nearest'}})")
+        await self.js(f"document.querySelector({json.dumps(sel)}).scrollIntoView({{block: 'center'}})")
         await asyncio.sleep(0.05)
         xy = await self.js(f"(() => {{ const r = document.querySelector({json.dumps(sel)}).getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }})()")
         await self.mouse(xy[0], xy[1])

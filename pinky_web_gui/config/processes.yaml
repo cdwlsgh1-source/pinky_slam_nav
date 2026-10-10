@@ -1,0 +1,108 @@
+# GUI 의 "시스템" 패널에서 켜고 끄는 프로세스 목록. 이 목록에 있는 것만 실행할 수 있다.
+# 목록 순서가 [전체 시작] 순서이고, [전체 정지] 는 반대 순서다 (브릿지 -> zone_manager -> bringup -> map).
+#
+# 사용하려면 서버를 띄울 때 PINKY_OPERATOR_PASSWORD 환경 변수를 설정해야 한다 (설정이 없으면 이 기능은 꺼진다).
+# 비밀번호를 이 파일에 적지 않는다.
+#
+# 치환: {repo} = pinky_slam_nav 폴더의 절대 경로.
+# detect  : pgrep -f 패턴(정규식). 시작 전에 같은 프로세스가 이미 도는지 확인한다 (터미널에서 직접 켠 것과 겹치지 않게).
+#           영문/숫자로 시작해야 한다 (자기 자신을 찾지 않도록 서버가 첫 글자를 [x] 로 감싼다).
+# command : 비어 있으면 화면에 "명령 미설정" 으로 나오고 시작할 수 없다. 로봇 쪽 명령은 아래에서 직접 채운다.
+
+defaults:
+  local_source:
+    - /opt/ros/jazzy/setup.bash
+    - "{repo}/install/setup.bash"      # domain_bridge, zone_traffic_control 이 설치된 workspace
+
+processes:
+  # ---- 관제 PC (도메인 50) ----
+  - id: bridge_pinky1
+    label: 도메인 브릿지 pinky1
+    kind: local
+    domain: 50
+    command: "ros2 run domain_bridge domain_bridge {repo}/domain_bridge_pc/config/pinky_bridge_pinky1.yaml"
+    detect: "domain_bridge .*pinky_bridge_pinky1"
+    robot: pinky1
+    health: true            # 로봇 토픽이 오고 있으면 초록, 프로세스만 떠 있으면 노랑
+
+  - id: bridge_pinky2
+    label: 도메인 브릿지 pinky2
+    kind: local
+    domain: 50
+    command: "ros2 run domain_bridge domain_bridge {repo}/domain_bridge_pc/config/pinky_bridge_pinky2.yaml"
+    detect: "domain_bridge .*pinky_bridge_pinky2"
+    robot: pinky2
+    health: true
+
+  - id: zone_manager
+    label: zone_manager
+    kind: local
+    domain: 50
+    command: "ros2 launch zone_traffic_control zone_manager.launch.xml"
+    detect: "zone_manager_node"
+
+  # ---- 로봇 (SSH, 키 로그인) ----
+  # 사전 준비 (한 번만, 터미널에서 직접):
+  #   ssh-copy-id <user>@<host>          # 이때 비밀번호를 터미널에 입력한다. 이후 서버는 키로만 접속한다.
+  #   ssh <user>@<host> true             # 처음 접속 확인(known_hosts 등록)
+  # 키 대신 비밀번호를 써야 하면 ssh.password_env 에 '환경 변수 이름' 을 적고 서버 실행 환경에 그 변수를 둔다 (sshpass 설치 필요).
+  #
+  # host, user, command 를 채우면 활성화된다 (pinky2 는 값을 받지 못해 비어 있다).
+  # cwd    : 로봇에서 cd 할 절대 경로 (~ 불가). source 의 ./install/setup.bash 와 command 의 상대 경로 인자(map:=...)의 기준이다.
+  # source : 로봇의 경로. SSH 는 ~/.bashrc 를 읽지 않으므로 ROS 배포판 setup.bash 도 여기에 적는다.
+  - id: bringup_pinky1
+    label: pinky1 bringup
+    kind: ssh
+    robot: pinky1
+    health: true
+    domain: 20
+    ssh: {host: "192.168.45.20", user: "pinky", port: 22}
+    cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
+    source: ["/opt/ros/jazzy/setup.bash", "/home/pinky/pinky_slam_nav/install/setup.bash"]   # jazzy 는 로봇에서 확인함. SSH 는 ~/.bashrc 를 읽지 않으므로 명시한다
+    command: "ros2 launch pinky_bringup bringup_robot.launch.xml"
+    detect: "ros2 launch pinky_bringup"
+
+  - id: map_pinky1
+    label: pinky1 map (Nav2)
+    kind: ssh
+    robot: pinky1
+    domain: 20
+    ssh: {host: "192.168.45.20", user: "pinky", port: 22}
+    cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
+    source: ["/opt/ros/jazzy/setup.bash", "/home/pinky/pinky_slam_nav/install/setup.bash"]   # jazzy 는 로봇에서 확인함. SSH 는 ~/.bashrc 를 읽지 않으므로 명시한다
+    command: "ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml"
+    detect: "ros2 launch pinky_navigation"
+
+  # 순찰 노드: map(Nav2)이 올라온 뒤에 켠다 (노드가 Nav2 를 쓴다). 목록 순서 = 전체 시작 순서.
+  # cwd 가 pinky_slam_nav 라서 ./install/setup.bash 를 상대 경로로 source 한다 (robot_id 는 노드 기본값 pinky1).
+  - id: patrol_pinky1
+    label: pinky1 순찰 노드
+    kind: ssh
+    robot: pinky1
+    domain: 20
+    ssh: {host: "192.168.45.20", user: "pinky", port: 22}
+    cwd: /home/pinky/pinky_slam_nav
+    source: ["/opt/ros/jazzy/setup.bash", "./install/setup.bash"]
+    command: "ros2 run my_pinky_package pinky_patrol_node_pinky1_v2"
+    detect: "pinky_patrol_node_pinky1_v2"
+
+  - id: bringup_pinky2
+    label: pinky2 bringup
+    kind: ssh
+    robot: pinky2
+    health: true
+    domain: 22
+    ssh: {host: "", user: "", port: 22}
+    source: []
+    command: ""
+    detect: ""
+
+  - id: map_pinky2
+    label: pinky2 map (Nav2)
+    kind: ssh
+    robot: pinky2
+    domain: 22
+    ssh: {host: "", user: "", port: 22}
+    source: []
+    command: ""
+    detect: ""

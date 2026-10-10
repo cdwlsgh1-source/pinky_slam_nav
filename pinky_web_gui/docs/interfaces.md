@@ -240,7 +240,31 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 설정: 구역 사각형과 문은 `config/zone.yaml`(초안, `confirmed: false`), 나머지는 `config/robots.yaml` 의 `motion`/`manual`/`scan`.
 
+## 6-6. 웹 GUI 인증과 프로세스 제어
+
+환경 변수 `PINKY_OPERATOR_PASSWORD`(명령 가능), `PINKY_VIEWER_PASSWORD`(보기 전용). 둘 다 없으면 인증이 꺼지고 프로세스 제어도 꺼진다.
+
+| 메서드 경로 | 권한 | 설명 |
+|---|---|---|
+| `GET /api/me` | 공개 | `{auth, role, procs_allowed, procs_configured}` |
+| `POST /api/login` `{password}` | 공개 | 성공 시 `pinky_session` 쿠키. 틀리면 401, 5회 연속(1분) 실패 시 429. 인증이 꺼져 있으면 400 |
+| `POST /api/logout` | 공개 | 세션 삭제 |
+| 그 밖의 `/api/*`, `/ws` | viewer 이상 | 인증이 켜져 있으면 로그인 필요 (401). `/api/health` 는 공개 |
+| `POST /api/robots/{id}/command`, WS `drive` | operator | viewer 는 403 / `drive_denied` |
+| `POST /api/robots/{id}/estop`, `POST /api/estop` | viewer 이상 | 정지는 누구나 누를 수 있다 |
+| `GET /api/procs` | viewer 이상 | `{enabled, procs:[{id,label,kind,robot,host,configured,state,message,pid,uptime_sec,exit_code,confirm_stop,health,log_n}], sequence}` |
+| `POST /api/procs/{id}/start`, `/stop` | operator | stop 은 `confirm_stop` 인 프로세스(로봇)에 `{"confirm": true}` 필요 (없으면 409 + `needs_confirm`) |
+| `POST /api/procs/start_all`, `/stop_all` | operator | 백그라운드 시퀀스. 진행은 `sequence` (`{kind, state: running\|done\|failed, step, message, results}`). stop_all 도 로봇 프로세스가 돌면 `confirm` 필요 |
+| `GET /api/procs/{id}/log` | operator | 최근 200줄 |
+
+프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(operator 비밀번호 설정)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
+
 ## 7. 확인 필요 목록
+
+- (프로세스 제어) 로봇의 bringup/map 정확한 명령, source 경로, SSH 계정/주소 (`config/processes.yaml` 의 빈칸)
+- (프로세스 제어) SSH pty 에 Ctrl-C 를 보내 `ros2 launch` 가 로봇에서 깨끗이 종료되는지, 자식 프로세스가 남는지 (`detect` 확인 단계가 남은 것을 잡는다)
+- (프로세스 제어) 서버 종료 때 로봇의 bringup/map 이 실제로 정지하는지 (SSH Ctrl-C → 원격 pkill → SSH 끊기 순서, 남아 있으면 종료 로그에 남는다)
+- (프로세스 제어) 브릿지를 GUI 가 따로 띄울 때 `ros2 run domain_bridge domain_bridge` 가 `launch/bridges.launch.xml` 과 같은 동작을 하는지, `install/setup.bash` 에 domain_bridge 가 있는지 (이 PC 에서는 확인됨)
 
 - `goto`에 같은 지점을 중복해서 보냈을 때의 동작
 - `goto`의 `STOPPED`/`FAILED` 분기별 `waypoint`/`detail` 전수 확인
