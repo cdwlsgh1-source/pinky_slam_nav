@@ -9,6 +9,7 @@ const MAX_SCALE = 60;
 const MAX_ALARMS = 4;
 
 const el = (id) => document.getElementById(id);
+document.addEventListener('themechange', () => { if (typeof draw === 'function') draw(); }); // theme.js: 지도 배경/글자색은 CSS 변수라 다시 그린다
 const canvas = el('mapCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -971,7 +972,7 @@ el('driveRobot').onchange = () => { driveHalt(); el('driveMsg').textContent = ''
 function renderAuth() {
   const me = app.me, box = el('authBox');
   box.hidden = !(me && me.auth && me.role);
-  el('authRole').textContent = me && me.role ? (me.user || me.role) + (me.role === 'manager' ? ' (명령 가능)' : ' (보기 전용)') : '';
+  el('authRole').textContent = me && me.role ? (me.user || me.role) + (me.role === 'manager' ? '\n(명령 가능)' : '\n(보기 전용)') : '';
   app.dirtyCards = true;
   renderProcs();
 }

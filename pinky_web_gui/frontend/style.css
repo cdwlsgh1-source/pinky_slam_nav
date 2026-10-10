@@ -41,6 +41,7 @@ h2 small { font-weight: 400; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .brand { font-weight: 700; text-align: center; padding: 4px 0 8px; color: var(--accent); }
 .menu-item { width: 100%; text-align: left; }
+#themeBtn { white-space: pre-line; }  /* theme.js 의 \n 으로 두 줄 표시 */
 .menu-item.active { border-color: var(--accent); color: var(--accent); }
 .alarmbar { grid-area: alarm; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-height: 44px; }
@@ -179,7 +180,8 @@ code { font-family: var(--mono); }
 }
 
 /* 로그인, 로그아웃 */
-.authbox { margin-top: auto; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.authbox { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.authbox #authRole { white-space: pre-line; }  /* app.js 의 \n 으로 (명령 가능) 을 아래 줄에 표시 */
 .authbox[hidden] { display: none; }
 #confirmText { white-space: pre-line; }
 #loginDlg { min-width: 280px; }
