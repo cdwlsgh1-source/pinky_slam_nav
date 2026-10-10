@@ -4,10 +4,8 @@ GUI 의 시스템 패널로 도메인 브릿지, zone_manager, 로봇의 bringup
 
 ## 0. 준비 (한 번만)
 
-1. 서버를 비밀번호와 함께 실행한다. 비밀번호가 없으면 프로세스 제어는 꺼져 있다.
+1. 서버를 실행하고 `mngr` 계정(비밀번호 mngr, manager 역할)으로 로그인한다 (계정은 `backend/auth.py` 에 고정: mngr/mngr, oper/oper). `--no-auth` 로 실행하면 프로세스 제어는 꺼진다.
    ```bash
-   export PINKY_OPERATOR_PASSWORD='...'
-   export PINKY_VIEWER_PASSWORD='...'      # 선택
    cd pinky_web_gui && .venv/bin/python -m backend.main
    ```
 2. 로봇 SSH 키 등록 (비밀번호는 이때 터미널에 직접 입력):
@@ -35,7 +33,7 @@ GUI 의 시스템 패널로 도메인 브릿지, zone_manager, 로봇의 bringup
 
 | # | 할 일 | 기대 | 실패하면 |
 |---|---|---|---|
-| A1 | 로그인 | viewer 는 시스템 패널 버튼이 모두 꺼짐. operator 는 켜짐 | |
+| A1 | 로그인 | operator 는 시스템 패널 버튼이 모두 꺼짐. manager 는 켜짐 | |
 | A2 | 터미널에서 브릿지를 미리 켜 둔 채 GUI 로 `도메인 브릿지 pinky1` 시작 | "이미 실행 중인 같은 프로세스가 있습니다 (pid …)" 로 거절 | `ps aux \| grep domain_bridge` 로 패턴 확인 (`detect`) |
 | A3 | 터미널 브릿지를 끄고 GUI 로 시작 | 실행 중 → 로봇 토픽이 오면 초록, 아니면 "토픽 없음". `ros2 topic list` 에 `/pinky1/...` | 로그 보기 확인. `source` 경로 문제면 로그에 나온다 |
 | A4 | 로그 버튼 | 시작 줄(`$ local: …`)과 브릿지 출력 | |

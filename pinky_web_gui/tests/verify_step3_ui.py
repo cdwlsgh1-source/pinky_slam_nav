@@ -66,6 +66,7 @@ class Page:
         await self.mouse(xy[0], xy[1])
 
     async def mouse(self, x, y):
+        await self.call('Input.dispatchMouseEvent', type='mouseMoved', x=x, y=y)   # 페이지가 막 다시 로드된 직후에는 첫 클릭이 무시될 수 있어 먼저 움직인다
         for t in ('mousePressed', 'mouseReleased'):
             await self.call('Input.dispatchMouseEvent', type=t, x=x, y=y, button='left', clickCount=1)
 
@@ -87,7 +88,7 @@ async def run(shot):
     if not chrome:
         print('SKIP: Chrome 이 없다')
         return
-    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--mock', '--mock-wait-scale', '0.2', '--port', str(PORT)],
+    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--mock', '--mock-wait-scale', '0.2', '--port', str(PORT), '--no-auth'],
                            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     prof = tempfile.mkdtemp()
     br = subprocess.Popen([chrome, '--headless=new', '--no-sandbox', '--disable-gpu', f'--remote-debugging-port={CDP}',

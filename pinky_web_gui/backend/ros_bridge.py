@@ -5,6 +5,7 @@ rclpy 는 별도 스레드에서 spin 하고, 콜백은 값만 뽑아 asyncio �
 rclpy 는 mock 모드에서 설치되어 있지 않아도 되도록 이 모듈 안에서만 import 한다.
 """
 import logging
+import time
 import threading
 
 from .commands import CommandUnavailable
@@ -44,6 +45,7 @@ class RosBridge:
     def start(self):
         import rclpy
         from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
+        from nav_msgs.msg import Odometry
         from rclpy.node import Node
         from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
         from sensor_msgs.msg import LaserScan
@@ -82,6 +84,11 @@ class RosBridge:
             node.create_subscription(
                 Float32, f'/{rid}/battery/voltage',
                 lambda m, rid=rid: self._put(('battery', rid, None, m.data)), 10)
+        # 생존 확인용: bringup 만 켠 로봇은 amcl_pose(Nav2)와 patrol_status(순찰 노드)가 없고 배터리뿐이라 online 이 불안정했다.
+        # bringup 이 계속 내는 /odom 을 받아 '살아 있음' 만 반영한다 (BEST_EFFORT 로 받으면 어느 발행자와도 연결된다). 상태 값은 만들지 않는다.
+        self._alive_t = {}
+        for rid in self._cfg.robots:
+            node.create_subscription(Odometry, f'/{rid}/odom', lambda m, rid=rid: self._on_alive(rid), qos_profile_sensor_data)
         node.create_subscription(
             String, self._cfg.zone_status_topic,
             lambda m: self._put(('zone', m.data)), 10)
@@ -177,6 +184,12 @@ class RosBridge:
     def scan_subscribed(self):
         with self._scan_lock:
             return sorted(self._scan_subs)
+
+    def _on_alive(self, rid):
+        now = time.monotonic()
+        if now - self._alive_t.get(rid, 0.0) >= 0.5:   # odom 은 수십 Hz 라서 초당 2번만 넘긴다
+            self._alive_t[rid] = now
+            self._put(('alive', rid))
 
     def _on_pose(self, rid, msg):
         p = msg.pose.pose

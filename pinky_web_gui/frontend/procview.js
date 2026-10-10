@@ -18,8 +18,8 @@
   // ctx: { enabled(서버가 프로세스 제어를 켰는지), role, seqRunning }
   // 반환: null 이면 가능, 문자열이면 불가 사유(버튼 title 로 보여준다)
   function blocked(ctx) {
-    if (!ctx.enabled) return '프로세스 제어가 꺼져 있습니다 (서버에 PINKY_OPERATOR_PASSWORD 설정 필요)';
-    if (ctx.role !== 'operator') return '보기 전용 계정은 사용할 수 없습니다';
+    if (!ctx.enabled) return '프로세스 제어가 꺼져 있습니다 (로그인이 꺼진 --no-auth 서버)';
+    if (ctx.role !== 'manager') return '보기 전용 계정은 사용할 수 없습니다';
     return null;
   }
   function startBlocked(p, ctx) {

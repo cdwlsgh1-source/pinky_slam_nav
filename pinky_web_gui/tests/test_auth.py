@@ -1,5 +1,5 @@
-"""인증(역할, 세션, 로그인 제한) 단위 테스트."""
-from backend.auth import MAX_FAILS, OPERATOR, SESSION_SEC, VIEWER, Auth
+"""인증(고정 계정, 역할, 세션, 로그인 제한) 단위 테스트."""
+from backend.auth import DEFAULT_ACCOUNTS, MAX_FAILS, MANAGER, OPERATOR, SESSION_SEC, Auth
 
 
 class Clock:
@@ -10,77 +10,77 @@ class Clock:
         return self.t
 
 
-def make(op='op-pass', vw='vw-pass', clock=None):
-    return Auth(op, vw, now=clock or Clock())
+def make(clock=None):
+    return Auth(now=clock or Clock())
 
 
-def test_disabled_without_passwords():
-    a = Auth(None, None)
-    assert not a.enabled and not a.procs_allowed
-    assert a.role_of(None) == OPERATOR  # 인증이 꺼져 있으면 기존처럼 모두 사용 가능
-
-
-def test_from_env():
-    a = Auth.from_env({'PINKY_OPERATOR_PASSWORD': 'x'})
+def test_fixed_accounts_are_in_the_program():
+    assert DEFAULT_ACCOUNTS == {'mngr': ('mngr', MANAGER), 'oper': ('oper', OPERATOR)}
+    a = make()
     assert a.enabled and a.procs_allowed
-    b = Auth.from_env({'PINKY_VIEWER_PASSWORD': 'y'})
-    assert b.enabled and not b.procs_allowed  # viewer 만 있으면 프로세스 제어는 켜지지 않는다
-    assert not Auth.from_env({'PINKY_OPERATOR_PASSWORD': ''}).enabled
+
+
+def test_disabled_has_no_accounts_and_everyone_is_manager():
+    a = Auth.disabled()
+    assert not a.enabled and not a.procs_allowed
+    assert a.role_of(None) == MANAGER
+    assert a.login('mngr', 'mngr') == (None, 'invalid')
+
+
+def test_login_needs_matching_id_and_password():
+    a = make()
+    tok, role = a.login('mngr', 'mngr')
+    assert role == MANAGER and a.role_of(tok) == MANAGER and a.user_of(tok) == 'mngr'
+    tok2, role2 = a.login('oper', 'oper')
+    assert role2 == OPERATOR and a.role_of(tok2) == OPERATOR and a.user_of(tok2) == 'oper'
+    assert a.login('mngr', 'oper') == (None, 'invalid')      # 엇갈린 조합
+    assert a.login('oper', 'mngr') == (None, 'invalid')
+    assert a.login('admin', 'mngr') == (None, 'invalid')        # 없는 ID
+    assert a.login('', '') == (None, 'invalid')
 
 
 def test_roles():
+    assert Auth.allows(MANAGER, OPERATOR) and Auth.allows(MANAGER, MANAGER)
+    assert Auth.allows(OPERATOR, OPERATOR) and not Auth.allows(OPERATOR, MANAGER)
+    assert not Auth.allows(None, OPERATOR)
+
+
+def test_bad_types_and_unknown_token():
     a = make()
-    tok, role = a.login('op-pass')
-    assert role == OPERATOR and a.role_of(tok) == OPERATOR
-    tok2, role2 = a.login('vw-pass')
-    assert role2 == VIEWER and a.role_of(tok2) == VIEWER
-    assert Auth.allows(OPERATOR, VIEWER) and Auth.allows(OPERATOR, OPERATOR)
-    assert Auth.allows(VIEWER, VIEWER) and not Auth.allows(VIEWER, OPERATOR)
-    assert not Auth.allows(None, VIEWER)
-
-
-def test_wrong_password_and_unknown_token():
-    a = make()
-    assert a.login('nope') == (None, 'invalid')
-    assert a.login(None) == (None, 'invalid')
-    assert a.login(123) == (None, 'invalid')
-    assert a.login('') == (None, 'invalid')
-    assert a.role_of('forged') is None and a.role_of(None) is None
-
-
-def test_same_password_prefers_operator():
-    a = Auth('same', 'same')
-    assert a.login('same')[1] == OPERATOR
+    assert a.login(None, None) == (None, 'invalid')
+    assert a.login('mngr', 123) == (None, 'invalid')
+    assert a.login(['mngr'], 'mngr') == (None, 'invalid')
+    assert a.role_of('forged') is None and a.role_of(None) is None and a.user_of('forged') is None
 
 
 def test_session_expiry_and_logout():
     c = Clock()
-    a = make(clock=c)
-    tok, _ = a.login('op-pass')
+    a = make(c)
+    tok, _ = a.login('mngr', 'mngr')
     c.t += SESSION_SEC - 1
-    assert a.role_of(tok) == OPERATOR
+    assert a.role_of(tok) == MANAGER
     c.t += 2
     assert a.role_of(tok) is None
-    tok, _ = a.login('op-pass')
+    tok, _ = a.login('mngr', 'mngr')
     a.logout(tok)
     assert a.role_of(tok) is None
 
 
 def test_lockout_and_recovery():
     c = Clock()
-    a = make(clock=c)
+    a = make(c)
     for _ in range(MAX_FAILS):
-        assert a.login('bad', 'ip1')[1] == 'invalid'
-    assert a.login('op-pass', 'ip1') == (None, 'locked')   # 맞는 비밀번호도 잠시 막는다
-    assert a.login('op-pass', 'ip2')[1] == OPERATOR          # 다른 주소는 영향 없다
+        assert a.login('mngr', 'bad', 'ip1')[1] == 'invalid'
+    assert a.login('mngr', 'mngr', 'ip1') == (None, 'locked')   # 맞는 정보도 잠시 막는다
+    assert a.login('mngr', 'mngr', 'ip2')[1] == MANAGER          # 다른 주소는 영향 없다
     c.t += 61
-    assert a.login('op-pass', 'ip1')[1] == OPERATOR
+    assert a.login('mngr', 'mngr', 'ip1')[1] == MANAGER
 
 
 def test_successful_login_clears_failures():
     a = make()
     for _ in range(MAX_FAILS - 1):
-        a.login('bad', 'ip')
-    assert a.login('op-pass', 'ip')[1] == OPERATOR
+        a.login('mngr', 'bad', 'ip')
+    assert a.login('mngr', 'mngr', 'ip')[1] == MANAGER
     for _ in range(MAX_FAILS - 1):
-        assert a.login('bad', 'ip')[1] == 'invalid'
+        assert a.login('mngr', 'bad', 'ip')[1] == 'invalid'

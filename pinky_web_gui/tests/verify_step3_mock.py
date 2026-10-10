@@ -36,7 +36,7 @@ def post(path, body, raw=False):
 
 
 async def main():
-    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--mock', '--mock-wait-scale', '0.1', '--port', str(PORT)],
+    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--mock', '--mock-wait-scale', '0.1', '--port', str(PORT), '--no-auth'],
                            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(100):

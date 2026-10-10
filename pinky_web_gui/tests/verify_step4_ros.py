@@ -138,7 +138,7 @@ async def scenario(scan_reliable, with_tf=False):
     spin = threading.Thread(target=lambda: rclpy.spin(robot), daemon=True)
     spin.start()
     log_out = open(os.environ['STEP4_SERVER_LOG'], 'a') if os.environ.get('STEP4_SERVER_LOG') else subprocess.DEVNULL  # 디버깅용
-    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--port', str(PORT)], cwd=ROOT,
+    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--port', str(PORT), '--no-auth'], cwd=ROOT,
                            stdout=log_out, stderr=log_out)
     try:
         for _ in range(100):

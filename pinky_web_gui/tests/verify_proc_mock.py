@@ -1,7 +1,7 @@
 """프로세스 제어 + 인증 API 를 --mock 서버에 직접 붙어 확인한다 (urllib + websockets). 서버는 이 스크립트가 띄우고 정리한다.
 
 실행: .venv/bin/python tests/verify_proc_mock.py
-확인: 로그인 없이 /api 거절, viewer/operator 권한(명령·프로세스 제어·수동 조작), 프로세스 시작/정지/전체 시작·정지(WS 상태 포함),
+확인: 로그인 없이 /api 거절, operator/manager 권한(명령·프로세스 제어·수동 조작), 프로세스 시작/정지/전체 시작·정지(WS 상태 포함),
       로봇 프로세스 정지 확인 요구, 이미 실행 중인 프로세스 거절, 시작 실패 표시, 인증 미설정 시 프로세스 제어 꺼짐, 로그인 시도 제한.
 ros2, ssh 는 실행하지 않는다 (--mock 은 가짜 실행기를 쓴다).
 """
@@ -25,7 +25,7 @@ BASE = f'http://127.0.0.1:{PORT}'
 WS = f'ws://127.0.0.1:{PORT}/ws'
 FAILS = []
 
-OP, VW = 'op-secret-1', 'vw-secret-1'
+OP, VW = 'mngr', 'oper'   # 프로그램에 고정된 비밀번호 (backend/auth.py). ID 는 mngr / oper
 
 
 def check(name, cond, extra=''):
@@ -60,8 +60,9 @@ class Client:
             except Exception:
                 return e.code, {}
 
-    def login(self, pw):
-        return self.req('POST', '/api/login', {'password': pw})
+    def login(self, pw, uid=None):
+        uid = uid or ('mngr' if pw == OP else 'oper')
+        return self.req('POST', '/api/login', {'id': uid, 'password': pw})
 
 
 def write_config(tmp):
@@ -137,9 +138,9 @@ async def ws_recv_until(ws, pred, sec):
 
 async def with_auth(tmp):
     cfg = write_config(tmp)
-    srv = start_server(cfg, {'PINKY_OPERATOR_PASSWORD': OP, 'PINKY_VIEWER_PASSWORD': VW}, ['--mock-proc-external', 'zone_manager'])
+    srv = start_server(cfg, {}, ['--mock-proc-external', 'zone_manager'])
     try:
-        anon, viewer, op = Client(), Client(), Client()
+        anon, operator, op = Client(), Client(), Client()
         # ---- 로그인 전 ----
         check('로그인 없이 /api/state 는 401', anon.req('GET', '/api/state')[0] == 401)
         check('로그인 없이 /api/procs 는 401', anon.req('GET', '/api/procs')[0] == 401)
@@ -161,52 +162,59 @@ async def with_auth(tmp):
         check('틀린 비밀번호는 401', sc == 401)
         check('로그인 POST 도 출처 검사', Client().req('POST', '/api/login', {'password': OP}, headers={'Origin': 'http://evil.example'})[0] == 403)
         check('로그인 POST 는 JSON 만', Client().req('POST', '/api/login', raw=b'password=x', headers={'Content-Type': 'text/plain'})[0] == 415)
-        sc, body = viewer.login(VW)
-        check('viewer 로그인', sc == 200 and body['role'] == 'viewer')
-        sc, body = op.login(OP)
+        sc, body = operator.login(VW)
         check('operator 로그인', sc == 200 and body['role'] == 'operator')
+        sc, body = op.login(OP)
+        check('manager 로그인', sc == 200 and body['role'] == 'manager')
         sh = op.set_cookie_header.lower()
         check('세션 쿠키: HttpOnly, SameSite=Strict', 'httponly' in sh and 'samesite=strict' in sh and OP not in op.set_cookie_header)
-        check('로그인 후 /api/state 200', viewer.req('GET', '/api/state')[0] == 200)
+        check('로그인 후 /api/state 200', operator.req('GET', '/api/state')[0] == 200)
 
         # ---- 로그 화면 API ----
         sc, lg = op.req('GET', '/api/logs')
-        check('operator: /api/logs 구조', sc == 200 and {'epoch', 'last', 'entries', 'sources'} <= set(lg) and lg['sources'][0]['id'] == 'gui')
+        check('manager: /api/logs 구조', sc == 200 and {'epoch', 'last', 'entries', 'sources'} <= set(lg) and lg['sources'][0]['id'] == 'gui')
         check('GUI 서버 로그가 들어 있다(로그인/요청 기록 없이도 시작 로그)', all({'n', 't', 'src', 'lvl', 'text'} <= set(e) for e in lg['entries']))
-        check('/api/logs 응답에 비밀번호가 없다', OP not in json.dumps(lg) and VW not in json.dumps(lg))
+        check('/api/logs 응답에 비밀번호가 없다', 'password' not in json.dumps(lg).lower() and '비밀번호' not in json.dumps(lg, ensure_ascii=False))
         sc, lg2 = op.req('GET', '/api/logs?since=' + str(lg['last']))
         check('since 이후만 돌려준다', sc == 200 and all(e['n'] > lg['last'] for e in lg2['entries']))
         check('화면 파일은 no-cache', urllib.request.urlopen(BASE + '/app.js').headers.get('Cache-Control') == 'no-cache')
 
-        # ---- viewer 권한 ----
-        sc, p = viewer.req('GET', '/api/procs')
-        check('viewer 는 프로세스 목록을 본다', sc == 200 and p['enabled'] is True and len(p['procs']) >= 3)
-        check('viewer 는 프로세스를 시작할 수 없다(403)', viewer.req('POST', '/api/procs/bridge_pinky1/start', {})[0] == 403)
-        check('viewer 는 전체 시작도 불가', viewer.req('POST', '/api/procs/start_all', {})[0] == 403)
-        check('viewer 는 로그를 볼 수 없다', viewer.req('GET', '/api/procs/bridge_pinky1/log')[0] == 403)
-        check('viewer 는 로그 화면 API 도 볼 수 없다', viewer.req('GET', '/api/logs')[0] == 403)
+        # ---- 계정 전환: 새 로그인이 성공하면 이전 세션이 끝난다 ----
+        sw = Client(); sw.login(OP); old = sw.cookie
+        sc, body = sw.login(VW)
+        check('로그인 상태에서 다른 계정으로 로그인하면 새 역할', sc == 200 and body['role'] == 'operator')
+        stale = Client(); stale.cookie = old
+        check('전환하면 이전 세션은 무효(401)', stale.req('GET', '/api/state')[0] == 401)
+
+        # ---- operator 권한 ----
+        sc, p = operator.req('GET', '/api/procs')
+        check('operator 는 프로세스 목록을 본다', sc == 200 and p['enabled'] is True and len(p['procs']) >= 3)
+        check('operator 는 프로세스를 시작할 수 없다(403)', operator.req('POST', '/api/procs/bridge_pinky1/start', {})[0] == 403)
+        check('operator 는 전체 시작도 불가', operator.req('POST', '/api/procs/start_all', {})[0] == 403)
+        check('operator 는 로그를 볼 수 없다', operator.req('GET', '/api/procs/bridge_pinky1/log')[0] == 403)
+        check('operator 는 로그 화면 API 도 볼 수 없다', operator.req('GET', '/api/logs')[0] == 403)
         check('로그인 없이 /api/logs 는 401', Client().req('GET', '/api/logs')[0] == 401)
-        check('viewer 는 start 명령을 보낼 수 없다(403)', viewer.req('POST', '/api/robots/pinky1/command', {'cmd': 'start'})[0] == 403)
-        sc, _ = viewer.req('POST', '/api/robots/pinky1/estop', {})
-        check('viewer 도 비상정지는 누를 수 있다', sc == 200)
-        sc, _ = viewer.req('POST', '/api/estop', {})
-        check('viewer 도 모두 정지 가능', sc == 200)
-        async with websockets.connect(WS, additional_headers={'Cookie': viewer.cookie}) as ws:
+        check('operator 는 start 명령을 보낼 수 없다(403)', operator.req('POST', '/api/robots/pinky1/command', {'cmd': 'start'})[0] == 403)
+        sc, _ = operator.req('POST', '/api/robots/pinky1/estop', {})
+        check('operator 도 비상정지는 누를 수 있다', sc == 200)
+        sc, _ = operator.req('POST', '/api/estop', {})
+        check('operator 도 모두 정지 가능', sc == 200)
+        async with websockets.connect(WS, additional_headers={'Cookie': operator.cookie}) as ws:
             await ws.recv()
             await ws.send(json.dumps({'type': 'drive', 'robot': 'pinky1', 'linear': 0.05, 'angular': 0}))
             m = await ws_recv_until(ws, lambda x: x['type'] == 'drive_denied', 3)
-            check('viewer 의 수동 조작은 거절 알림', m is not None and '보기 전용' in m['reason'])
+            check('operator 의 수동 조작은 거절 알림', m is not None and '보기 전용' in m['reason'])
             await ws.send(json.dumps({'type': 'scan', 'robot': 'pinky1', 'on': True}))
             m = await ws_recv_until(ws, lambda x: x['type'] == 'scan', 4)
-            check('viewer 도 LiDAR 는 볼 수 있다', m is not None)
+            check('operator 도 LiDAR 는 볼 수 있다', m is not None)
         cv = json.loads(op.req('GET', '/api/mock/cmd_vel')[1] and json.dumps(op.req('GET', '/api/mock/cmd_vel')[1]))
-        check('viewer 의 drive 로 cmd_vel 이 나가지 않았다(비상정지 0 속도만)', all(c['linear'] == 0 and c['angular'] == 0 for c in cv['cmd_vel']))
+        check('operator 의 drive 로 cmd_vel 이 나가지 않았다(비상정지 0 속도만)', all(c['linear'] == 0 and c['angular'] == 0 for c in cv['cmd_vel']))
 
-        # ---- operator: 프로세스 ----
+        # ---- manager: 프로세스 ----
         sc, p = op.req('GET', '/api/procs')
         by = {x['id']: x for x in p['procs']}
         check('로봇 프로세스(채워 넣은 것)와 설정됨 표시', by['bringup_pinky1']['configured'] and by['bringup_pinky1']['kind'] == 'ssh' and by['bringup_pinky1']['confirm_stop'])
-        check('operator 의 알 수 없는 id 는 404', op.req('POST', '/api/procs/rm_rf/start', {})[0] == 404)
+        check('manager 의 알 수 없는 id 는 404', op.req('POST', '/api/procs/rm_rf/start', {})[0] == 404)
         check('procs POST 출처 검사', op.req('POST', '/api/procs/bridge_pinky1/start', {}, headers={'Origin': 'http://evil.example'})[0] == 403)
         check('procs POST 는 JSON 만', op.req('POST', '/api/procs/bridge_pinky1/start', raw=b'{}', headers={'Content-Type': 'text/plain'})[0] == 415)
 
@@ -271,7 +279,7 @@ async def with_auth(tmp):
 
 async def with_failures(tmp):
     cfg = write_config(tmp)
-    srv = start_server(cfg, {'PINKY_OPERATOR_PASSWORD': OP}, ['--mock-proc-fail', 'bridge_pinky1'])
+    srv = start_server(cfg, {}, ['--mock-proc-fail', 'bridge_pinky1'])
     try:
         op = Client()
         op.login(OP)
@@ -289,16 +297,16 @@ async def with_failures(tmp):
 
 async def without_auth(tmp):
     cfg = write_config(tmp)
-    srv = start_server(cfg, {})
+    srv = start_server(cfg, {}, ['--no-auth'])
     try:
         c = Client()
         check('인증 미설정: /api 는 그대로 쓸 수 있다', c.req('GET', '/api/state')[0] == 200)
         sc, me = c.req('GET', '/api/me')
-        check('인증 미설정: /api/me', me['auth'] is False and me['role'] == 'operator' and me['procs_allowed'] is False)
+        check('인증 미설정: /api/me', me['auth'] is False and me['role'] == 'manager' and me['procs_allowed'] is False)
         sc, p = c.req('GET', '/api/procs')
         check('인증 미설정: 목록은 enabled=false', sc == 200 and p['enabled'] is False)
         sc, r = c.req('POST', '/api/procs/bridge_pinky1/start', {})
-        check('인증 미설정이면 프로세스 제어는 403 (원격 실행을 열지 않는다)', sc == 403 and 'PINKY_OPERATOR_PASSWORD' in r['error'])
+        check('인증 미설정이면 프로세스 제어는 403 (원격 실행을 열지 않는다)', sc == 403 and '--no-auth' in r['error'])
         check('인증 미설정: 전체 시작도 403', c.req('POST', '/api/procs/start_all', {})[0] == 403)
         check('인증 미설정: 기존 명령 API 는 그대로', c.req('POST', '/api/robots/pinky1/command', {'cmd': 'stop'})[0] == 200)
         check('인증 미설정: 로그인 시도는 400', c.login('x')[0] == 400)
@@ -306,21 +314,28 @@ async def without_auth(tmp):
         stop_server(srv)
 
 
-async def viewer_only(tmp):
+async def login_rules(tmp):
+    """ID 와 비밀번호가 둘 다 맞아야 한다 (고정 계정 manager/mngr, operator/oper)."""
     cfg = write_config(tmp)
-    srv = start_server(cfg, {'PINKY_VIEWER_PASSWORD': VW})
+    srv = start_server(cfg, {'PINKY_MANAGER_PASSWORD': 'ignored', 'PINKY_OPERATOR_PASSWORD': 'ignored'})
     try:
-        v = Client()
-        check('viewer 비밀번호만 설정: viewer 로그인', v.login(VW)[0] == 200)
-        sc, p = v.req('GET', '/api/procs')
-        check('viewer 비밀번호만 설정하면 프로세스 제어는 꺼짐', sc == 200 and p['enabled'] is False)
-        check('operator 가 없으니 명령도 못 보낸다', v.req('POST', '/api/robots/pinky1/command', {'cmd': 'stop'})[0] == 403)
+        check('manager / mngr 로그인', Client().login('mngr', 'mngr')[1].get('role') == 'manager')
+        check('operator / oper 로그인', Client().login('oper', 'oper')[1].get('role') == 'operator')
+        check('ID 와 비밀번호가 엇갈리면 거절', Client().login('mngr', 'oper')[0] == 401 and Client().login('oper', 'mngr')[0] == 401)
+        check('없는 ID 는 거절', Client().login('mngr', 'admin')[0] == 401)
+        check('환경 변수로는 비밀번호를 바꿀 수 없다 (고정)', Client().login('ignored', 'mngr')[0] == 401)
+        c = Client()
+        c.login('mngr', 'mngr')
+        sc, me = c.req('GET', '/api/me')
+        check('/api/me 에 ID 가 나온다', me['user'] == 'mngr' and me['role'] == 'manager')
+        sc, p = c.req('GET', '/api/procs')
+        check('고정 계정이 있으니 프로세스 제어가 켜진다', sc == 200 and p['enabled'] is True)
     finally:
         stop_server(srv)
 
 
 async def main():
-    for fn in (with_auth, with_failures, without_auth, viewer_only):
+    for fn in (with_auth, with_failures, without_auth, login_rules):
         print(f'--- {fn.__name__} ---')
         with tempfile.TemporaryDirectory() as t:
             await fn(Path(t))

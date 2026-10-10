@@ -87,6 +87,8 @@ class StateStore:
             out += self._apply_pose(rid, event[2], event[3], event[4])
         elif kind == 'battery':
             out += self._apply_battery(rid, event[2], event[3])
+        elif kind == 'alive':
+            pass  # /odom 처럼 '살아 있다' 는 사실만 필요한 토픽: online 갱신(_touch)으로 충분하다
         elif kind == 'scan':
             pass  # 수신했다는 사실(online 갱신)만 반영한다. 점은 StateStore 가 아니라 scan 경로로 나간다
         else:

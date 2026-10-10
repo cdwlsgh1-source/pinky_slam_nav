@@ -183,6 +183,7 @@ code { font-family: var(--mono); }
 .authbox[hidden] { display: none; }
 #confirmText { white-space: pre-line; }
 #loginDlg { min-width: 280px; }
+#loginDlg .field { margin-bottom: 8px; }
 #loginDlg input { flex: 1; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; }
 .notice-bad { color: var(--bad); min-height: 18px; margin: 6px 0 8px; font-size: 14px; }
 

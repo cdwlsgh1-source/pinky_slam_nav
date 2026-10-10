@@ -78,5 +78,5 @@ scan:
   yaw_offset_deg: {}
 
 # ---- 프로세스 제어 (브릿지, zone_manager, 로봇 bringup/map 을 GUI 버튼으로) ----
-# 실행할 수 있는 프로세스 목록 yaml. PINKY_OPERATOR_PASSWORD 환경 변수가 있어야 켜진다.
+# 실행할 수 있는 프로세스 목록 yaml. manager 로 로그인해야 쓸 수 있다 (--no-auth 면 꺼짐).
 processes_yaml: processes.yaml

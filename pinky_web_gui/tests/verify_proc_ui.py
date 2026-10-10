@@ -1,7 +1,7 @@
 """로그인 + 시스템 패널(프로세스 제어) 화면을 headless Chrome(CDP)으로 확인한다. mock 서버를 직접 띄우고 정리한다.
 
 실행: .venv/bin/python tests/verify_proc_ui.py [--shot docs/process_panel.png]   (google-chrome 필요, 없으면 SKIP)
-확인: 로그인 화면(잘못된 비밀번호, 로그인 후 화면), viewer 의 버튼 비활성, operator 의 프로세스 시작/정지(로그 표시),
+확인: 로그인 화면(잘못된 비밀번호, 로그인 후 화면), operator 의 버튼 비활성, manager 의 프로세스 시작/정지(로그 표시),
       로봇 프로세스 정지 확인 팝업, 전체 시작/정지, 실패 표시, 인증 미설정 시 안내와 버튼 비활성.
 """
 import argparse
@@ -34,7 +34,7 @@ def check(name, cond, extra=''):
 
 async def open_page(chrome, url):
     prof = tempfile.mkdtemp()
-    br = subprocess.Popen([chrome, '--headless=new', '--no-sandbox', '--disable-gpu', f'--remote-debugging-port={CDP}',
+    br = subprocess.Popen([chrome, '--headless=new', '--no-sandbox', '--disable-features=PasswordManagerOnboarding,PasswordLeakDetection', '--password-store=basic', '--disable-save-password-bubble', '--disable-component-update', '--disable-sync', '--use-mock-keychain', '--disable-gpu', f'--remote-debugging-port={CDP}',
                            f'--user-data-dir={prof}', '--window-size=1400,1000', 'about:blank'],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(100):
@@ -48,13 +48,16 @@ async def open_page(chrome, url):
     pg = Page(ws)
     await pg.call('Page.enable')
     await pg.call('Emulation.setDeviceMetricsOverride', width=1400, height=1000, deviceScaleFactor=1, mobile=False)
+    await pg.call('Emulation.setFocusEmulationEnabled', enabled=True)   # headless 창이 포커스가 없어 입력이 무시되는 일을 막는다
+    await pg.call('Page.bringToFront')
     await pg.call('Page.navigate', url=url)
     return br, ws, pg
 
 
-async def login_via_ui(pg, pw):
-    await pg.js(f"(() => {{ const i = document.getElementById('loginPw'); i.value = {json.dumps(pw)}; }})()")
-    await pg.click_sel('#loginBtn')
+async def login_via_ui(pg, pw, uid=None):
+    uid = uid or ('mngr' if pw == vp.OP else 'oper')
+    await pg.js(f"(() => {{ document.getElementById('loginId').value = {json.dumps(uid)}; document.getElementById('loginPw').value = {json.dumps(pw)}; }})()")
+    await pg.js("document.getElementById('loginForm').requestSubmit()")   # 마우스로 누르면 이어지는 새로고침 뒤 headless Chrome 이 마우스 입력을 받지 않는 일이 있어 폼을 직접 제출한다
 
 
 ROW = lambda pid, act: f"#procList li[data-id='{pid}'] [data-act='{act}']"  # noqa: E731
@@ -68,40 +71,65 @@ async def accept_dialog(pg):
 
 async def scenario_auth(chrome, tmp, shot):
     cfg = vp.write_config(tmp)
-    srv = vp.start_server(cfg, {'PINKY_OPERATOR_PASSWORD': vp.OP, 'PINKY_VIEWER_PASSWORD': vp.VW})
+    srv = vp.start_server(cfg, {})
     br = ws = None
     try:
         br, ws, pg = await open_page(chrome, vp.BASE + '/')
+        # 이 시나리오의 headless Chrome 은 마우스 입력을 받지 않는 일이 있어(원인 미확인, 같은 화면을 JS 클릭으로는 정상 동작 확인) 클릭을 JS 로 한다
+        async def _js_click(sel):
+            await pg.js(f"(() => {{ const e = document.querySelector({json.dumps(sel)}); e.scrollIntoView({{block: 'center'}}); e.click(); }})()")
+        pg.click_sel = _js_click
         check('로그인 전: 로그인 창이 열린다', await pg.wait("document.getElementById('loginDlg').open", 8))
         check('로그인 전: 화면은 서버 API 를 부르지 않았다(지도/설정 없음)', await pg.js("!app.cfg && !app.meta && !app.wsUp"))
         await login_via_ui(pg, 'wrong-password')
         check('틀린 비밀번호: 오류 문구', await pg.wait("document.getElementById('loginErr').textContent.includes('맞지 않')", 5))
         check('틀린 비밀번호: 창이 그대로 열려 있다', await pg.js("document.getElementById('loginDlg').open"))
-        # viewer 로 로그인 -> 페이지가 다시 로드된다
+        # operator 로 로그인 -> 페이지가 다시 로드된다
         await login_via_ui(pg, vp.VW)
-        check('viewer 로그인 후 화면 로드', await pg.wait("app.cfg && app.meta && app.order.length === 2 && app.wsUp && app.me && app.me.role === 'viewer'", 12))
+        check('operator 로그인 후 화면 로드', await pg.wait("app.cfg && app.meta && app.order.length === 2 && app.wsUp && app.me && app.me.role === 'operator'", 12))
         check('로그인 창이 닫혀 있다', await pg.js("!document.getElementById('loginDlg').open"))
-        check('역할 표시(보기 전용)와 로그아웃 버튼', await pg.js("!document.getElementById('authBox').hidden && document.getElementById('authRole').textContent === '보기 전용'"))
+        check('역할 표시(보기 전용)와 로그아웃 버튼', await pg.js("!document.getElementById('authBox').hidden && document.getElementById('authRole').textContent === 'oper (보기 전용)'"))
         await asyncio.sleep(0.6)
-        check('viewer: 카드의 순찰 시작/정지/경로 이동 버튼이 꺼져 있다', await pg.js("[...document.querySelectorAll('#robotCards .cmd-row:not(.estop-row) button')].every(b => b.disabled)"))
-        check('viewer: 비상정지 버튼(상단과 카드)은 켜져 있다', await pg.js("[...document.querySelectorAll('#estopBar button, #robotCards button.danger')].every(b => !b.disabled)")
+        check('operator: 카드의 순찰 시작/정지/경로 이동 버튼이 꺼져 있다', await pg.js("[...document.querySelectorAll('#robotCards .cmd-row:not(.estop-row) button')].every(b => b.disabled)"))
+        check('operator: 비상정지 버튼(상단과 카드)은 켜져 있다', await pg.js("[...document.querySelectorAll('#estopBar button, #robotCards button.danger')].every(b => !b.disabled)")
               and await pg.js("document.querySelectorAll('#robotCards button.danger').length") == 2)
-        check('viewer: 수동 조작 체크박스가 꺼져 있고 사유 표시', await pg.js("document.getElementById('driveEnable').disabled && document.getElementById('driveMsg').textContent.includes('보기 전용')"))
-        check('viewer: 시스템 패널 목록과 안내', await pg.js("document.querySelectorAll('#procList li').length >= 3 && document.getElementById('procNote').textContent.includes('보기 전용')"))
-        check('viewer: 시작/정지/전체 버튼이 모두 꺼져 있다', await pg.js("[...document.querySelectorAll('#procList [data-act=start], #procList [data-act=stop], #procStartAll, #procStopAll')].every(b => b.disabled)"))
+        check('operator: 수동 조작 체크박스가 꺼져 있고 사유 표시', await pg.js("document.getElementById('driveEnable').disabled && document.getElementById('driveMsg').textContent.includes('보기 전용')"))
+        check('operator: 시스템 패널 목록과 안내', await pg.js("document.querySelectorAll('#procList li').length >= 3 && document.getElementById('procNote').textContent.includes('보기 전용')"))
+        check('operator: 시작/정지/전체 버튼이 모두 꺼져 있다', await pg.js("[...document.querySelectorAll('#procList [data-act=start], #procList [data-act=stop], #procStartAll, #procStopAll')].every(b => b.disabled)"))
         await pg.click_sel('#logMenu')
-        check('viewer: 로그 화면은 operator 안내만 보인다', await pg.wait("document.getElementById('logNote').textContent.includes('operator')", 5))
+        check('operator: 로그 화면은 manager 안내만 보인다', await pg.wait("document.getElementById('logNote').textContent.includes('manager')", 5))
         await pg.click_sel('.menu-item[data-view="main"]')
         # 로그아웃 -> 다시 로그인 창
         await pg.click_sel('#logoutBtn')
         check('로그아웃하면 로그인 창', await pg.wait("document.getElementById('loginDlg').open", 8))
-        # operator
+        # manager
         await login_via_ui(pg, vp.OP)
-        check('operator 로그인 후 화면 로드', await pg.wait("app.cfg && app.wsUp && app.me && app.me.role === 'operator' && app.procs", 12))
+        check('manager 로그인 후 화면 로드', await pg.wait("app.cfg && app.wsUp && app.me && app.me.role === 'manager' && app.procs", 12))
         await asyncio.sleep(0.8)
-        check('operator: 명령 버튼 활성 (online 로봇 순찰 시작)', await pg.wait("document.querySelector('#robotCards .card .cmd-row button').disabled === false", 5))
-        check('operator: 설정된 프로세스의 시작 버튼 활성, 미설정은 사유 표시', await pg.js(f"!document.querySelector(\"{ROW('bridge_pinky1', 'start')}\").disabled && !document.querySelector(\"{ROW('bringup_pinky1', 'start')}\").disabled"))
-        check('operator: 정지 버튼은 실행 중이 아니면 꺼져 있다', await pg.js(f"document.querySelector(\"{ROW('bridge_pinky1', 'stop')}\").disabled"))
+
+        # ---- 계정 전환: 로그아웃 없이 다른 계정으로 ----
+        await pg.click_sel('#switchBtn')
+        check('계정 전환: 로그인 창이 열리고 취소 버튼이 보임', await pg.js("document.getElementById('loginDlg').open && !document.getElementById('loginCancel').hidden && document.getElementById('loginTitle').textContent.includes('계정 전환')"))
+        await pg.click_sel('#loginCancel')
+        check('취소하면 창이 닫히고 계정은 그대로(manager)', await pg.js("!document.getElementById('loginDlg').open && app.me.role === 'manager'"))
+        await pg.click_sel('#switchBtn')
+        await login_via_ui(pg, 'wrong-pw')
+        check('전환 중 틀린 비밀번호: 오류가 보이고 지금 계정이 유지', await pg.wait("document.getElementById('loginErr').textContent.length > 0", 5)
+              and await pg.js("fetch('/api/me').then(r => r.json()).then(m => m.role === 'manager')"))
+        await pg.click_sel('#loginCancel')
+        await pg.click_sel('#switchBtn')
+        await login_via_ui(pg, vp.VW)
+        check('operator 비밀번호로 전환하면 operator(보기 전용)', await pg.wait("app.cfg && app.wsUp && app.me && app.me.role === 'operator' && app.procs", 12)
+              and await pg.js("document.getElementById('authRole').textContent.startsWith('oper (')"))
+        await asyncio.sleep(0.6)
+        check('전환 뒤 시스템 패널 버튼이 꺼지고 비상 정지는 켜짐', await pg.js("[...document.querySelectorAll('#procList [data-act=start], #procStartAll')].every(b => b.disabled) && !document.getElementById('estopAll').disabled"))
+        await pg.click_sel('#switchBtn')
+        await login_via_ui(pg, vp.OP)
+        check('manager 비밀번호로 다시 전환하면 manager', await pg.wait("app.cfg && app.wsUp && app.me && app.me.role === 'manager' && app.procs", 12))
+        await asyncio.sleep(0.6)
+        check('manager: 명령 버튼 활성 (online 로봇 순찰 시작)', await pg.wait("document.querySelector('#robotCards .card .cmd-row button').disabled === false", 5))
+        check('manager: 설정된 프로세스의 시작 버튼 활성, 미설정은 사유 표시', await pg.js(f"!document.querySelector(\"{ROW('bridge_pinky1', 'start')}\").disabled && !document.querySelector(\"{ROW('bringup_pinky1', 'start')}\").disabled"))
+        check('manager: 정지 버튼은 실행 중이 아니면 꺼져 있다', await pg.js(f"document.querySelector(\"{ROW('bridge_pinky1', 'stop')}\").disabled"))
 
         # 기능별 묶음 (도메인 브릿지 / zone_manager / bringup / map / 순찰 노드)
         check('시스템 패널이 기능별 묶음으로 나뉜다', await pg.js("[...document.querySelectorAll('#procList .proc-group')].map(g => g.dataset.group).join('|')") == '도메인 브릿지|zone_manager|bringup|map|순찰 노드')
@@ -179,7 +207,8 @@ async def scenario_auth(chrome, tmp, shot):
         await pg.click_sel('#logPause')
         check('재개하면 밀린 줄이 보인다', await pg.wait(f"document.querySelectorAll('#logBody .ln').length > {n_p}", 4))
         # 따라가기
-        check('따라가기가 켜져 있으면 맨 아래에 붙어 있다', await pg.js("(() => { const b = document.getElementById('logBody'); return b.scrollHeight - b.scrollTop - b.clientHeight < 30; })()"))
+        await pg.js("document.getElementById('logFollow').checked = true; document.getElementById('logFollow').dispatchEvent(new Event('change'))")
+        check('따라가기가 켜져 있으면 맨 아래에 붙어 있다', await pg.wait("(() => { const b = document.getElementById('logBody'); return b.scrollHeight - b.scrollTop - b.clientHeight < 30; })()", 4))
         await pg.js("document.getElementById('logBody').scrollTop = 0; document.getElementById('logBody').dispatchEvent(new Event('scroll'))")
         check('위로 올리면 따라가기가 꺼진다', await pg.js("!document.getElementById('logFollow').checked"))
         # 화면 지우기는 화면에서만
@@ -219,13 +248,13 @@ async def scenario_auth(chrome, tmp, shot):
 
 async def scenario_failure(chrome, tmp):
     cfg = vp.write_config(tmp)
-    srv = vp.start_server(cfg, {'PINKY_OPERATOR_PASSWORD': vp.OP}, ['--mock-proc-fail', 'bridge_pinky1'])
+    srv = vp.start_server(cfg, {}, ['--mock-proc-fail', 'bridge_pinky1'])
     br = ws = None
     try:
         br, ws, pg = await open_page(chrome, vp.BASE + '/')
         await pg.wait("document.getElementById('loginDlg').open", 8)
         await login_via_ui(pg, vp.OP)
-        await pg.wait("app.procs && app.me && app.me.role === 'operator' && app.wsUp", 12)
+        await pg.wait("app.procs && app.me && app.me.role === 'manager' && app.wsUp", 12)
         await pg.click_sel(ROW('bridge_pinky1', 'start'))
         check('시작 직후 종료: 실패 배지 + 사유 문구', await pg.wait(f"{STATE('bridge_pinky1')} === '실패' && document.querySelector(\"#procList li[data-id='bridge_pinky1'] .proc-msg\").textContent.includes('시작 직후 종료')", 8))
         check('실패한 뒤에는 시작이 다시 켜진다', await pg.js(f"!document.querySelector(\"{ROW('bridge_pinky1', 'start')}\").disabled"))
@@ -239,15 +268,15 @@ async def scenario_failure(chrome, tmp):
 
 async def scenario_noauth(chrome, tmp):
     cfg = vp.write_config(tmp)
-    srv = vp.start_server(cfg, {})
+    srv = vp.start_server(cfg, {}, ['--no-auth'])
     br = ws = None
     try:
         br, ws, pg = await open_page(chrome, vp.BASE + '/')
-        check('인증 미설정: 로그인 창 없이 화면이 뜬다', await pg.wait("app.cfg && app.meta && app.wsUp && app.me && app.me.role === 'operator'", 12))
+        check('인증 미설정: 로그인 창 없이 화면이 뜬다', await pg.wait("app.cfg && app.meta && app.wsUp && app.me && app.me.role === 'manager'", 12))
         check('인증 미설정: 로그인 창이 닫혀 있고 로그아웃 버튼이 숨겨져 있다', await pg.js("!document.getElementById('loginDlg').open && document.getElementById('authBox').hidden"))
         await asyncio.sleep(0.8)
         check('인증 미설정: 기존 명령 버튼은 그대로 쓸 수 있다', await pg.js("document.querySelector('#robotCards .card .cmd-row button').disabled === false"))
-        check('인증 미설정: 프로세스 제어는 꺼짐 + 안내 + 버튼 비활성', await pg.js("document.getElementById('procNote').textContent.includes('PINKY_OPERATOR_PASSWORD') && [...document.querySelectorAll('#procList [data-act=start], #procStartAll')].every(b => b.disabled)"))
+        check('인증 미설정: 프로세스 제어는 꺼짐 + 안내 + 버튼 비활성', await pg.js("document.getElementById('procNote').textContent.includes('--no-auth') && [...document.querySelectorAll('#procList [data-act=start], #procStartAll')].every(b => b.disabled)"))
     finally:
         if ws:
             await ws.close()

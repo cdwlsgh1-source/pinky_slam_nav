@@ -79,3 +79,18 @@ def test_battery_parts_merge():
     out = s.apply(('battery', 'a', None, 7.9))
     assert s.snapshot()['robots']['a']['battery'] == {'percentage': 80.0, 'voltage': 7.9}
     assert any(m.get('field') == 'battery' for m in out)
+
+
+def test_alive_event_only_keeps_robot_online_without_changing_values():
+    from backend.state import StateStore
+    t = [1000.0]
+    s = StateStore(['a'], '/zone', 5.0, 10, now=lambda: t[0])
+    msgs = s.apply(('alive', 'a'))
+    assert any(m.get('field') == 'online' and m.get('data') is True for m in msgs)
+    assert s.is_online('a')
+    t[0] += 3
+    assert s.apply(('alive', 'a')) == []          # 이미 online 이면 아무 메시지도 없다
+    t[0] += 3                                      # 마지막 수신 3초 뒤: 5초 타임아웃 전이라 online 유지
+    assert s.tick() == [] and s.is_online('a')
+    t[0] += 6
+    assert not s.is_online('a') or s.tick() != []

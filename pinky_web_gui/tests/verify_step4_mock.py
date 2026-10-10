@@ -93,7 +93,7 @@ async def mounted_scan(extra_args, config_text=None):
     """센서가 180도 돌아 달린 mock 서버를 따로 띄워 켠 LiDAR 의 첫 스캔 메시지와 벽 일치율을 돌려준다."""
     import tempfile
     port = PORT + 10
-    args = [sys.executable, '-m', 'backend.main', '--mock', '--port', str(port), '--mock-scan-mount-deg', '180'] + extra_args
+    args = [sys.executable, '-m', 'backend.main', '--mock', '--port', str(port), '--mock-scan-mount-deg', '180', '--no-auth'] + extra_args
     tmp = None
     if config_text is not None:
         tmp = Path(tempfile.mkdtemp())
@@ -129,7 +129,7 @@ async def mounted_scan(extra_args, config_text=None):
 async def main():
     cfg = load_config()
     meta, pixels = load_grid(cfg.map_yaml)
-    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--mock', '--mock-wait-scale', '0.1', '--port', str(PORT)],
+    srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--mock', '--mock-wait-scale', '0.1', '--port', str(PORT), '--no-auth'],
                            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(100):

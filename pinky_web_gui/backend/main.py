@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .auth import COOKIE, OPERATOR, SESSION_SEC, VIEWER, Auth
+from .auth import COOKIE, MANAGER, SESSION_SEC, OPERATOR, Auth
 from .commands import CommandRejected, CommandTracker, CommandUnavailable, FAILED, validate
 from .config import Config, load_config
 from .hub import Hub
@@ -54,7 +54,7 @@ PUBLIC_API = ('/api/health', '/api/login', '/api/logout', '/api/me')  # 로그�
 
 
 def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None) -> FastAPI:
-    auth = auth if auth is not None else Auth.from_env(os.environ)
+    auth = auth if auth is not None else Auth()   # 고정 계정 (backend/auth.py). 끄려면 Auth.disabled() 또는 --no-auth
     store = StateStore(cfg.robots, cfg.zone_status_topic, cfg.online_timeout_sec, cfg.pose_max_hz)
     tracker = CommandTracker(cfg.robots, cfg.command_history_size, cfg.no_response_sec)
     hub = Hub()
@@ -230,7 +230,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         if role is None:
             return JSONResponse({'accepted': False, 'error': '로그인이 필요합니다'}, status_code=401)
         if not Auth.allows(role, need):
-            return JSONResponse({'accepted': False, 'error': '보기 전용 계정은 사용할 수 없습니다 (operator 로 로그인하세요)'}, status_code=403)
+            return JSONResponse({'accepted': False, 'error': '보기 전용 계정은 사용할 수 없습니다 (manager 로 로그인하세요)'}, status_code=403)
         return None
 
     @app.middleware('http')
@@ -243,7 +243,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
 
     @app.get('/api/me')
     async def me(request: Request):
-        return {'auth': auth.enabled, 'role': role_of(request), 'procs_allowed': auth.procs_allowed,
+        return {'auth': auth.enabled, 'role': role_of(request), 'user': auth.user_of(request.cookies.get(COOKIE)), 'procs_allowed': auth.procs_allowed,
                 'procs_configured': bool(cfg.processes)}
 
     @app.post('/api/login')
@@ -257,16 +257,19 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             body = None
         who = request.client.host if request.client else '-'
         if not auth.enabled:
-            return JSONResponse({'ok': False, 'error': '인증이 설정돼 있지 않습니다'}, status_code=400)
-        token, role = auth.login(body.get('password') if isinstance(body, dict) else None, who)
+            return JSONResponse({'ok': False, 'error': '인증이 꺼져 있습니다 (--no-auth)'}, status_code=400)
+        b = body if isinstance(body, dict) else {}
+        token, role = auth.login(b.get('id'), b.get('password'), who)
+        if token:
+            auth.logout(request.cookies.get(COOKIE))   # 계정 전환: 이전 계정의 세션은 바로 끝낸다
         if token is None:
             if role == 'locked':
                 log.warning('로그인 시도 제한: %s', who)
                 return JSONResponse({'ok': False, 'error': '실패가 너무 많습니다. 잠시 후 다시 시도하세요'}, status_code=429)
             log.warning('로그인 실패: %s', who)
-            return JSONResponse({'ok': False, 'error': '비밀번호가 맞지 않습니다'}, status_code=401)
-        log.info('로그인: %s (%s)', who, role)
-        resp = JSONResponse({'ok': True, 'role': role})
+            return JSONResponse({'ok': False, 'error': 'ID 또는 비밀번호가 맞지 않습니다'}, status_code=401)
+        log.info('로그인: %s (%s, %s)', who, b.get('id'), role)
+        resp = JSONResponse({'ok': True, 'role': role, 'user': b.get('id')})
         resp.set_cookie(COOKIE, token, max_age=SESSION_SEC, httponly=True, samesite='strict', path='/')
         return resp
 
@@ -386,7 +389,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
 
         본문은 직접 파싱해서 모든 입력 오류를 400 으로 통일한다 (허용 목록 밖은 400, 알 수 없는 로봇은 404).
         """
-        denied = guard_post(request) or require(request, OPERATOR)
+        denied = guard_post(request) or require(request, MANAGER)
         if denied:
             return denied
         if robot_id not in cfg.robot_settings:
@@ -421,16 +424,16 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         return {'accepted': True, 'sent': sent, 'id': entry['id']}
 
     def procs_guard(request):
-        """프로세스 제어(원격 실행) 공통 검사: 출처·형식, operator 권한, 그리고 operator 비밀번호가 설정돼 있어야 한다."""
+        """프로세스 제어(원격 실행) 공통 검사: 출처·형식, manager 권한, 그리고 manager 비밀번호가 설정돼 있어야 한다."""
         if request.method == 'POST':
             denied = guard_post(request)
             if denied:
                 return denied
-        denied = require(request, OPERATOR)
+        denied = require(request, MANAGER)
         if denied:
             return denied
         if not auth.procs_allowed:
-            return JSONResponse({'accepted': False, 'error': '프로세스 제어는 PINKY_OPERATOR_PASSWORD 환경 변수를 설정해야 켜집니다 (인증 없이 원격 실행을 열지 않습니다)'}, status_code=403)
+            return JSONResponse({'accepted': False, 'error': '프로세스 제어는 로그인이 켜져 있어야 합니다 (--no-auth 서버에서는 인증 없이 원격 실행을 열지 않습니다)'}, status_code=403)
         return None
 
     def proc_error(e):
@@ -497,8 +500,8 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
 
     @app.get('/api/logs')
     async def api_logs(request: Request, since: int = 0, limit: int = 2000):
-        """로그 화면: 프로세스 출력과 GUI 서버 로그. 프로세스 출력에는 비밀이 섞일 수 있어 operator 만 본다 (인증이 꺼져 있으면 누구나 - 이때 프로세스는 없다)."""
-        denied = require(request, OPERATOR)
+        """로그 화면: 프로세스 출력과 GUI 서버 로그. 프로세스 출력에는 비밀이 섞일 수 있어 manager 만 본다 (인증이 꺼져 있으면 누구나 - 이때 프로세스는 없다)."""
+        denied = require(request, MANAGER)
         if denied:
             return denied
         rows, last = logs.read(max(0, since), max(1, min(limit, 5000)))
@@ -587,10 +590,10 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
                 hub.set_scan(q, rid, msg['on'])
                 sync_scans()
             elif kind == 'drive' and rid in cfg.robots:
-                if not Auth.allows(auth.role_of(ws.cookies.get(COOKIE)), OPERATOR):  # 보기 전용은 조작할 수 없다 (매 메시지 확인: 세션 만료 대비)
+                if not Auth.allows(auth.role_of(ws.cookies.get(COOKIE)), MANAGER):  # 보기 전용은 조작할 수 없다 (매 메시지 확인: 세션 만료 대비)
                     motion.release(client)
-                    if last_denied.get(rid) != 'viewer':
-                        last_denied[rid] = 'viewer'
+                    if last_denied.get(rid) != 'operator':
+                        last_denied[rid] = 'operator'
                         q.put_nowait({'type': 'drive_denied', 'robot': rid, 'reason': '보기 전용 계정은 수동 조작할 수 없습니다'})
                     return
                 ok, reason = motion.drive(client, rid, msg.get('linear'), msg.get('angular'))
@@ -657,23 +660,21 @@ def main():
                     help='--mock-scan-mount-deg 와 함께: 센서가 돌려 달렸어도 tf 를 주지 않는다 (amcl + yaw_offset_deg 대체 경로 시험용)')
     ap.add_argument('--mock-proc-fail', default='', help='--mock 에서 시작 직후 실패하는 프로세스 id (쉼표로 구분)')
     ap.add_argument('--mock-proc-external', default='', help='--mock 에서 이미 다른 곳에서 실행 중인 것으로 보이는 프로세스 id (쉼표로 구분)')
+    ap.add_argument('--no-auth', action='store_true', help='로그인을 끈다 (개발/시험용. 프로세스 제어도 꺼진다)')
     ap.add_argument('--config', default=None, help='robots.yaml 경로 (기본 config/robots.yaml)')
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     cfg = load_config(args.config)
-    auth = Auth.from_env(os.environ)
+    auth = Auth.disabled() if args.no_auth else Auth()
     if not auth.enabled:
-        logging.getLogger('backend').warning(
-            '인증이 꺼져 있습니다 (PINKY_OPERATOR_PASSWORD, PINKY_VIEWER_PASSWORD 미설정). 프로세스 제어(원격 실행)는 꺼진 채로 시작합니다')
+        logging.getLogger('backend').warning('--no-auth: 인증이 꺼져 있습니다. 프로세스 제어(원격 실행)는 꺼진 채로 시작합니다')
         if args.host not in LOOPBACK:
             logging.getLogger('backend').warning(
                 '--host %s: 인증 없이 같은 네트워크의 누구나 start/goto%s를 보낼 수 있습니다',
                 args.host, '와 수동 조작(cmd_vel) ' if cfg.motion.manual_enabled else ' ')
-    elif not auth.procs_allowed:
-        logging.getLogger('backend').warning('PINKY_OPERATOR_PASSWORD 가 없어 프로세스 제어는 꺼진 채로 시작합니다')
-    if args.host not in LOOPBACK and auth.enabled:
-        logging.getLogger('backend').warning('--host %s: 로그인 비밀번호가 암호화되지 않은 HTTP 로 전달됩니다. 신뢰하는 내부망에서만 쓰세요', args.host)
+    elif args.host not in LOOPBACK:
+        logging.getLogger('backend').warning('--host %s: 로그인 정보가 암호화되지 않은 HTTP 로 전달되고, 계정은 소스(backend/auth.py)에 고정돼 있습니다. 신뢰하는 내부망에서만 쓰세요', args.host)
 
     import signal
     import uvicorn

@@ -38,7 +38,7 @@ const app = {
   routeTarget: null,  // 지도에서 포인트를 클릭하면 경로가 추가되는 로봇
   history: [],        // 명령 이력, 최신이 앞 (서버가 보낸 command 이벤트로 갱신)
   locks: {},          // 'id:cmd' -> 연타 방지 해제 시각(ms)
-  me: null,           // /api/me: {auth, role, procs_allowed, procs_configured}. role 이 operator 일 때만 명령·수동 조작·프로세스 제어 버튼이 켜진다
+  me: null,           // /api/me: {auth, role, procs_allowed, procs_configured}. role 이 manager 일 때만 명령·수동 조작·프로세스 제어 버튼이 켜진다
   procs: null,        // 서버가 보낸 프로세스 상태 {enabled, procs:[...], sequence}
   procLogOpen: null,  // 로그를 펼친 프로세스 id
 };
@@ -47,7 +47,7 @@ const BTN_LOCK_MS = 1000;    // FR3-7: 같은 버튼 연타 방지
 
 // ---------- 유틸 ----------
 const hhmmss = () => new Date().toTimeString().slice(0, 8);
-const isOperator = () => !!app.me && app.me.role === 'operator';
+const isManager = () => !!app.me && app.me.role === 'manager';
 function normAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 
 function addAlarm(level, text) {
@@ -467,7 +467,7 @@ function renderCards() {
     const noResp = lc && lc.result === 'no_response' && r.noRespDismissed !== lc.id;
     c.noResp.style.display = noResp ? 'block' : 'none';
     c.noResp.textContent = noResp ? '로봇이 응답하지 않았거나 무시했을 수 있음 (' + (lc.sent || lc.cmd) + ')' : '';
-    const ready = !!app.cfg && app.wsUp && isOperator();   // 보기 전용(viewer)은 명령 버튼이 꺼진다
+    const ready = !!app.cfg && app.wsUp && isManager();   // 보기 전용(operator)은 명령 버튼이 꺼진다
     const route = app.routes[id] || [];
     c.btns.start.disabled = !ready || !PatrolView.canStart(state, r.online) || locked(id, 'start');
     c.btns.stop.disabled = !ready || !PatrolView.canStop(state, r.online) || locked(id, 'stop');
@@ -872,7 +872,7 @@ function driveRobotId() { return el('driveRobot').value; }
 
 function driveAllowed(id) {
   const r = app.robots[id], m = app.motion && app.motion.manual;
-  if (!isOperator()) return '보기 전용 계정은 수동 조작할 수 없습니다';
+  if (!isManager()) return '보기 전용 계정은 수동 조작할 수 없습니다';
   if (!r || !m || !m.enabled) return '수동 조작이 설정에서 꺼져 있습니다';
   if (!app.wsUp) return '서버에 연결되어 있지 않습니다';
   if (!r.online) return id + ' 가 오프라인입니다';
@@ -967,16 +967,22 @@ el('driveRobot').onchange = () => { driveHalt(); el('driveMsg').textContent = ''
 function renderAuth() {
   const me = app.me, box = el('authBox');
   box.hidden = !(me && me.auth && me.role);
-  el('authRole').textContent = me && me.role ? (me.role === 'operator' ? '명령 가능' : '보기 전용') : '';
+  el('authRole').textContent = me && me.role ? (me.user || me.role) + (me.role === 'manager' ? ' (명령 가능)' : ' (보기 전용)') : '';
   app.dirtyCards = true;
   renderProcs();
 }
 
-function showLogin(message) {
+// switching: 이미 로그인한 상태에서 다른 계정으로 바꾸는 중 (취소할 수 있다. 틀려도 지금 계정은 그대로)
+function showLogin(message, switching) {
   const dlg = el('loginDlg');
+  app.switching = !!switching;
+  el('loginCancel').hidden = !switching;
+  el('loginTitle').textContent = switching ? '계정 전환 (현재: ' + (app.me && (app.me.user || app.me.role)) + ')' : 'Pinky 관제 로그인';
+  el('loginPw').value = '';
+  if (switching) el('loginId').value = '';
   el('loginErr').textContent = message || '';
   if (!dlg.open) dlg.showModal();
-  setTimeout(() => el('loginPw').focus(), 0);
+  setTimeout(() => (el('loginId').value ? el('loginPw') : el('loginId')).focus(), 0);
 }
 
 async function checkSession() {
@@ -987,13 +993,15 @@ async function checkSession() {
   } catch (e) { /* 서버가 내려가 있으면 다시 연결될 때까지 기다린다 */ }
 }
 
-el('loginDlg').addEventListener('cancel', (e) => e.preventDefault());  // 로그인 전에는 닫을 수 없다
+el('loginDlg').addEventListener('cancel', (e) => { if (!app.switching) e.preventDefault(); });  // 로그인 전에는 닫을 수 없다 (계정 전환 중에는 Esc 로 취소)
+el('loginCancel').onclick = () => { app.switching = false; el('loginDlg').close(); };
+el('switchBtn').onclick = () => { driveHalt(); showLogin('', true); };
 el('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = el('loginBtn');
   btn.disabled = true; el('loginErr').textContent = '';
   try {
-    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: el('loginPw').value }) });
+    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: el('loginId').value.trim(), password: el('loginPw').value }) });
     const data = await res.json().catch(() => ({}));
     if (res.ok) { el('loginPw').value = ''; location.reload(); return; }
     el('loginErr').textContent = data.error || '로그인 실패 (' + res.status + ')';
@@ -1071,8 +1079,8 @@ function renderProcs() {
   const pp = app.procs, list = el('procList');
   if (!pp) return;
   const ctx = procCtx(), procs = pp.procs;
-  const note = !pp.enabled ? '프로세스 제어가 꺼져 있습니다. 서버를 PINKY_OPERATOR_PASSWORD 환경 변수와 함께 실행해야 켜집니다.'
-    : ctx.role !== 'operator' ? '보기 전용 계정입니다. 상태만 볼 수 있습니다.' : '';
+  const note = !pp.enabled ? '프로세스 제어가 꺼져 있습니다. 로그인이 꺼진 서버(--no-auth)에서는 쓸 수 없습니다.'
+    : ctx.role !== 'manager' ? '보기 전용 계정입니다. 상태만 볼 수 있습니다.' : '';
   el('procNote').textContent = note;
   const sa = ProcView.startAllBlocked(procs, ctx), oa = ProcView.stopAllBlocked(procs, ctx);
   el('procStartAll').disabled = !!sa; el('procStartAll').title = sa || '브릿지 → zone_manager → bringup → map 순서로 시작';
@@ -1124,7 +1132,7 @@ function renderProcs() {
     li.querySelector('.proc-msg').textContent = p.message && p.state !== 'running' ? p.message : '';
     const pre = li.querySelector('.proc-log'), open = app.procLogOpen === p.id;
     pre.hidden = !open;
-    if (open && pp.enabled && ctx.role === 'operator' && procLogN[p.id] !== p.log_n) { procLogN[p.id] = p.log_n; loadProcLog(p.id); }
+    if (open && pp.enabled && ctx.role === 'manager' && procLogN[p.id] !== p.log_n) { procLogN[p.id] = p.log_n; loadProcLog(p.id); }
   }
   for (const li of have.values()) li.remove();
   for (const g of [...list.children]) {   // 묶음 머리글: 실행 중 개수 요약. 비어 버린 묶음은 지운다
@@ -1441,7 +1449,7 @@ async function pollLogs() {
   try {
     const res = await fetch('/api/logs?since=' + logs.last);
     if (res.status === 401) { showLogin('세션이 만료됐습니다. 다시 로그인하세요'); return; }
-    if (res.status === 403) { el('logNote').textContent = '로그는 operator 로 로그인해야 볼 수 있습니다.'; return; }
+    if (res.status === 403) { el('logNote').textContent = '로그는 manager 로 로그인해야 볼 수 있습니다.'; return; }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
     el('logNote').textContent = '';

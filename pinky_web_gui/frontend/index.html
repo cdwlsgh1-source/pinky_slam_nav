@@ -25,6 +25,7 @@
     </div>
     <div class="authbox" id="authBox" hidden>
       <span id="authRole" class="dim"></span>
+      <button type="button" id="switchBtn" title="로그아웃하지 않고 다른 계정(manager / operator)의 비밀번호로 전환합니다">계정 전환</button>
       <button type="button" id="logoutBtn" title="로그아웃">로그아웃</button>
     </div>
   </nav>
@@ -76,7 +77,7 @@
       <p class="hint" id="procSeq"></p>
       <p class="hint" id="procNote"></p>
       <div class="procs" id="procList"></div>
-      <p class="hint">브릿지와 zone_manager 는 이 PC 에서, bringup 과 map 은 SSH 로 로봇에서 실행합니다. 터미널에서 직접 켠 프로세스는 여기서 끌 수 없습니다. 로그인(operator)이 필요합니다.</p>
+      <p class="hint">브릿지와 zone_manager 는 이 PC 에서, bringup 과 map 은 SSH 로 로봇에서 실행합니다. 터미널에서 직접 켠 프로세스는 여기서 끌 수 없습니다. 로그인(manager)이 필요합니다.</p>
     </section>
 
     <section id="routePanel" data-tab="route" data-tab-label="경로">
@@ -159,10 +160,11 @@
 
 <dialog id="loginDlg">
   <form id="loginForm" method="post" action="#">
-    <p><b>Pinky 관제 로그인</b></p>
+    <p><b id="loginTitle">Pinky 관제 로그인</b></p>
+    <label class="field">ID <input type="text" id="loginId" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
     <label class="field">비밀번호 <input type="password" id="loginPw" autocomplete="current-password" required></label>
     <p class="notice-bad" id="loginErr"></p>
-    <div class="row-actions"><button type="submit" class="primary" id="loginBtn">로그인</button></div>
+    <div class="row-actions"><button type="submit" class="primary" id="loginBtn">로그인</button><button type="button" id="loginCancel" hidden>취소</button></div>
   </form>
 </dialog>
 
