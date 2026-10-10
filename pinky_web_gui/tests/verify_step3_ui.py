@@ -70,6 +70,8 @@ class Page:
             await self.call('Input.dispatchMouseEvent', type=t, x=x, y=y, button='left', clickCount=1)
 
     async def click_sel(self, sel):
+        # 사이드바는 탭이라 다른 탭의 요소는 숨겨져 있다: 그 요소가 든 탭을 먼저 연다
+        await self.js(f"(() => {{ const s = document.querySelector({json.dumps(sel)}).closest('.sidebar > section[data-tab]'); if (s && s.hidden) app.showTab(s.dataset.tab); }})()")
         # 사이드바는 스크롤되므로, 화면 밖에 있으면 먼저 화면 안으로 가져온다 (좌표 클릭이 빗나가지 않게)
         await self.js(f"document.querySelector({json.dumps(sel)}).scrollIntoView({{block: 'center'}})")
         await asyncio.sleep(0.05)
@@ -77,7 +79,7 @@ class Page:
         await self.mouse(xy[0], xy[1])
 
 
-CARD_BTN = lambda rid, i: f"#robotCards .card:nth-child({1 + ['pinky1', 'pinky2'].index(rid)}) .cmd-row button:nth-child({i})"  # noqa: E731
+CARD_BTN = lambda rid, i: f"#robotCards .card:nth-child({1 + ['pinky1', 'pinky2'].index(rid)}) .cmd-row:not(.estop-row) button:nth-child({i})"  # noqa: E731
 
 
 async def run(shot):

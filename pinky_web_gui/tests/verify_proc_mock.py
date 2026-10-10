@@ -169,12 +169,23 @@ async def with_auth(tmp):
         check('세션 쿠키: HttpOnly, SameSite=Strict', 'httponly' in sh and 'samesite=strict' in sh and OP not in op.set_cookie_header)
         check('로그인 후 /api/state 200', viewer.req('GET', '/api/state')[0] == 200)
 
+        # ---- 로그 화면 API ----
+        sc, lg = op.req('GET', '/api/logs')
+        check('operator: /api/logs 구조', sc == 200 and {'epoch', 'last', 'entries', 'sources'} <= set(lg) and lg['sources'][0]['id'] == 'gui')
+        check('GUI 서버 로그가 들어 있다(로그인/요청 기록 없이도 시작 로그)', all({'n', 't', 'src', 'lvl', 'text'} <= set(e) for e in lg['entries']))
+        check('/api/logs 응답에 비밀번호가 없다', OP not in json.dumps(lg) and VW not in json.dumps(lg))
+        sc, lg2 = op.req('GET', '/api/logs?since=' + str(lg['last']))
+        check('since 이후만 돌려준다', sc == 200 and all(e['n'] > lg['last'] for e in lg2['entries']))
+        check('화면 파일은 no-cache', urllib.request.urlopen(BASE + '/app.js').headers.get('Cache-Control') == 'no-cache')
+
         # ---- viewer 권한 ----
         sc, p = viewer.req('GET', '/api/procs')
         check('viewer 는 프로세스 목록을 본다', sc == 200 and p['enabled'] is True and len(p['procs']) >= 3)
         check('viewer 는 프로세스를 시작할 수 없다(403)', viewer.req('POST', '/api/procs/bridge_pinky1/start', {})[0] == 403)
         check('viewer 는 전체 시작도 불가', viewer.req('POST', '/api/procs/start_all', {})[0] == 403)
         check('viewer 는 로그를 볼 수 없다', viewer.req('GET', '/api/procs/bridge_pinky1/log')[0] == 403)
+        check('viewer 는 로그 화면 API 도 볼 수 없다', viewer.req('GET', '/api/logs')[0] == 403)
+        check('로그인 없이 /api/logs 는 401', Client().req('GET', '/api/logs')[0] == 401)
         check('viewer 는 start 명령을 보낼 수 없다(403)', viewer.req('POST', '/api/robots/pinky1/command', {'cmd': 'start'})[0] == 403)
         sc, _ = viewer.req('POST', '/api/robots/pinky1/estop', {})
         check('viewer 도 비상정지는 누를 수 있다', sc == 200)
@@ -242,7 +253,7 @@ async def with_auth(tmp):
             check('전체 정지는 확인 없이 409', sc == 409 and r['needs_confirm'])
             sc, _ = op.req('POST', '/api/procs/stop_all', {'confirm': True})
             seq = await until_seq(op, 30)
-            check('전체 정지 완료(역순)', seq is not None and seq['state'] == 'done' and [x['id'] for x in seq['results']][0] == 'map_pinky2', str(seq))
+            check('전체 정지 완료(역순)', seq is not None and seq['state'] == 'done' and [x['id'] for x in seq['results']][0] == 'patrol_pinky2', str(seq))
             procs_now = {x['id']: x['state'] for x in op.req('GET', '/api/procs')[1]['procs']}
             check('전체 정지 뒤 모두 stopped', all(v == 'stopped' for v in procs_now.values()), str(procs_now))
 

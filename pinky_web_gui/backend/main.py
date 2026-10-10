@@ -17,6 +17,7 @@ from .auth import COOKIE, OPERATOR, SESSION_SEC, VIEWER, Auth
 from .commands import CommandRejected, CommandTracker, CommandUnavailable, FAILED, validate
 from .config import Config, load_config
 from .hub import Hub
+from .logstore import GUI, LogStore, StoreHandler
 from .map_loader import load_grid, load_map
 from .motion import Motion
 from .procs import ProcError, ProcessManager, SystemRunner
@@ -74,7 +75,8 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
     if proc_runner is None and mock:
         from .mock_runner import MockRunner
         proc_runner = MockRunner(**(mock_opts or {}).get('proc_opts', {}))
-    procs = ProcessManager(cfg.processes, proc_runner or SystemRunner(), lambda robot: store.is_online(robot), procs_changed)
+    logs = LogStore()
+    procs = ProcessManager(cfg.processes, proc_runner or SystemRunner(), lambda robot: store.is_online(robot), procs_changed, log_sink=logs.add)
 
     def procs_message():
         return {'type': 'procs', 'enabled': auth.procs_allowed, **procs.status()}
@@ -200,6 +202,8 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             ros.start()
             bg['commander'] = ros
         bg['mock'] = mock
+        log_handler = StoreHandler(logs)   # GUI 서버 로그를 로그 화면으로 모은다 (서버가 도는 동안만)
+        logging.getLogger('backend').addHandler(log_handler)
         try:
             yield
         finally:
@@ -213,6 +217,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            logging.getLogger('backend').removeHandler(log_handler)
 
     app = FastAPI(title='Pinky web GUI backend', lifespan=lifespan)
 
@@ -490,6 +495,17 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             return proc_error(e)
         return {'accepted': True}
 
+    @app.get('/api/logs')
+    async def api_logs(request: Request, since: int = 0, limit: int = 2000):
+        """로그 화면: 프로세스 출력과 GUI 서버 로그. 프로세스 출력에는 비밀이 섞일 수 있어 operator 만 본다 (인증이 꺼져 있으면 누구나 - 이때 프로세스는 없다)."""
+        denied = require(request, OPERATOR)
+        if denied:
+            return denied
+        rows, last = logs.read(max(0, since), max(1, min(limit, 5000)))
+        sources = [{'id': GUI, 'label': 'GUI 서버'}] + [
+            {'id': s.id, 'label': s.label, 'configured': bool(s.command)} for s in cfg.processes]
+        return {'epoch': logs.epoch, 'last': last, 'entries': rows, 'sources': sources}
+
     @app.get('/api/procs/{proc_id}/log')
     async def procs_log(proc_id: str, request: Request):
         denied = procs_guard(request)
@@ -610,6 +626,14 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             hub.unregister(q)
             motion.release(client)  # 연결이 어떻게 끊겼든 이 화면이 조작 중이던 로봇은 즉시 멈춘다 (FR4-9)
             sync_scans()            # 이 화면이 마지막 LiDAR 구독자였다면 /scan 구독 해제
+
+    # 화면 파일은 매번 서버에 변경 여부를 확인하게 한다 (no-cache: 안 바뀌면 304). 업데이트 뒤 브라우저가 옛 CSS/JS 와 새 HTML 을 섞어 쓰는 것을 막는다
+    @app.middleware('http')
+    async def no_stale_frontend(request, call_next):
+        resp = await call_next(request)
+        if not request.url.path.startswith('/api/'):
+            resp.headers['Cache-Control'] = 'no-cache'
+        return resp
 
     # API 와 /ws 를 모두 등록한 뒤 마지막에 정적 파일을 '/' 에 붙인다 (FR2-9, 빌드 단계 없음)
     if FRONTEND.is_dir():

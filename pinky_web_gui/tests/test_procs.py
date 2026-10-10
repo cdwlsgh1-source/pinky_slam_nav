@@ -445,3 +445,13 @@ def test_default_config_processes():
     assert ids.index('bringup_pinky1') < ids.index('map_pinky1') < ids.index('patrol_pinky1')   # 전체 시작 순서
     assert by['bringup_pinky2'].command == ''   # pinky2 는 값을 받지 못해 비어 있다
     assert by['zone_manager'].stop_on_exit
+
+
+def test_group_is_read_from_config(tmp_path):
+    from backend.config import _load_processes
+    f = tmp_path / 'p.yaml'
+    f.write_text("""processes:
+  - {id: a, label: A, kind: local, command: "echo a", group: "묶음 1"}
+  - {id: b, kind: local, command: "echo b"}
+""", encoding='utf-8')
+    assert [s.group for s in _load_processes(f, ())] == ['묶음 1', '']

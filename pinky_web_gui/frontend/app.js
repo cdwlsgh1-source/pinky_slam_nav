@@ -419,12 +419,19 @@ function ensureCard(id) {
   const noResp = document.createElement('p'); noResp.className = 'notice';
   const row = document.createElement('div'); row.className = 'cmd-row';
   const btns = {};
-  for (const [cmd, label] of [['start', '순찰 시작'], ['stop', '정지'], ['goto', '경로 이동']]) {
+  for (const [cmd, label] of [['start', '순찰 시작'], ['stop', '순찰 정지'], ['goto', '경로 이동']]) {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
     b.addEventListener('click', (e) => { e.stopPropagation(); onCommandClick(id, cmd); });
     btns[cmd] = b; row.appendChild(b);
   }
-  root.append(head, dl, meta, notice, noResp, row);
+  // 비상 정지: 권한, online 여부, 연타 잠금과 상관없이 항상 누를 수 있다 (FR4-7). 카드 클릭(경로 대상 선택)은 막는다
+  const estopRow = document.createElement('div'); estopRow.className = 'cmd-row estop-row';
+  const estopBtn = document.createElement('button'); estopBtn.type = 'button'; estopBtn.className = 'danger';
+  estopBtn.textContent = '비상 정지'; estopBtn.dataset.robot = id;
+  estopBtn.title = id + ' 에 stop 과 cmd_vel 0 속도를 보냅니다';
+  estopBtn.addEventListener('click', (e) => { e.stopPropagation(); estop(id); });
+  estopRow.appendChild(estopBtn);
+  root.append(head, dl, meta, notice, noResp, row, estopRow);
   el('robotCards').appendChild(root);
   return (cardEls[id] = { root, badge, stateBadge, meta, notice, noResp, btns, ...f });
 }
@@ -623,7 +630,7 @@ function applySnapshot(msg) {
   app.history = (msg.commands || []).slice().reverse();
   renderHistory();
   setupRoutePanel();
-  setupEstop(); setupScanToggles(); setupDrive();
+  setupScanToggles(); setupDrive();
   app.dirtyCards = true;
 }
 
@@ -803,6 +810,7 @@ el('gridBtn').onclick = () => {
 };
 
 // ---------- 비상정지 (FR4-7, FR4-8) ----------
+// 상단 '비상 정지' 는 모든 로봇, 로봇별 비상 정지는 로봇 카드 안의 버튼이다.
 // 확인 팝업도, 1초 잠금도 없다: 누를 때마다 보낸다 (정지 요청을 막는 일이 없어야 한다). 서버가 stop 과 cmd_vel 0 속도 burst 를 보낸다.
 async function estop(id) {
   driveHalt();
@@ -820,16 +828,6 @@ async function estop(id) {
   }
 }
 
-function setupEstop() {
-  const box = el('estopButtons');
-  box.replaceChildren();
-  for (const id of app.order) {
-    const b = document.createElement('button'); b.type = 'button'; b.className = 'danger'; b.textContent = id + ' 정지';
-    b.title = id + ' 에 stop 과 cmd_vel 0 속도를 보냅니다'; b.dataset.robot = id;
-    b.onclick = () => estop(id);
-    box.appendChild(b);
-  }
-}
 el('estopAll').onclick = () => estop(null);
 
 // ---------- LiDAR 토글 (FR4-5) ----------
@@ -1084,7 +1082,18 @@ function renderProcs() {
   el('procSeq').textContent = ProcView.sequenceText(seq, labelOf);
   el('procSeq').style.color = seq && seq.state === 'failed' ? 'var(--bad)' : '';
   // 행이 이미 있으면 내용만 고친다 (로그를 보고 있는 도중에 목록이 다시 그려져 스크롤이 튀지 않게)
-  const have = new Map([...list.children].map((li) => [li.dataset.id, li]));
+  const have = new Map([...list.querySelectorAll('li[data-id]')].map((li) => [li.dataset.id, li]));
+  // 기능별 묶음: 설정의 group 이름이 같은 것끼리 한 카드로 묶는다 (순서는 처음 나온 순서)
+  const groupBox = (name) => {
+    let g = [...list.children].find((c) => c.dataset.group === name);
+    if (!g) {
+      g = document.createElement('div'); g.className = 'proc-group'; g.dataset.group = name;
+      g.innerHTML = '<div class="proc-group-head"><span class="proc-group-name"></span><span class="proc-group-sum"></span></div><ul class="proc-rows"></ul>';
+      g.querySelector('.proc-group-name').textContent = name;
+      list.appendChild(g);
+    }
+    return g;
+  };
   for (const p of procs) {
     let li = have.get(p.id);
     if (!li) {
@@ -1100,8 +1109,9 @@ function renderProcs() {
         renderProcs();
       };
       li.querySelector('.proc-log').dataset.id = p.id;
-      list.appendChild(li);
     }
+    const gbox = groupBox(p.group || '기타');
+    if (li.parentNode !== gbox.querySelector('.proc-rows')) gbox.querySelector('.proc-rows').appendChild(li);
     have.delete(p.id);
     const b = ProcView.badge(p);
     li.querySelector('.proc-name').textContent = p.label;
@@ -1117,6 +1127,16 @@ function renderProcs() {
     if (open && pp.enabled && ctx.role === 'operator' && procLogN[p.id] !== p.log_n) { procLogN[p.id] = p.log_n; loadProcLog(p.id); }
   }
   for (const li of have.values()) li.remove();
+  for (const g of [...list.children]) {   // 묶음 머리글: 실행 중 개수 요약. 비어 버린 묶음은 지운다
+    const rows = procs.filter((p) => (p.group || '기타') === g.dataset.group);
+    if (!rows.length) { g.remove(); continue; }
+    const set = rows.filter((p) => p.configured !== false && p.state !== 'unset');
+    const run = set.filter((p) => p.state === 'running').length;
+    const bad = set.filter((p) => p.state === 'failed').length;
+    const sum = g.querySelector('.proc-group-sum');
+    sum.textContent = !set.length ? '명령 미설정' : run + '/' + set.length + ' 실행' + (bad ? ' · 실패 ' + bad : '');
+    sum.dataset.level = bad ? 'bad' : run && run === set.length ? 'ok' : run ? 'warn' : 'dim';
+  }
 }
 
 el('procStartAll').onclick = async () => {
@@ -1130,89 +1150,355 @@ el('procStopAll').onclick = async () => {
   await procPost('/api/procs/stop_all', { confirm: true });
 };
 
-const LAYOUT_KEY = 'pinky.layout.v1';
-const SIDE = { var: '--side-w', def: 300, min: 220, max: () => Math.min(720, Math.floor(window.innerWidth * 0.55)) };
-const HIST = { var: '--hist-h', def: 170, min: 80, max: () => Math.floor(window.innerHeight * 0.6) };
-const layout = { side: SIDE.def, hist: HIST.def, collapsed: [] };
+// ---------- 사이드바 탭 ----------
+const TAB_KEY = 'pinky.tab.v1';
+function setupTabs() {
+  const bar = el('sideTabs');
+  const panels = [...document.querySelectorAll('.sidebar > section[data-tab]')];
+  const tabs = {};
+  let saved = null;
+  try { saved = localStorage.getItem(TAB_KEY); } catch (e) { /* 저장소를 못 쓰면 기본 탭 */ }
+  for (const sec of panels) {
+    const name = sec.dataset.tab;
+    const b = document.createElement('button');
+    b.type = 'button'; b.id = 'tab-' + name; b.className = 'tab'; b.textContent = sec.dataset.tabLabel;
+    b.setAttribute('role', 'tab'); b.setAttribute('aria-controls', sec.id);
+    sec.setAttribute('role', 'tabpanel'); sec.setAttribute('aria-labelledby', b.id);
+    b.addEventListener('click', () => show(name, true));
+    b.addEventListener('keydown', (e) => {
+      const i = panels.indexOf(sec), n = panels.length;
+      const to = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i + n - 1) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+      if (to < 0) return;
+      e.preventDefault(); show(panels[to].dataset.tab, true); tabs[panels[to].dataset.tab].focus();
+    });
+    tabs[name] = b; bar.appendChild(b);
+  }
+  function show(name, persist) {
+    if (!tabs[name]) name = panels[0].dataset.tab;
+    for (const sec of panels) {
+      const on = sec.dataset.tab === name;
+      sec.hidden = !on;
+      tabs[sec.dataset.tab].setAttribute('aria-selected', String(on));
+      tabs[sec.dataset.tab].tabIndex = on ? 0 : -1;
+    }
+    app.tab = name;
+    if (persist) { try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* 무시 */ } }
+  }
+  app.showTab = (name) => show(name, false);
+  show(saved, false);
+}
 
+// ---------- 레이아웃 편집 ----------
+// 지도, 사이드바, 명령 이력 세 패널을 작업 영역 안의 24x20 격자에 놓는다. 좌표는 격자 칸 수(정수)라서 창 크기가 바뀌어도 비율이 유지된다.
+// 알람바(비상 정지)와 메뉴바는 항상 보여야 해서 배치 대상이 아니다.
+const LAYOUT_KEY = 'pinky.layout.v2';
+const GRID = { cols: 24, rows: 20 };
+const MIN_SIZE = { w: 4, h: 3 };
+const DEFAULT_RECTS = {
+  map: { x: 0, y: 0, w: 18, h: 16 },
+  side: { x: 18, y: 0, w: 6, h: 16 },
+  hist: { x: 0, y: 16, w: 24, h: 4 },
+};
+const PANEL_ELS = { map: 'panelMap', side: 'panelSide', hist: 'panelHist' };
+const cloneRects = (r) => JSON.parse(JSON.stringify(r));
+
+function validRect(r) {
+  const EPS = 1e-6;   // 분할선으로 끈 값은 정수 칸이 아니라 소수다
+  return r && ['x', 'y', 'w', 'h'].every((k) => Number.isFinite(r[k]))
+    && r.w >= MIN_SIZE.w - EPS && r.h >= MIN_SIZE.h - EPS && r.x >= -EPS && r.y >= -EPS && r.x + r.w <= GRID.cols + EPS && r.y + r.h <= GRID.rows + EPS;
+}
 function loadLayout() {
   try {
-    const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}');
-    if (Number.isFinite(v.side)) layout.side = v.side;
-    if (Number.isFinite(v.hist)) layout.hist = v.hist;
-    if (Array.isArray(v.collapsed)) layout.collapsed = v.collapsed.filter((x) => typeof x === 'string');
-  } catch (e) { /* 저장소를 못 쓰면 기본값으로 */ }
+    const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) || 'null');
+    if (v && v.rects && Object.keys(PANEL_ELS).every((k) => validRect(v.rects[k]))) return cloneRects(v.rects);
+  } catch (e) { /* 저장소를 못 쓰거나 값이 깨졌으면 기본 배치 */ }
+  return cloneRects(DEFAULT_RECTS);
 }
-function saveLayout() { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch (e) { /* 무시 */ } }
+function saveLayout(rects) { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ rects })); } catch (e) { /* 무시 */ } }
 
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const lay = { rects: loadLayout(), backup: null, editing: false, z: 1 };
 function applyLayout() {
-  layout.side = clamp(Math.round(layout.side), SIDE.min, Math.max(SIDE.min, SIDE.max()));
-  layout.hist = clamp(Math.round(layout.hist), HIST.min, Math.max(HIST.min, HIST.max()));
-  const root = document.querySelector('.app').style;
-  root.setProperty(SIDE.var, layout.side + 'px');
-  root.setProperty(HIST.var, layout.hist + 'px');
+  for (const [k, id] of Object.entries(PANEL_ELS)) {
+    const r = lay.rects[k], st = el(id).style;
+    st.setProperty('--x', r.x / GRID.cols); st.setProperty('--y', r.y / GRID.rows);
+    st.setProperty('--w', r.w / GRID.cols); st.setProperty('--h', r.h / GRID.rows);
+  }
 }
 
-function setupSplit(handle, axis, cfg, key) {
-  const horizontal = axis === 'x';
-  let drag = null;
-  handle.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    handle.setPointerCapture(e.pointerId);
-    drag = { start: horizontal ? e.clientX : e.clientY, base: layout[key] };
-    handle.classList.add('active');
-    document.body.classList.add('resizing', horizontal ? 'col' : 'row');
-  });
-  handle.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    const d = (horizontal ? e.clientX : e.clientY) - drag.start;
-    layout[key] = drag.base - d;  // 사이드바는 왼쪽으로, 이력은 위쪽으로 끌면 커진다
-    applyLayout();
-  });
-  const end = () => {
-    if (!drag) return;
-    drag = null;
-    handle.classList.remove('active');
-    document.body.classList.remove('resizing', 'col', 'row');
-    saveLayout();
+// 이동/크기 조절: 방향 문자열(n,s,e,w 조합, 'move' 는 이동)과 시작 사각형, 격자 칸 이동량으로 새 사각형을 구한다 (순수 계산이라 따로 뗐다)
+function dragRect(start, dir, dx, dy) {
+  let { x, y, w, h } = start;
+  if (dir === 'move') {
+    x = clamp(x + dx, 0, GRID.cols - w); y = clamp(y + dy, 0, GRID.rows - h);
+    return { x, y, w, h };
+  }
+  if (dir.includes('e')) w = clamp(start.w + dx, MIN_SIZE.w, GRID.cols - start.x);
+  if (dir.includes('s')) h = clamp(start.h + dy, MIN_SIZE.h, GRID.rows - start.y);
+  if (dir.includes('w')) { const right = start.x + start.w; x = clamp(start.x + dx, 0, right - MIN_SIZE.w); w = right - x; }
+  if (dir.includes('n')) { const bottom = start.y + start.h; y = clamp(start.y + dy, 0, bottom - MIN_SIZE.h); h = bottom - y; }
+  return { x, y, w, h };
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function setupLayoutEdit() {
+  const ws = el('workspace');
+  const overlays = {};
+  for (const [key, id] of Object.entries(PANEL_ELS)) {
+    const panel = el(id);
+    const ov = document.createElement('div'); ov.className = 'edit-overlay'; ov.dataset.panel = key;
+    const title = document.createElement('div'); title.className = 'edit-title'; title.textContent = panel.dataset.title + ' (끌어서 이동)';
+    ov.appendChild(title);
+    for (const dir of ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']) {
+      const h = document.createElement('div'); h.className = 'edit-handle edit-' + dir; h.dataset.dir = dir; ov.appendChild(h);
+    }
+    ov.addEventListener('pointerdown', (e) => {
+      if (!lay.editing || e.button > 0) return;
+      e.preventDefault();
+      const dir = e.target.dataset.dir || 'move';
+      const box = ws.getBoundingClientRect();
+      const cw = box.width / GRID.cols, ch = box.height / GRID.rows;
+      const start = { ...lay.rects[key] }, x0 = e.clientX, y0 = e.clientY;
+      panel.style.zIndex = ++lay.z;   // 최근에 만진 패널이 위로 온다
+      ov.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        lay.rects[key] = dragRect(start, dir, Math.round((ev.clientX - x0) / cw), Math.round((ev.clientY - y0) / ch));
+        applyLayout();
+      };
+      const end = () => { ov.removeEventListener('pointermove', move); ov.removeEventListener('pointerup', end); ov.removeEventListener('pointercancel', end); };
+      ov.addEventListener('pointermove', move); ov.addEventListener('pointerup', end); ov.addEventListener('pointercancel', end);
+    });
+    panel.appendChild(ov);
+    overlays[key] = ov;
+  }
+  const setEditing = (on) => {
+    lay.editing = on;
+    document.body.classList.toggle('layout-editing', on);
+    el('layoutEditBtn').setAttribute('aria-pressed', String(on));
+    el('layoutEditActions').hidden = !on;
+    if (app.placeSplits) app.placeSplits();
+    el('layoutEditBtn').hidden = on;
   };
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(ev, end);
-  handle.addEventListener('dblclick', () => { layout[key] = cfg.def; applyLayout(); saveLayout(); });
-  handle.addEventListener('keydown', (e) => {  // 키보드: 방향키 20px (Shift 는 60px), Home 은 초기화
-    const step = e.shiftKey ? 60 : 20;
-    const grow = horizontal ? 'ArrowLeft' : 'ArrowUp', shrink = horizontal ? 'ArrowRight' : 'ArrowDown';
-    if (e.key === grow) layout[key] += step; else if (e.key === shrink) layout[key] -= step;
-    else if (e.key === 'Home') layout[key] = cfg.def; else return;
-    e.preventDefault(); applyLayout(); saveLayout();
-  });
+  el('layoutEditBtn').onclick = () => { lay.backup = cloneRects(lay.rects); setEditing(true); };
+  el('layoutDone').onclick = () => { saveLayout(lay.rects); lay.backup = null; setEditing(false); };
+  el('layoutReset').onclick = () => { lay.rects = cloneRects(DEFAULT_RECTS); applyLayout(); };
+  const cancel = () => { if (lay.backup) { lay.rects = lay.backup; lay.backup = null; applyLayout(); } setEditing(false); };
+  el('layoutCancel').onclick = cancel;
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && lay.editing) { e.preventDefault(); cancel(); } });
+  app.layout = lay;  // 테스트가 확인한다
 }
 
-function setupSections() {
-  document.querySelectorAll('.sidebar section').forEach((sec, i) => {
-    const h = sec.querySelector('h2');
-    if (!h) return;
-    const id = sec.id || 'sec' + i;
-    h.setAttribute('role', 'button'); h.tabIndex = 0;
-    const set = (collapsed) => { sec.classList.toggle('collapsed', collapsed); h.setAttribute('aria-expanded', String(!collapsed)); };
-    set(layout.collapsed.includes(id));
-    const toggle = () => {
-      const c = !sec.classList.contains('collapsed');
-      set(c);
-      layout.collapsed = layout.collapsed.filter((x) => x !== id).concat(c ? [id] : []);
-      saveLayout();
-    };
-    h.addEventListener('click', toggle);
-    h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
-  });
-}
-
-loadLayout();
 applyLayout();
-setupSplit(el('splitV'), 'x', SIDE, 'side');
-setupSplit(el('splitH'), 'y', HIST, 'hist');
-setupSections();
-window.addEventListener('resize', applyLayout);  // 창이 줄어들면 최대값에 맞춰 다시 자른다
+setupTabs();
+setupLayoutEdit();
+
+// ---------- 분할선: 편집 모드 없이 경계를 끌어 크기 조절 ----------
+// 지도|사이드바 사이(세로선)와 지도·사이드바|이력 사이(가로선). 두 패널이 맞닿아 있을 때만 보인다 (자유 배치로 떨어뜨렸다면 숨김).
+// 더블클릭은 기본 배치, 방향키는 한 칸의 1/2 씩(Shift 는 2칸). 놓을 때 저장한다.
+function splitGeom() {
+  const m = lay.rects.map, sd = lay.rects.side, h = lay.rects.hist, E = 0.01;
+  const v = Math.abs(m.x + m.w - sd.x) < E && Math.abs(m.y - sd.y) < E && Math.abs(m.h - sd.h) < E;
+  const hz = Math.abs(Math.max(m.y + m.h, sd.y + sd.h) - h.y) < E && Math.abs(m.y + m.h - (sd.y + sd.h)) < E && Math.abs(h.x) < E && Math.abs(h.w - GRID.cols) < E;
+  return { v, h: hz };
+}
+function moveSplitV(b) {   // b: 새 경계 x (칸)
+  const m = lay.rects.map, sd = lay.rects.side, right = sd.x + sd.w;
+  b = clamp(b, m.x + MIN_SIZE.w, right - MIN_SIZE.w);
+  m.w = b - m.x; sd.x = b; sd.w = right - b;
+}
+function moveSplitH(b) {   // b: 새 경계 y (칸)
+  const m = lay.rects.map, sd = lay.rects.side, h = lay.rects.hist, bottom = h.y + h.h;
+  b = clamp(b, Math.max(m.y, sd.y) + MIN_SIZE.h, bottom - MIN_SIZE.h);
+  m.h = b - m.y; sd.h = b - sd.y; h.y = b; h.h = bottom - b;
+}
+function setupSplits() {
+  const ws = el('workspace');
+  const defs = [
+    { id: 'splitV', cls: 'split-v', key: 'v', label: '지도와 사이드바 경계 (끌어서 너비 조절, 더블클릭: 초기화)', axis: 'x',
+      get: () => lay.rects.side.x, set: moveSplitV,
+      place: (st) => { const sd = lay.rects.side; st.left = `calc(${sd.x / GRID.cols * 100}% - 5px)`; st.top = `${sd.y / GRID.rows * 100}%`; st.height = `${sd.h / GRID.rows * 100}%`; } },
+    { id: 'splitH', cls: 'split-h', key: 'h', label: '지도와 명령 이력 경계 (끌어서 높이 조절, 더블클릭: 초기화)', axis: 'y',
+      get: () => lay.rects.hist.y, set: moveSplitH,
+      place: (st) => { st.top = `calc(${lay.rects.hist.y / GRID.rows * 100}% - 5px)`; st.left = '0'; st.width = '100%'; } },
+  ];
+  const nodes = defs.map((d) => {
+    const n = document.createElement('div');
+    n.id = d.id; n.className = 'split ' + d.cls; n.tabIndex = 0;
+    n.setAttribute('role', 'separator'); n.setAttribute('aria-orientation', d.axis === 'x' ? 'vertical' : 'horizontal'); n.title = d.label;
+    ws.appendChild(n);
+    let drag = null;
+    const finish = () => { if (!drag) return; drag = null; n.classList.remove('active'); document.body.classList.remove('resizing', 'col', 'row'); saveLayout(lay.rects); };
+    n.addEventListener('pointerdown', (e) => {
+      if (lay.editing || e.button > 0) return;
+      e.preventDefault(); n.setPointerCapture(e.pointerId);
+      drag = { start: d.axis === 'x' ? e.clientX : e.clientY, base: d.get() };
+      n.classList.add('active'); document.body.classList.add('resizing', d.axis === 'x' ? 'col' : 'row');
+    });
+    n.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const box = ws.getBoundingClientRect();
+      const px = (d.axis === 'x' ? e.clientX : e.clientY) - drag.start;
+      d.set(drag.base + px / (d.axis === 'x' ? box.width / GRID.cols : box.height / GRID.rows));
+      applyLayout(); placeSplits();
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) n.addEventListener(ev, finish);
+    n.addEventListener('dblclick', () => {
+      if (lay.editing) return;
+      d.set(DEFAULT_RECTS[d.key === 'v' ? 'side' : 'hist'][d.key === 'v' ? 'x' : 'y']);
+      applyLayout(); placeSplits(); saveLayout(lay.rects);
+    });
+    n.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 2 : 0.5;
+      const dec = d.axis === 'x' ? 'ArrowLeft' : 'ArrowUp', inc = d.axis === 'x' ? 'ArrowRight' : 'ArrowDown';
+      if (e.key === dec) d.set(d.get() - step); else if (e.key === inc) d.set(d.get() + step);
+      else if (e.key === 'Home') d.set(DEFAULT_RECTS[d.key === 'v' ? 'side' : 'hist'][d.key === 'v' ? 'x' : 'y']); else return;
+      e.preventDefault(); applyLayout(); placeSplits(); saveLayout(lay.rects);
+    });
+    return { d, n };
+  });
+  function placeSplits() {
+    const g = splitGeom();
+    for (const { d, n } of nodes) { n.hidden = lay.editing || !g[d.key]; if (!n.hidden) d.place(n.style); }
+  }
+  app.placeSplits = placeSplits;
+  placeSplits();
+}
+setupSplits();
+
+// ---------- 화면 전환 (메인 / 로그) ----------
+function setView(name) {
+  if (lay.editing) return;   // 레이아웃 편집 중에는 화면을 바꾸지 않는다 (완료/취소 먼저)
+  const log = name === 'log';
+  el('workspace').hidden = log;
+  el('logView').hidden = !log;
+  document.querySelectorAll('.menu-item[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+  document.querySelectorAll('[data-only-view]').forEach((n) => { n.hidden = n.dataset.onlyView !== name; });
+  if (log) startLogs(); else stopLogs();
+  if (!log) resizeCanvas();
+}
+document.querySelectorAll('.menu-item[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+
+// ---------- 로그 화면 ----------
+// 서버가 모아 둔 로그(프로세스 출력, GUI 서버)를 1초마다 '마지막 번호 이후' 만 받아 소스 탭, 레벨, 검색으로 거른다.
+const logs = { entries: [], last: 0, epoch: null, src: 'all', sources: [], labels: { gui: 'GUI 서버' }, timer: null, paused: false, busy: false, shown: 0 };
+
+function logFilter() { return { src: logs.src, level: el('logLevel').value, q: el('logSearch').value.trim() }; }
+
+function logLine(e) {
+  const d = document.createElement('span'); d.className = 'ln'; d.dataset.lvl = e.lvl;
+  const t = document.createElement('span'); t.className = 't'; t.textContent = LogView.timeText(e.t) + ' ';
+  d.appendChild(t);
+  if (logs.src === 'all') {
+    const s = document.createElement('span'); s.className = 's'; s.textContent = '[' + (logs.labels[e.src] || e.src) + '] ';
+    d.appendChild(s);
+  }
+  d.appendChild(document.createTextNode(e.text));
+  return d;
+}
+
+function followBottom() {
+  const b = el('logBody');
+  if (el('logFollow').checked) b.scrollTop = b.scrollHeight;
+}
+
+function renderLogAll() {
+  const rows = LogView.filter(logs.entries, logFilter());
+  const body = el('logBody');
+  body.replaceChildren();
+  if (!rows.length) {
+    const p = document.createElement('span'); p.className = 'empty';
+    p.textContent = logs.entries.length ? '조건에 맞는 로그가 없습니다.' : '아직 로그가 없습니다. 시스템 탭에서 프로세스를 시작하면 출력이 여기에 나옵니다.';
+    body.appendChild(p);
+  } else {
+    const frag = document.createDocumentFragment();
+    for (const e of rows) frag.appendChild(logLine(e));
+    body.appendChild(frag);
+  }
+  logs.shown = rows.length;
+  el('logInfo').textContent = rows.length + ' / ' + logs.entries.length + ' 줄';
+  followBottom();
+}
+
+function renderLogTabs() {
+  const bar = el('logTabs'), c = LogView.counts(logs.entries);
+  const list = [{ id: 'all', label: '전체' }, ...logs.sources.filter((s) => s.id === 'gui' || s.configured || c[s.id])];
+  bar.replaceChildren();
+  for (const s of list) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'tab'; b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(logs.src === s.id)); b.dataset.src = s.id;
+    b.appendChild(document.createTextNode(s.label));
+    const n = c[s.id] || { n: 0, warn: 0, error: 0 };
+    if (n.error) { const x = document.createElement('span'); x.className = 'cnt e'; x.textContent = 'E' + n.error; b.appendChild(x); }
+    if (n.warn) { const x = document.createElement('span'); x.className = 'cnt w'; x.textContent = 'W' + n.warn; b.appendChild(x); }
+    if (!n.n) b.dataset.off = '1';
+    b.onclick = () => { logs.src = s.id; renderLogTabs(); renderLogAll(); };
+    bar.appendChild(b);
+  }
+}
+
+async function pollLogs() {
+  if (logs.busy) return;
+  logs.busy = true;
+  try {
+    const res = await fetch('/api/logs?since=' + logs.last);
+    if (res.status === 401) { showLogin('세션이 만료됐습니다. 다시 로그인하세요'); return; }
+    if (res.status === 403) { el('logNote').textContent = '로그는 operator 로 로그인해야 볼 수 있습니다.'; return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    el('logNote').textContent = '';
+    if (logs.epoch && logs.epoch !== d.epoch) {   // 서버가 다시 시작됐다: 번호가 처음부터 다시 시작하므로 처음부터 받는다
+      logs.entries = []; logs.last = 0; logs.epoch = d.epoch;
+      el('logNote').textContent = '서버가 다시 시작돼 로그를 처음부터 받습니다.';
+      return;
+    }
+    logs.epoch = d.epoch;
+    logs.sources = d.sources;
+    logs.labels = Object.fromEntries(d.sources.map((x) => [x.id, x.label]));
+    if (d.entries.length) {
+      logs.entries = LogView.append(logs.entries, d.entries);
+      logs.last = d.last;
+      if (!logs.paused) {
+        const f = logFilter(), body = el('logBody');
+        const add = LogView.filter(d.entries, f);
+        if (logs.shown === 0 || logs.entries.length >= LogView.MAX_KEEP) renderLogAll();   // 빈 안내 문구를 치우거나, 상한에서 앞쪽이 잘렸을 때는 다시 그린다
+        else {
+          for (const e of add) body.appendChild(logLine(e));
+          logs.shown += add.length;
+          el('logInfo').textContent = logs.shown + ' / ' + logs.entries.length + ' 줄';
+          followBottom();
+        }
+      }
+    }
+    renderLogTabs();
+  } catch (err) {
+    el('logNote').textContent = '로그를 받지 못했습니다: ' + err.message;
+  } finally {
+    logs.busy = false;
+  }
+}
+
+function startLogs() {
+  if (logs.timer) return;
+  renderLogAll();
+  pollLogs();
+  logs.timer = setInterval(pollLogs, 1000);
+}
+function stopLogs() { clearInterval(logs.timer); logs.timer = null; }
+
+el('logLevel').onchange = renderLogAll;
+el('logSearch').oninput = renderLogAll;
+el('logPause').onclick = () => {
+  logs.paused = !logs.paused;
+  el('logPause').setAttribute('aria-pressed', String(logs.paused));
+  el('logPause').textContent = logs.paused ? '재개' : '일시정지';
+  if (!logs.paused) renderLogAll();
+};
+el('logCopy').onclick = () => copyText(LogView.copyText(LogView.filter(logs.entries, logFilter()), logs.labels), el('logCopy'));
+el('logClear').onclick = () => { logs.entries = []; renderLogTabs(); renderLogAll(); };
+el('logBody').addEventListener('scroll', () => {   // 위로 올려 읽는 중이면 따라가기를 끄고, 맨 아래로 내리면 다시 켠다
+  const b = el('logBody'), atEnd = b.scrollHeight - b.scrollTop - b.clientHeight < 24;
+  el('logFollow').checked = atEnd;
+});
+el('logFollow').onchange = followBottom;
 
 // ---------- 시작 ----------
 window.addEventListener('resize', resizeCanvas);

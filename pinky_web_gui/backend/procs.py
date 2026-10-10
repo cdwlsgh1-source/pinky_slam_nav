@@ -140,7 +140,8 @@ class _Entry:
 
 
 class ProcessManager:
-    def __init__(self, specs, runner=None, health=None, on_change=None, now=time.monotonic, environ=None, which=shutil.which):
+    def __init__(self, specs, runner=None, health=None, on_change=None, now=time.monotonic, environ=None, which=shutil.which, log_sink=None):
+        self._sink = log_sink   # 로그 화면용: (프로세스 id, 한 줄) 을 받는다
         self._specs = {s.id: s for s in specs}
         self._order = [s.id for s in specs]
         self._e = {s.id: _Entry(s) for s in specs}
@@ -174,7 +175,7 @@ class ProcessManager:
             e = self._e[pid]
             s = e.spec
             procs.append({
-                'id': pid, 'label': s.label, 'kind': s.kind, 'robot': s.robot,
+                'id': pid, 'label': s.label, 'group': s.group, 'kind': s.kind, 'robot': s.robot,
                 'host': s.ssh_host if s.kind == 'ssh' else None,
                 'configured': bool(s.command), 'state': e.state, 'message': e.message, 'pid': e.pid,
                 'uptime_sec': round(now - e.started, 1) if e.state == RUNNING and e.started is not None else None,
@@ -195,6 +196,8 @@ class ProcessManager:
         if text:
             e.log.append(text[:MAX_LINE])
             e.log_n += 1
+            if self._sink:
+                self._sink(e.spec.id, text)
 
     # ---- 시작 ----
     async def _detect(self, spec):

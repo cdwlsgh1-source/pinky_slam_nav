@@ -78,6 +78,7 @@ class ProcSpec:
     ssh_port: int = 22
     ssh_key: str = ''
     ssh_password_env: str = ''   # 있으면 이 환경 변수의 값을 sshpass -e 로 쓴다 (값 자체는 설정 파일에 두지 않는다)
+    group: str = ''              # 시스템 패널에서 묶어 보여 줄 기능 이름 (예: '도메인 브릿지', 'bringup'). 같은 이름끼리 한 묶음
 
 
 @dataclass(frozen=True)
@@ -307,6 +308,9 @@ def _load_processes(path, robots):
                 raise ValueError(f'{path}: {pid}.ssh.password_env 는 환경 변수 이름이어야 한다 (비밀번호 값을 적지 않는다)')
             if key:
                 key = str(Path(key).expanduser())
+        group = str(p.get('group') or '').strip()
+        if len(group) > 40:
+            raise ValueError(f'{path}: {pid}.group 은 40자 이하여야 한다')
         def num(name, default, hi):
             try:
                 v = float(p.get(name, default))
@@ -323,7 +327,7 @@ def _load_processes(path, robots):
             flags[name] = v
         out.append(ProcSpec(pid, str(p.get('label') or pid), kind, command, domain, src, cwd, detect, stop_pattern, robot, health,
                             flags['stop_on_exit'], flags['confirm_stop'], num('settle_sec', 2.0, 60), num('stop_timeout_sec', 5.0, 60),
-                            host, user, port, key, pw_env))
+                            host, user, port, key, pw_env, group))
     return tuple(out)
 
 

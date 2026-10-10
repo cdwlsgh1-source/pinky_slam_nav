@@ -13,8 +13,16 @@
   <nav class="menubar" aria-label="메뉴">
     <div class="brand">Pinky</div>
     <button class="menu-item active" data-view="main">메인</button>
-    <button class="menu-item" disabled title="준비 중">로그</button>
+    <button class="menu-item" data-view="log" id="logMenu" title="GUI 가 켠 프로세스의 출력과 GUI 서버 로그">로그</button>
     <button class="menu-item" disabled title="준비 중">포인트</button>
+    <div class="layout-tools" id="layoutTools" data-only-view="main">
+      <button type="button" class="menu-item" id="layoutEditBtn" aria-pressed="false" title="지도, 사이드바, 명령 이력 패널을 끌어서 옮기고 크기를 조절합니다">레이아웃 편집</button>
+      <div class="layout-edit-actions" id="layoutEditActions" hidden>
+        <button type="button" id="layoutDone" class="primary">완료</button>
+        <button type="button" id="layoutReset" title="기본 배치로 되돌립니다">초기화</button>
+        <button type="button" id="layoutCancel" title="Esc">취소</button>
+      </div>
+    </div>
     <div class="authbox" id="authBox" hidden>
       <span id="authRole" class="dim"></span>
       <button type="button" id="logoutBtn" title="로그아웃">로그아웃</button>
@@ -25,16 +33,18 @@
   <header class="alarmbar" aria-label="시스템 알람">
     <span class="chip" id="connChip" data-level="warn">연결 중...</span>
     <span class="chip" id="zoneChip" data-level="dim">구역: -</span>
-    <!-- 비상정지: 항상 보이고, 확인 팝업 없이 한 번 누르면 동작한다 (FR4-7) -->
+    <!-- 비상정지: 항상 보이고, 확인 팝업 없이 한 번 누르면 동작한다 (FR4-7). 로봇별 비상 정지는 로봇 카드 안에 있다 -->
     <div class="estop" id="estopBar" role="group" aria-label="비상정지">
-      <span id="estopButtons"></span>
-      <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">모두 정지</button>
+      <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">비상 정지</button>
     </div>
     <ul class="alarm-list" id="alarmList"><li class="dim">알람 없음</li></ul>
   </header>
 
-  <!-- 가운데: 지도 화면 -->
-  <main class="mapwrap">
+  <!-- 작업 영역: 지도 / 사이드바 / 명령 이력 패널을 자유롭게 배치한다 (레이아웃 편집, app.js) -->
+  <div class="workspace" id="workspace">
+
+  <!-- 지도 화면 -->
+  <main class="mapwrap panel" id="panelMap" data-panel="map" data-title="지도">
     <div class="stage" id="stage">
       <canvas id="mapCanvas"></canvas>
       <div class="stage-note" id="stageNote">지도 불러오는 중...</div>
@@ -52,25 +62,24 @@
   </main>
 
   <!-- 오른쪽: 로봇 카드 / 명령어 / 클릭 좌표 -->
-  <aside class="sidebar" aria-label="로봇과 명령">
-    <section>
-      <h2>로봇</h2>
+  <aside class="sidebar panel" id="panelSide" data-panel="side" data-title="사이드바" aria-label="로봇과 명령">
+    <div class="tabs" id="sideTabs" role="tablist" aria-label="사이드바 탭"></div>
+    <section id="robotsPanel" data-tab="robots" data-tab-label="로봇">
       <div id="robotCards"></div>
     </section>
 
-    <section id="procPanel">
-      <h2>시스템 <small>(프로세스)</small></h2>
+    <section id="procPanel" data-tab="system" data-tab-label="시스템">
       <div class="row-actions">
         <button type="button" id="procStartAll" class="primary">전체 시작</button>
         <button type="button" id="procStopAll">전체 정지</button>
       </div>
       <p class="hint" id="procSeq"></p>
       <p class="hint" id="procNote"></p>
-      <ul class="procs" id="procList"></ul>
+      <div class="procs" id="procList"></div>
       <p class="hint">브릿지와 zone_manager 는 이 PC 에서, bringup 과 map 은 SSH 로 로봇에서 실행합니다. 터미널에서 직접 켠 프로세스는 여기서 끌 수 없습니다. 로그인(operator)이 필요합니다.</p>
     </section>
 
-    <section>
+    <section id="routePanel" data-tab="route" data-tab-label="경로">
       <h2>경로 이동 <small>(goto)</small></h2>
       <label class="field">대상 로봇 <select id="routeRobot"></select></label>
       <p class="hint">지도의 포인트(P1~P7)를 클릭하면 경로 끝에 추가됩니다. 구역 문(RED*)과 락은 로봇이 알아서 처리합니다. 지도의 <b>경로</b> 버튼을 켜면 로봇의 경로 선을 그리며(기본 꺼짐), 이 선은 지도의 벽을 피하는 최단 경로를 계산한 <b>추정</b>이라 Nav2 의 실제 경로와 조금 다를 수 있습니다.</p>
@@ -80,14 +89,12 @@
       <p class="hint" id="routeMeta"></p>
     </section>
 
-    <section>
+    <section id="controlPanel" data-tab="control" data-tab-label="조작">
       <h2>오버레이 <small>(LiDAR)</small></h2>
       <div id="scanToggles"></div>
       <p class="hint">켠 로봇만 서버가 <code>/scan</code> 을 구독합니다 (5Hz, 점 3개당 1개). 점은 로봇의 tf(map → 센서)로 지도에 그립니다. tf 를 못 구하면 AMCL 위치와 설정의 보정 각도(<code>scan.yaw_offset_deg</code>)로 대신 그리며, 이때는 센서 방향이 어긋날 수 있습니다. 어느 쪽인지는 로봇 이름 옆에 표시됩니다.</p>
-    </section>
-
-    <section id="drivePanel">
-      <h2>수동 조작 <small>(누르는 동안만)</small></h2>
+      <div id="drivePanel">
+      <h2 class="sub">수동 조작 <small>(누르는 동안만)</small></h2>
       <label class="field">대상 로봇 <select id="driveRobot"></select></label>
       <label class="check"><input type="checkbox" id="driveEnable"> 수동 조작 켜기</label>
       <div class="pad" id="drivePad">
@@ -98,9 +105,10 @@
       </div>
       <p class="hint" id="driveInfo"></p>
       <p class="hint" id="driveMsg"></p>
+      </div>
     </section>
 
-    <section>
+    <section id="pointsPanel" data-tab="points" data-tab-label="좌표">
       <h2>클릭 좌표 <small>(waypoint 지정용)</small></h2>
       <div class="row-actions">
         <button type="button" id="copyAllBtn">전체 복사</button>
@@ -111,14 +119,8 @@
     </section>
   </aside>
 
-  <!-- 패널 크기 조절 손잡이 (끌기 / 방향키 / 더블클릭으로 초기화) -->
-  <div class="split split-v" id="splitV" role="separator" aria-orientation="vertical" tabindex="0"
-       title="끌어서 사이드바 너비 조절 (더블클릭: 초기화)"></div>
-  <div class="split split-h" id="splitH" role="separator" aria-orientation="horizontal" tabindex="0"
-       title="끌어서 명령 이력 높이 조절 (더블클릭: 초기화)"></div>
-
   <!-- 아래: 명령 이력 -->
-  <section class="history" aria-label="명령 이력">
+  <section class="history panel" id="panelHist" data-panel="hist" data-title="명령 이력" aria-label="명령 이력">
     <h2>명령 이력 <small>(최근 50건)</small></h2>
     <div class="history-scroll">
       <table>
@@ -127,6 +129,30 @@
       </table>
       <p class="hint" id="historyEmpty">보낸 명령이 없습니다.</p>
     </div>
+  </section>
+
+  </div><!-- /workspace -->
+
+  <!-- 로그 화면: GUI 가 켠 프로세스의 터미널 출력과 GUI 서버 로그를 소스별로 본다 -->
+  <section class="logview" id="logView" hidden aria-label="로그">
+    <div class="log-tabs" id="logTabs" role="tablist" aria-label="로그 종류"></div>
+    <div class="log-tools">
+      <label class="field">레벨
+        <select id="logLevel">
+          <option value="all">전체</option>
+          <option value="warn">WARN 이상</option>
+          <option value="error">ERROR 만</option>
+        </select>
+      </label>
+      <input type="search" id="logSearch" placeholder="검색 (대소문자 무시)" aria-label="로그 검색">
+      <label class="check"><input type="checkbox" id="logFollow" checked> 맨 아래 따라가기</label>
+      <button type="button" id="logPause" aria-pressed="false" title="새 줄을 받아도 화면을 멈춥니다">일시정지</button>
+      <button type="button" id="logCopy">복사</button>
+      <button type="button" id="logClear" title="이 화면에서만 지웁니다 (서버에 저장된 로그는 그대로)">화면 지우기</button>
+      <span class="dim" id="logInfo"></span>
+    </div>
+    <pre class="log-body" id="logBody" tabindex="0" aria-live="off"></pre>
+    <p class="hint" id="logNote"></p>
   </section>
 
 </div>
@@ -154,6 +180,7 @@
 <script src="patrolview.js"></script>
 <script src="zoneview.js"></script>
 <script src="procview.js"></script>
+<script src="logview.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

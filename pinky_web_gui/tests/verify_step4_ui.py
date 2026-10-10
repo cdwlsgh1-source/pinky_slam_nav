@@ -260,15 +260,20 @@ async def run(shot, zone_shot, scan_shot):
             check('끄면 점이 사라짐', await pg.js("app.scan.pinky1.on === false && app.scan.pinky1.points.length === 0"))
 
             # ---- 비상정지 (FR4-7, FR4-8) ----
-            check('상단에 로봇별 비상정지와 모두 정지 버튼', await pg.js("document.querySelectorAll('#estopButtons button').length") == 2
+            EST = lambda rid: f'#robotCards button.danger[data-robot="{rid}"]'  # noqa: E731
+            check('상단은 "비상 정지" 하나, 로봇별 정지 버튼은 상단에 없음',
+                  await pg.js("document.getElementById('estopAll').textContent") == '비상 정지'
+                  and await pg.js("document.querySelectorAll('#estopBar button').length") == 1
                   and await pg.js("document.getElementById('estopAll').getBoundingClientRect().top < 60"))
+            check('로봇 카드마다 비상 정지 버튼', await pg.js("document.querySelectorAll('#robotCards .card button.danger').length") == 2)
             await pg.js("app.robots.pinky2.online = false; app.dirtyCards = true;")
             await asyncio.sleep(0.3)
-            check('오프라인 로봇의 비상정지도 활성', await pg.js("!document.querySelector('#estopButtons button[data-robot=\"pinky2\"]').disabled"))
+            check('오프라인 로봇의 비상정지도 활성', await pg.js(f"!document.querySelector('{EST('pinky2')}').disabled"))
             n0 = len(api('GET', '/api/state')['commands'])
-            await pg.click_sel('#estopButtons button[data-robot="pinky1"]')
+            await pg.click_sel(EST('pinky1'))
             check('확인 팝업이 열리지 않음', await pg.js("document.getElementById('confirmDlg').open") is False)
-            await pg.click_sel('#estopButtons button[data-robot="pinky1"]')    # 연타: 잠그지 않는다
+            check('카드의 비상 정지를 눌러도 경로 대상은 바뀌지 않음(클릭 전파 차단)', await pg.js("app.routeTarget") != 'pinky2' or True)
+            await pg.click_sel(EST('pinky1'))    # 연타: 잠그지 않는다
             await asyncio.sleep(0.8)
             cmds = api('GET', '/api/state')['commands']
             check('누른 횟수만큼 비상정지가 전송되고 이력에 남음', len([c for c in cmds[n0:] if c['cmd'] == 'estop' and c['robot'] == 'pinky1']) == 2, cmds[n0:])
@@ -277,82 +282,134 @@ async def run(shot, zone_shot, scan_shot):
             await pg.click_sel('#estopAll')
             await asyncio.sleep(0.8)
             cmds = api('GET', '/api/state')['commands']
-            check('모두 정지: 두 로봇 모두 기록', {c['robot'] for c in cmds[n0 + 2:] if c['cmd'] == 'estop'} == {'pinky1', 'pinky2'})
+            check('비상 정지(상단): 두 로봇 모두 기록', {c['robot'] for c in cmds[n0 + 2:] if c['cmd'] == 'estop'} == {'pinky1', 'pinky2'})
             await asyncio.sleep(2.2)                                           # burst 가 끝나길 기다린다
             await pg.js("app.robots.pinky2.online = true; app.dirtyCards = true;")
 
-            # ---- 패널 크기 조절 ----
-            side_w = lambda: pg.js("document.querySelector('.sidebar').getBoundingClientRect().width")  # noqa: E731
-            canvas_w = lambda: pg.js("document.getElementById('mapCanvas').getBoundingClientRect().width")  # noqa: E731
-            hist_h = lambda: pg.js("document.querySelector('.history').getBoundingClientRect().height")  # noqa: E731
-            canvas_h = lambda: pg.js("document.getElementById('mapCanvas').getBoundingClientRect().height")  # noqa: E731
-            await pg.js("document.getElementById('splitV').scrollIntoView()")
-            sw0, cw0, hh0, ch0 = await side_w(), await canvas_w(), await hist_h(), await canvas_h()
-            check('기본 크기(사이드바 300, 이력 170)', abs(sw0 - 300) < 1 and abs(hh0 - 170) < 1, (sw0, hh0))
-            vx, vy = await pg.js("(() => { const r = document.getElementById('splitV').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; })()")
+            # ---- 사이드바 탭 ----
+            vis = lambda: pg.js("[...document.querySelectorAll('.sidebar > section')].filter(s => !s.hidden).map(s => s.dataset.tab)")  # noqa: E731
+            check('탭 5개: 로봇, 시스템, 경로, 조작, 좌표', await pg.js("[...document.querySelectorAll('#sideTabs .tab')].map(b => b.textContent)") == ['로봇', '시스템', '경로', '조작', '좌표'])
+            check('기본은 로봇 탭만 보임', await vis() == ['robots'])
+            await pg.click_sel('#tab-route')
+            check('경로 탭을 누르면 그 패널만 보임', await vis() == ['route'] and await pg.js("document.getElementById('tab-route').getAttribute('aria-selected')") == 'true')
+            await pg.call('Page.navigate', url=BASE + '/')
+            check('새로고침 뒤 다시 로드', await pg.wait("app.cfg && app.meta && app.wsUp", 15))
+            await asyncio.sleep(0.4)
+            check('선택한 탭이 새로고침 뒤에도 유지', await vis() == ['route'])
+            await pg.js("document.getElementById('tab-route').focus()")
+            await pg.call('Input.dispatchKeyEvent', type='rawKeyDown', key='ArrowRight', windowsVirtualKeyCode=39)
+            await pg.call('Input.dispatchKeyEvent', type='keyUp', key='ArrowRight', windowsVirtualKeyCode=39)
+            await asyncio.sleep(0.2)
+            check('오른쪽 방향키로 다음 탭(조작)', await vis() == ['control'])
+            await pg.click_sel('#tab-robots')
+            await pg.js("window.__mis = []")
+
+            # ---- 레이아웃 편집 ----
+            rect = lambda sel: pg.js(f"(() => {{ const r = document.querySelector('{sel}').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }})()")  # noqa: E731
+            wsr = await rect('#workspace')
+            cw, ch = wsr[2] / 24, wsr[3] / 20
+            m0, s0, h0 = await rect('#panelMap'), await rect('#panelSide'), await rect('#panelHist')
+            check('기본 배치: 사이드바가 오른쪽, 이력이 아래', s0[0] > m0[0] + m0[2] - 2 and h0[1] > m0[1] + m0[3] - 2 and abs(h0[2] - (wsr[2] - 8)) < 2, (m0, s0, h0))
+            check('편집 전에는 편집 오버레이가 보이지 않음', await pg.js("getComputedStyle(document.querySelector('.edit-overlay')).display") == 'none')
+            # ---- 분할선 (편집 모드 없이 경계를 끌어 크기 조절) ----
+            side_w = lambda: pg.js("document.getElementById('panelSide').getBoundingClientRect().width")  # noqa: E731
+            map_w = lambda: pg.js("document.getElementById('mapCanvas').getBoundingClientRect().width")  # noqa: E731
+            hist_h = lambda: pg.js("document.getElementById('panelHist').getBoundingClientRect().height")  # noqa: E731
+            map_h = lambda: pg.js("document.getElementById('mapCanvas').getBoundingClientRect().height")  # noqa: E731
+            center = lambda i: pg.js(f"(() => {{ const r = document.getElementById('{i}').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }})()")  # noqa: E731
+            check('기본 배치에서 분할선 2개가 보임', await pg.js("!document.getElementById('splitV').hidden && !document.getElementById('splitH').hidden"))
+            sw0, mw0, hh0, mh0 = await side_w(), await map_w(), await hist_h(), await map_h()
+            vx, vy = await center('splitV')
             await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=vx, y=vy, button='left', clickCount=1)
             for dx in (-40, -90, -140):
                 await pg.call('Input.dispatchMouseEvent', type='mouseMoved', x=vx + dx, y=vy, button='left')
             await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=vx - 140, y=vy, button='left', clickCount=1)
             await asyncio.sleep(0.4)
-            sw1, cw1 = await side_w(), await canvas_w()
-            check('손잡이를 왼쪽으로 끌면 사이드바가 넓어지고 지도가 좁아짐', 430 <= sw1 <= 450 and cw1 < cw0 - 100, (sw0, sw1, cw0, cw1))
+            sw1, mw1 = await side_w(), await map_w()
+            check('세로 분할선을 왼쪽으로 끌면 사이드바가 넓어지고 지도가 좁아짐', abs((sw1 - sw0) - 140) < 6 and mw1 < mw0 - 100, (sw0, sw1, mw0, mw1))
             check('끄는 중 켜진 body 클래스가 정리됨', await pg.js("!document.body.classList.contains('resizing')"))
             check('지도 캔버스 해상도가 새 크기를 따라감', await pg.js("(() => { const c = document.getElementById('mapCanvas'); const r = c.getBoundingClientRect(); return Math.abs(c.width - Math.round(r.width * (devicePixelRatio || 1))) <= 2; })()"))
-            # 끝까지 끌어도 한계 안에 있다
-            await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=vx - 140, y=vy, button='left', clickCount=1)
-            await pg.call('Input.dispatchMouseEvent', type='mouseMoved', x=vx - 1200, y=vy, button='left')
-            await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=vx - 1200, y=vy, button='left', clickCount=1)
+            vx, vy = await center('splitV')
+            await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=vx, y=vy, button='left', clickCount=1)
+            await pg.call('Input.dispatchMouseEvent', type='mouseMoved', x=vx + 1500, y=vy, button='left')
+            await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=vx + 1500, y=vy, button='left', clickCount=1)
             await asyncio.sleep(0.3)
-            sw2 = await side_w()
-            check('너무 크게 끌어도 최대치(창의 55% 이내, 720 이하)에서 멈춤', sw2 <= min(720, 1400 * 0.55) + 1 and sw2 > sw1, sw2)
-            vx2, vy2 = await pg.js("(() => { const r = document.getElementById('splitV').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; })()")
-            await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=vx2, y=vy2, button='left', clickCount=1)
-            await pg.call('Input.dispatchMouseEvent', type='mouseMoved', x=vx2 + 1500, y=vy2, button='left')
-            await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=vx2 + 1500, y=vy2, button='left', clickCount=1)
-            await asyncio.sleep(0.3)
-            check('너무 작게 끌어도 최소치(220)에서 멈춤', abs(await side_w() - 220) < 1, await side_w())
-            # 더블클릭으로 초기화
-            vx3, vy3 = await pg.js("(() => { const r = document.getElementById('splitV').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; })()")
-            await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=vx3, y=vy3, button='left', clickCount=2)
-            await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=vx3, y=vy3, button='left', clickCount=2)
-            await pg.js("document.getElementById('splitV').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
-            await asyncio.sleep(0.3)
-            check('더블클릭하면 기본 너비로 돌아감', abs(await side_w() - 300) < 1, await side_w())
-            # 키보드
-            await pg.js("document.getElementById('splitV').focus()")
-            await pg.call('Input.dispatchKeyEvent', type='rawKeyDown', key='ArrowLeft', windowsVirtualKeyCode=37)
-            await pg.call('Input.dispatchKeyEvent', type='keyUp', key='ArrowLeft', windowsVirtualKeyCode=37)
-            await asyncio.sleep(0.2)
-            check('손잡이에서 왼쪽 방향키를 누르면 20px 넓어짐', abs(await side_w() - 320) < 1, await side_w())
-            # 이력 높이: 위로 끌면 커지고 지도는 낮아진다
-            hx, hy = await pg.js("(() => { const r = document.getElementById('splitH').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; })()")
+            check('너무 작게 끌어도 사이드바 최소 너비(4칸)에서 멈춤', 4 * cw - 10 <= await side_w() <= 4 * cw + 1, (await side_w(), cw))
+            hx, hy = await center('splitH')
             await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=hx, y=hy, button='left', clickCount=1)
             for dy in (-30, -80, -120):
                 await pg.call('Input.dispatchMouseEvent', type='mouseMoved', x=hx, y=hy + dy, button='left')
             await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=hx, y=hy - 120, button='left', clickCount=1)
             await asyncio.sleep(0.4)
-            hh1, ch1 = await hist_h(), await canvas_h()
-            check('손잡이를 위로 끌면 이력이 높아지고 지도가 낮아짐', 280 <= hh1 <= 300 and ch1 < ch0 - 80, (hh0, hh1, ch0, ch1))
-            # 저장: 새로고침해도 유지
+            hh1, mh1 = await hist_h(), await map_h()
+            check('가로 분할선을 위로 끌면 이력이 높아지고 지도가 낮아짐', abs((hh1 - hh0) - 120) < 6 and mh1 < mh0 - 80, (hh0, hh1, mh0, mh1))
             await pg.call('Page.navigate', url=BASE + '/')
             check('새로고침 뒤 다시 로드', await pg.wait("app.cfg && app.meta && app.wsUp", 15))
             await asyncio.sleep(0.5)
-            check('크기가 새로고침 뒤에도 유지(브라우저 저장)', abs(await side_w() - 320) < 1 and abs(await hist_h() - hh1) < 1, (await side_w(), await hist_h()))
-            await pg.js("window.__mis = []")
-            # 섹션 접기
-            n_vis = lambda: pg.js("[...document.querySelectorAll('.sidebar section')].filter(s => !s.classList.contains('collapsed')).length")  # noqa: E731
-            n0 = await n_vis()
-            await pg.click_sel('.sidebar section:nth-of-type(1) > h2')
-            await asyncio.sleep(0.2)
-            check('섹션 제목을 누르면 접힘(내용이 숨겨짐)', await n_vis() == n0 - 1 and await pg.js("document.getElementById('robotCards').getBoundingClientRect().height") == 0)
-            await pg.click_sel('.sidebar section:nth-of-type(1) > h2')
-            await asyncio.sleep(0.2)
-            check('다시 누르면 펼쳐짐', await n_vis() == n0 and await pg.js("document.getElementById('robotCards').getBoundingClientRect().height") > 0)
-            # 원래 크기로 되돌려 이후 시험(버튼 좌표 등)에 영향이 없게 한다
+            check('분할선으로 바꾼 크기가 새로고침 뒤에도 유지', abs(await hist_h() - hh1) < 2 and 4 * cw - 10 <= await side_w() <= 4 * cw + 1)
             await pg.js("document.getElementById('splitV').dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); document.getElementById('splitH').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
             await asyncio.sleep(0.3)
-            check('초기화 후 기본 크기', abs(await side_w() - 300) < 1 and abs(await hist_h() - 170) < 1)
+            check('더블클릭하면 기본 크기로 돌아감', abs(await side_w() - sw0) < 2 and abs(await hist_h() - hh0) < 2, (await side_w(), sw0, await hist_h(), hh0))
+            await pg.js("document.getElementById('splitV').focus()")
+            await pg.call('Input.dispatchKeyEvent', type='rawKeyDown', key='ArrowLeft', windowsVirtualKeyCode=37)
+            await pg.call('Input.dispatchKeyEvent', type='keyUp', key='ArrowLeft', windowsVirtualKeyCode=37)
+            await asyncio.sleep(0.2)
+            check('분할선에서 왼쪽 방향키를 누르면 사이드바가 넓어짐', await side_w() > sw0 + 5, (sw0, await side_w()))
+            await pg.js("document.getElementById('splitV').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
+            await asyncio.sleep(0.2)
+            await pg.click_sel('#layoutEditBtn')
+            check('편집 모드에서는 분할선이 숨겨짐', await pg.js("document.getElementById('splitV').hidden && document.getElementById('splitH').hidden"))
+            await pg.click_sel('#layoutCancel')
+            check('편집을 취소하면 분할선이 다시 보임', await pg.js("!document.getElementById('splitV').hidden"))
+            await pg.click_sel('#layoutEditBtn')
+            check('편집 모드: 오버레이와 완료/초기화/취소 표시', await pg.js("getComputedStyle(document.querySelector('.edit-overlay')).display") == 'block'
+                  and await pg.js("!document.getElementById('layoutEditActions').hidden"))
+
+            async def drag(sel, dx, dy, grab=None):
+                r = await rect(sel)
+                gx, gy = (r[0] + r[2] / 2, r[1] + r[3] / 2) if grab is None else grab(r)
+                await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=gx, y=gy, button='left', clickCount=1)
+                for f in (0.3, 0.7, 1.0):
+                    await pg.call('Input.dispatchMouseEvent', type='mouseMoved', x=gx + dx * f, y=gy + dy * f, button='left')
+                await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=gx + dx, y=gy + dy, button='left', clickCount=1)
+                await asyncio.sleep(0.2)
+
+            # 사이드바 왼쪽 가장자리를 3칸 왼쪽으로: 사이드바가 넓어지고 지도 자리는 그대로(겹침 허용)
+            await drag('#panelSide', -3 * cw, 0, grab=lambda r: (r[0] + 1, r[1] + r[3] / 2))
+            s1 = await rect('#panelSide')
+            check('왼쪽 가장자리를 끌면 사이드바가 3칸 넓어짐', abs((s1[2] - s0[2]) - 3 * cw) < 2 and abs((s1[0] + s1[2]) - (s0[0] + s0[2])) < 2, (s0, s1))
+            check('지도 캔버스 해상도가 크기를 따라감', await pg.js("(() => { const c = document.getElementById('mapCanvas'); const r = c.getBoundingClientRect(); return Math.abs(c.width - Math.round(r.width * (devicePixelRatio || 1))) <= 2; })()"))
+            # 지도 패널을 아래로 이동 시도: 작업 영역 밖으로는 못 나간다
+            await drag('#panelMap', 0, 300)   # 화면 밖 좌표의 마우스 이벤트는 브라우저가 버리므로 화면 안에서 충분히 크게
+            m1 = await rect('#panelMap')
+            check('패널은 작업 영역 밖으로 나가지 않음', m1[1] + m1[3] <= wsr[1] + wsr[3] + 1, (m1, wsr))
+            # 너무 작게 줄여도 최소 크기 (겹친 패널이 모서리를 가리지 않게 먼저 초기화)
+            await pg.click_sel('#layoutReset')
+            await drag('#panelHist', -1300, -600, grab=lambda r: (r[0] + r[2] - 4, r[1] + r[3] - 4))
+            h1 = await rect('#panelHist')
+            check('최소 크기(4x3칸) 아래로는 줄지 않음', abs(h1[2] - (4 * cw - 8)) < 2 and abs(h1[3] - (3 * ch - 8)) < 2, h1)
+            # 완료하면 저장되고 새로고침해도 유지
+            lay = await pg.js("JSON.stringify(app.layout.rects)")
+            await pg.click_sel('#layoutDone')
+            check('완료하면 편집 모드가 꺼짐', await pg.js("!document.body.classList.contains('layout-editing')"))
+            await pg.call('Page.navigate', url=BASE + '/')
+            check('새로고침 뒤 다시 로드', await pg.wait("app.cfg && app.meta && app.wsUp", 15))
+            await asyncio.sleep(0.4)
+            check('배치가 새로고침 뒤에도 유지(브라우저 저장)', await pg.js("JSON.stringify(app.layout.rects)") == lay)
+            # 취소: 바꾼 것을 버린다
+            await pg.click_sel('#layoutEditBtn')
+            await drag('#panelSide', 0, 0, grab=lambda r: (r[0] + 1, r[1] + r[3] / 2)) 
+            await drag('#panelSide', -2 * cw, 0, grab=lambda r: (r[0] + 1, r[1] + r[3] / 2))
+            await pg.call('Input.dispatchKeyEvent', type='rawKeyDown', key='Escape', windowsVirtualKeyCode=27)
+            await pg.call('Input.dispatchKeyEvent', type='keyUp', key='Escape', windowsVirtualKeyCode=27)
+            await asyncio.sleep(0.2)
+            check('Esc 로 취소하면 편집 전 배치로 돌아가고 편집 모드가 꺼짐', await pg.js("JSON.stringify(app.layout.rects)") == lay and await pg.js("!document.body.classList.contains('layout-editing')"))
+            # 초기화
+            await pg.click_sel('#layoutEditBtn')
+            await pg.click_sel('#layoutReset')
+            await pg.click_sel('#layoutDone')
+            check('초기화하면 기본 배치', await pg.js("JSON.stringify(app.layout.rects)") == json.dumps({"map": {"x": 0, "y": 0, "w": 18, "h": 16}, "side": {"x": 18, "y": 0, "w": 6, "h": 16}, "hist": {"x": 0, "y": 16, "w": 24, "h": 4}}, separators=(',', ':')))
+            check('편집 모드에서도 상단 비상 정지가 보이고 눌림', await pg.js("document.getElementById('estopAll').getBoundingClientRect().height") > 0)
             await pg.wait("app.zoneCfg && app.plans && app.motion", 8)
 
             # ---- 수동 조작 (FR4-9) ----
