@@ -69,7 +69,7 @@
   function sequenceText(seq, labelOf) {
     if (!seq) return '';
     const name = seq.kind === 'start_all' ? '전체 시작' : '전체 정지';
-    if (seq.state === 'running') return name + ' 진행 중' + (seq.step ? ': ' + labelOf(seq.step) : '');
+    if (seq.state === 'running') return name + ' 진행 중' + (seq.step ? ': ' + labelOf(seq.step) : '') + (seq.message ? ' — ' + seq.message : '');
     if (seq.state === 'failed') return name + ' 중단: ' + (seq.message || '실패');
     const skipped = seq.results.filter((r) => r.result === 'external' || r.result === 'unset').length;
     return name + ' 완료' + (skipped ? ' (' + skipped + '개 건너뜀)' : '');

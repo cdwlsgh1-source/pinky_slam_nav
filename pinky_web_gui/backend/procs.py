@@ -417,6 +417,50 @@ class ProcessManager:
         self._seq.update(state=state, step=None, message=message)
         self._changed()
 
+    async def _wait_health(self, spec, seq, text):
+        """로봇 토픽(online)이 올 때까지 spec.ready_sec 동안 기다린다. health 판정이 없으면(None) 기다리지 않는다."""
+        end = self._now() + spec.ready_sec
+        seq['message'] = text
+        self._changed()
+        while self._health(spec.robot) is False:
+            if self._now() >= end:
+                return False
+            await asyncio.sleep(0.2)
+        return True
+
+    async def _confirm_ready(self, e, seq):
+        """켜진 프로세스가 실제로 동작하는지 확인한다. 문제가 없으면 None, 실패하면 사유 문구를 돌려준다.
+        - 모든 프로세스: 실행 중(settle_sec 동안 죽지 않음)은 호출 전에 이미 확인했다.
+        - health 가 있는 것(로봇 bringup): 로봇 토픽이 올 때까지 기다리고, 안 오면 restart_if_stalled 인 프로세스(브릿지)를
+          한 번 재시작한다. 브릿지를 로봇 토픽보다 먼저 켜면 센서 토픽 QoS 가 안 맞아 데이터가 안 넘어올 수 있기 때문이다."""
+        spec = e.spec
+        try:
+            if not (spec.health and spec.robot):
+                return None
+            if await self._wait_health(spec, seq, f'{spec.label}: 로봇 토픽 대기 중'):
+                return None
+            fixers = [pid for pid in self._order if self._specs[pid].restart_if_stalled and self._e[pid].state == RUNNING]
+            if not fixers:
+                return f'{spec.label}: {spec.ready_sec:g}초 안에 로봇 토픽이 오지 않습니다'
+            for pid in fixers:
+                fx = self._e[pid]
+                seq['message'] = f'{fx.spec.label}: 로봇 토픽이 안 와서 재시작'
+                self._changed()
+                await self.stop(pid, confirm=True)
+                await self.start(pid)
+                while fx.state == STARTING:
+                    await asyncio.sleep(0.05)
+                if fx.state != RUNNING:
+                    return f'{fx.spec.label}: 재시작하지 못했습니다 ({fx.message or fx.state})'
+            if await self._wait_health(spec, seq, f'{spec.label}: 재시작 뒤 로봇 토픽 대기 중'):
+                return None
+            return f'{spec.label}: 브릿지를 재시작한 뒤에도 {spec.ready_sec:g}초 안에 로봇 토픽이 오지 않습니다'
+        except ProcError as ex:
+            return f'{spec.label}: {ex}'
+        finally:
+            seq['message'] = ''
+            self._changed()
+
     def start_all(self):
         self._begin('start_all')
         self._seq_task = asyncio.create_task(self._run_start_all())
@@ -430,6 +474,10 @@ class ProcessManager:
                     seq['results'].append({'id': pid, 'result': 'unset'})
                     continue
                 if e.state == RUNNING:
+                    err = await self._confirm_ready(e, seq)
+                    if err:
+                        seq['results'].append({'id': pid, 'result': 'failed', 'message': err})
+                        return self._finish('failed', err)
                     seq['results'].append({'id': pid, 'result': 'already'})
                     continue
                 seq['step'] = pid
@@ -447,6 +495,10 @@ class ProcessManager:
                 if e.state != RUNNING:
                     seq['results'].append({'id': pid, 'result': 'failed', 'message': e.message})
                     return self._finish('failed', f'{e.spec.label}: {e.message or e.state}')
+                err = await self._confirm_ready(e, seq)   # 켜진 것을 확인한 뒤에야 다음 단계로 넘어간다
+                if err:
+                    seq['results'].append({'id': pid, 'result': 'failed', 'message': err})
+                    return self._finish('failed', err)
                 seq['results'].append({'id': pid, 'result': 'started'})
             self._finish('done', '')
         except asyncio.CancelledError:

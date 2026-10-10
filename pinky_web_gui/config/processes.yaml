@@ -1,5 +1,5 @@
 # GUI 의 "시스템" 패널에서 켜고 끄는 프로세스 목록. 이 목록에 있는 것만 실행할 수 있다.
-# 목록 순서가 [전체 시작] 순서이고, [전체 정지] 는 반대 순서다 (zone_manager -> bringup -> map -> 순찰 노드 -> 브릿지).
+# 목록 순서가 [전체 시작] 순서이고, [전체 정지] 는 반대 순서다 (도메인 브릿지 -> bringup -> map -> zone_manager -> 순찰 노드).
 #
 # 로그인(manager 계정)이 필요하다. 서버를 --no-auth 로 띄우면 이 기능은 꺼진다.
 # 비밀번호를 이 파일에 적지 않는다.
@@ -28,16 +28,22 @@ defaults:
     ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
 
 processes:
-  # ---- 관제 PC (도메인 50) ----
-  - id: zone_manager
-    group: "zone_manager"
-    label: zone_manager
+  # ---- 1. 도메인 브릿지 (관제 PC) ----
+  # pinky1(20<->50) 과 pinky2(22<->50) 브릿지를 launch/bridges.launch.xml 하나로 같이 띄운다 (터미널의 ros2 launch 와 같다).
+  # cwd 는 이 PC 의 저장소 경로다 (/home/pinky/... 는 로봇 경로라 PC 에 없다).
+  # 브릿지를 먼저 켜면 로봇 토픽이 없을 때 구독이 기본 QoS(reliable)로 만들어져 best_effort 센서 토픽(/odom, /scan)이 안 넘어올 수 있다.
+  # 그래서 [전체 시작] 은 bringup 이 켜진 뒤 로봇 토픽이 오는지 확인하고, 안 오면 restart_if_stalled 인 이 프로세스를 한 번 재시작한다.
+  - id: bridge
+    group: "도메인 브릿지"
+    label: 도메인 브릿지 (pinky1, pinky2)
     kind: local
     domain: 50
-    command: "ros2 launch zone_traffic_control zone_manager.launch.xml"
-    detect: "zone_manager_node"
+    cwd: "{repo}"
+    command: "ros2 launch launch/bridges.launch.xml"
+    detect: "domain_bridge .*pinky_bridge_pinky"
+    restart_if_stalled: true   # bringup 뒤에도 로봇 토픽이 안 오면 [전체 시작] 이 이 프로세스를 한 번 재시작한다
 
-  # ---- 로봇 (SSH, 키 로그인) ----
+  # ---- 2, 3. 로봇 bringup, map (SSH, 키 로그인) ----
   # 사전 준비 (한 번만, 터미널에서 직접):
   #   ssh-copy-id <user>@<host>          # 이때 비밀번호를 터미널에 입력한다. 이후 서버는 키로만 접속한다.
   #   ssh <user>@<host> true             # 처음 접속 확인(known_hosts 등록)
@@ -102,6 +108,16 @@ processes:
     command: "ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml"
     detect: "ros2 launch pinky_navigation"
 
+  # ---- 4. zone_manager (관제 PC, 도메인 50) ----
+  - id: zone_manager
+    group: "zone_manager"
+    label: zone_manager
+    kind: local
+    domain: 50
+    command: "ros2 launch zone_traffic_control zone_manager.launch.xml"
+    detect: "zone_manager_node"
+
+  # ---- 5. 순찰 노드 ----
   # 순찰 노드: map(Nav2)이 올라온 뒤에 켠다 (노드가 Nav2 를 쓴다). 목록 순서 = 전체 시작 순서.
   # cwd 가 pinky_slam_nav 라서 ./install/setup.bash 를 상대 경로로 source 한다 (robot_id 는 노드 기본값 pinky1).
   - id: patrol_pinky1
@@ -130,18 +146,3 @@ processes:
     source: ["/opt/ros/jazzy/setup.bash", "./install/setup.bash"]
     command: "ros2 run my_pinky_package pinky_patrol_node_pinky2_v2"
     detect: "pinky_patrol_node_pinky2_v2"
-
-  # ---- 도메인 브릿지: bringup/map 보다 뒤에 둔다 ----
-  # domain_bridge 는 시작할 때 로봇 쪽 토픽의 QoS 를 보고 구독을 만든다. 로봇 토픽이 아직 없으면 기본 QoS(reliable)로 만들어져
-  # best_effort 센서 토픽(/odom, /scan)이 전달되지 않는다. 그래서 [전체 시작] 이 bringup 뒤에 브릿지를 켠다.
-  # 로봇 bringup 을 다시 켰다면 브릿지도 정지했다가 다시 시작한다.
-  # pinky1(20<->50) 과 pinky2(22<->50) 브릿지를 launch/bridges.launch.xml 하나로 같이 띄운다 (터미널의 ros2 launch 와 같다).
-  # cwd 는 이 PC 의 저장소 경로다 (/home/pinky/... 는 로봇 경로라 PC 에 없다).
-  - id: bridge
-    group: "도메인 브릿지"
-    label: 도메인 브릿지 (pinky1, pinky2)
-    kind: local
-    domain: 50
-    cwd: "{repo}"
-    command: "ros2 launch launch/bridges.launch.xml"
-    detect: "domain_bridge .*pinky_bridge_pinky"

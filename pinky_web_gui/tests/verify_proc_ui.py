@@ -132,7 +132,7 @@ async def scenario_auth(chrome, tmp, shot):
         check('manager: 정지 버튼은 실행 중이 아니면 꺼져 있다', await pg.js(f"document.querySelector(\"{ROW('bridge', 'stop')}\").disabled"))
 
         # 기능별 묶음 (도메인 브릿지 / zone_manager / bringup / map / 순찰 노드)
-        check('시스템 패널이 기능별 묶음으로 나뉜다', await pg.js("[...document.querySelectorAll('#procList .proc-group')].map(g => g.dataset.group).join('|')") == 'zone_manager|bringup|map|순찰 노드|도메인 브릿지')
+        check('시스템 패널이 기능별 묶음으로 나뉜다', await pg.js("[...document.querySelectorAll('#procList .proc-group')].map(g => g.dataset.group).join('|')") == '도메인 브릿지|bringup|map|zone_manager|순찰 노드')
         check('묶음마다 해당 프로세스만 들어 있다 (브릿지 1, bringup 2, map 2, 순찰 노드 2)', await pg.js("(() => { const n = (g) => document.querySelectorAll(`#procList .proc-group[data-group='${g}'] li`).length; return n('도메인 브릿지') === 1 && n('bringup') === 2 && n('map') === 2 && n('순찰 노드') === 2 && n('zone_manager') === 1; })()"))
         check('pinky2 순찰 노드가 목록에 있다', await pg.js("!!document.querySelector(\"#procList li[data-id='patrol_pinky2']\")"))
         # 개별 시작 / 로그 / 정지
@@ -166,7 +166,7 @@ async def scenario_auth(chrome, tmp, shot):
 
         # 전체 시작
         await pg.click_sel('#procStartAll')
-        check('전체 시작 확인 팝업(순서 나열)', await pg.wait("document.getElementById('confirmDlg').open && document.getElementById('confirmText').textContent.includes('1. zone_manager')", 3))
+        check('전체 시작 확인 팝업(순서 나열)', await pg.wait("document.getElementById('confirmDlg').open && document.getElementById('confirmText').textContent.includes('1. 도메인 브릿지')", 3))
         await pg.click_sel('#confirmOk')
         check('전체 시작 진행 문구', await pg.wait("document.getElementById('procSeq').textContent.includes('전체 시작')", 4))
         check('전체 시작 완료 문구와 모두 실행 중', await pg.wait("document.getElementById('procSeq').textContent.includes('전체 시작 완료') && [...document.querySelectorAll('#procList .proc-state')].every(e => e.textContent.startsWith('실행 중'))", 20))

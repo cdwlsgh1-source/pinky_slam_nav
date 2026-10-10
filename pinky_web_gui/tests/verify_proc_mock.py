@@ -253,15 +253,15 @@ async def with_auth(tmp):
             check('전체 시작 중 다시 누르면 409', sc2 == 409)
             seq = await until_seq(op)
             res = [(x['id'], x['result']) for x in seq['results']] if seq else []
-            check('전체 시작 완료 + 순서(zone_manager(외부), bringup, map, ..., 브릿지)', seq is not None and seq['state'] == 'done'
-                  and [r[0] for r in res][:2] == ['zone_manager', 'bringup_pinky1'] and [r[0] for r in res][-1:] == ['bridge'] and ('zone_manager', 'external') in res, str(seq))
+            check('전체 시작 완료 + 순서(브릿지, bringup, map, zone_manager(외부), 순찰 노드)', seq is not None and seq['state'] == 'done'
+                  and [r[0] for r in res] == ['bridge', 'bringup_pinky1', 'bringup_pinky2', 'map_pinky1', 'map_pinky2', 'zone_manager', 'patrol_pinky1', 'patrol_pinky2'] and ('zone_manager', 'external') in res, str(seq))
             procs_now = {x['id']: x['state'] for x in op.req('GET', '/api/procs')[1]['procs']}
             check('전체 시작 뒤 실행 중', procs_now['bridge'] == procs_now['bringup_pinky1'] == procs_now['map_pinky2'] == 'running', str(procs_now))
             sc, r = op.req('POST', '/api/procs/stop_all', {})
             check('전체 정지는 확인 없이 409', sc == 409 and r['needs_confirm'])
             sc, _ = op.req('POST', '/api/procs/stop_all', {'confirm': True})
             seq = await until_seq(op, 30)
-            check('전체 정지 완료(역순)', seq is not None and seq['state'] == 'done' and [x['id'] for x in seq['results']][0] == 'bridge', str(seq))
+            check('전체 정지 완료(역순)', seq is not None and seq['state'] == 'done' and [x['id'] for x in seq['results']][0] == 'patrol_pinky2', str(seq))
             procs_now = {x['id']: x['state'] for x in op.req('GET', '/api/procs')[1]['procs']}
             check('전체 정지 뒤 모두 stopped', all(v == 'stopped' for v in procs_now.values()), str(procs_now))
 
@@ -290,7 +290,7 @@ async def with_failures(tmp):
         seq = await until_seq(op)
         check('전체 시작은 첫 실패에서 멈추고 사유를 보인다', seq is not None and seq['state'] == 'failed' and 'pinky1' in seq['message'], str(seq))
         st = {x['id']: x['state'] for x in op.req('GET', '/api/procs')[1]['procs']}
-        check('실패 뒤 단계는 시작하지 않았다', st['bringup_pinky1'] == 'running', str(st))
+        check('실패 뒤 단계는 시작하지 않았다', st['bringup_pinky1'] == 'stopped' and st['patrol_pinky2'] == 'stopped', str(st))
     finally:
         stop_server(srv)
 

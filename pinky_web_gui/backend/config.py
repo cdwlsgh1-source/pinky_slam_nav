@@ -80,6 +80,8 @@ class ProcSpec:
     ssh_password_env: str = ''   # 있으면 이 환경 변수의 값을 sshpass -e 로 쓴다 (값 자체는 설정 파일에 두지 않는다)
     group: str = ''              # 시스템 패널에서 묶어 보여 줄 기능 이름 (예: '도메인 브릿지', 'bringup'). 같은 이름끼리 한 묶음
     env: tuple = ()          # ((이름, 값), ...) 실행 전에 export 할 환경 변수. SSH 는 ~/.bashrc 를 읽지 않아 RMW/CYCLONEDDS_URI 가 빠지므로 여기에 적는다
+    restart_if_stalled: bool = False   # True 면 [전체 시작] 에서 bringup 뒤에도 로봇 토픽이 안 올 때 이 프로세스(브릿지)를 한 번 재시작한다
+    ready_sec: float = 25.0  # health 가 있는 프로세스: 켜진 뒤 로봇 토픽이 올 때까지 [전체 시작] 이 기다리는 최대 시간
 
 
 @dataclass(frozen=True)
@@ -330,14 +332,14 @@ def _load_processes(path, robots):
                 raise ValueError(f'{path}: {pid}.{name} 는 0 초과 {hi} 이하여야 한다')
             return v
         flags = {}
-        for name, default in (('stop_on_exit', True), ('confirm_stop', kind == 'ssh')):
+        for name, default in (('stop_on_exit', True), ('confirm_stop', kind == 'ssh'), ('restart_if_stalled', False)):
             v = p.get(name, default)
             if not isinstance(v, bool):
                 raise ValueError(f'{path}: {pid}.{name} 는 true/false 여야 한다')
             flags[name] = v
         out.append(ProcSpec(pid, str(p.get('label') or pid), kind, command, domain, src, cwd, detect, stop_pattern, robot, health,
                             flags['stop_on_exit'], flags['confirm_stop'], num('settle_sec', 2.0, 60), num('stop_timeout_sec', 5.0, 60),
-                            host, user, port, key, pw_env, group, env))
+                            host, user, port, key, pw_env, group, env, flags['restart_if_stalled'], num('ready_sec', 25.0, 120)))
     return tuple(out)
 
 

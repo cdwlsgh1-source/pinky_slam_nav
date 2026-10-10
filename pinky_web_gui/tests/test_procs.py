@@ -429,7 +429,8 @@ def test_config_rejects_bad_processes(tmp_path, body, msg):
 def test_default_config_processes():
     cfg = load_config()
     ids = [p.id for p in cfg.processes]
-    assert ids[0] == 'zone_manager' and ids[-1:] == ['bridge']   # 브릿지는 bringup 뒤 (QoS 때문)
+    assert ids == ['bridge', 'bringup_pinky1', 'bringup_pinky2', 'map_pinky1', 'map_pinky2', 'zone_manager', 'patrol_pinky1', 'patrol_pinky2']   # 사용자가 정한 전체 시작 순서
+    assert {p.id for p in cfg.processes if p.restart_if_stalled} == {'bridge'}
     by = {p.id: p for p in cfg.processes}
     assert by['bridge'].command == 'ros2 launch launch/bridges.launch.xml'   # pinky1, pinky2 브릿지를 launch 하나로
     assert by['bridge'].cwd.startswith('/') and not by['bridge'].cwd.startswith('/home/pinky') and '{repo}' not in by['bridge'].cwd   # PC 의 저장소 경로
@@ -506,3 +507,72 @@ def test_sweep_kills_children_left_after_leader_exits():
         return alive
 
     assert asyncio.run(scenario()) is False
+
+
+def _ready_specs(**kw):
+    return [local('br', restart_if_stalled=True), local('bring', robot='pinky1', health=True, ready_sec=1.0, **kw), local('after')]
+
+
+def test_start_all_waits_for_robot_topics_before_next_step():
+    """health 가 있는 프로세스는 로봇 토픽이 올 때까지 기다린 뒤 다음 단계로 넘어간다."""
+    async def go():
+        r = MockRunner(interval=0.03)
+        online = {'v': False}
+        m = ProcessManager(_ready_specs(), r, health=lambda robot: online['v'])
+        m.start_all()
+        await until(lambda: m.status()['sequence']['step'] == 'bring' and m.status()['sequence']['message'] != '')
+        assert 'after' not in [c[2] for c in r.calls if c[0] == 'spawn']          # 아직 다음 단계는 시작하지 않았다
+        assert '로봇 토픽 대기 중' in m.status()['sequence']['message']
+        online['v'] = True
+        await until(lambda: m.status()['sequence']['state'] != 'running')
+        seq = m.status()['sequence']
+        assert seq['state'] == 'done' and [x['id'] for x in seq['results']] == ['br', 'bring', 'after']
+        assert [c[2] for c in r.calls if c[0] == 'spawn'] == ['br', 'bring', 'after']   # 브릿지는 재시작하지 않았다
+        await m.shutdown()
+    run(go())
+
+
+def test_start_all_restarts_bridge_once_when_topics_stall():
+    async def go():
+        r = MockRunner(interval=0.03)
+        restarted = {'n': 0}
+        def health(robot):
+            return restarted['n'] > 0           # 브릿지를 다시 켠 뒤에야 토픽이 온다 (QoS 문제 재현)
+        m = ProcessManager(_ready_specs(), r, health=health)
+        orig = m.start
+        async def counting_start(pid, *a, **k):
+            if pid == 'br' and any(c[0] == 'spawn' and c[2] == 'br' for c in r.calls):
+                restarted['n'] += 1
+            return await orig(pid, *a, **k)
+        m.start = counting_start
+        m.start_all()
+        await until(lambda: m.status()['sequence']['state'] != 'running', 8.0)
+        seq = m.status()['sequence']
+        assert seq['state'] == 'done', seq
+        assert [c[2] for c in r.calls if c[0] == 'spawn'].count('br') == 2         # 한 번만 재시작
+        await m.shutdown()
+    run(go())
+
+
+def test_start_all_fails_when_topics_never_arrive():
+    async def go():
+        r = MockRunner(interval=0.03)
+        m = ProcessManager(_ready_specs(), r, health=lambda robot: False)
+        m.start_all()
+        await until(lambda: m.status()['sequence']['state'] != 'running', 8.0)
+        seq = m.status()['sequence']
+        assert seq['state'] == 'failed' and '로봇 토픽' in seq['message']
+        assert 'after' not in [c[2] for c in r.calls if c[0] == 'spawn']          # 확인이 안 되면 다음 단계로 넘어가지 않는다
+        await m.shutdown()
+    run(go())
+
+
+def test_start_all_does_not_wait_without_health():
+    async def go():
+        r = MockRunner(interval=0.03)
+        m = ProcessManager([local('a'), local('b')], r, health=lambda robot: False)   # health 설정이 없으면 판정을 쓰지 않는다
+        m.start_all()
+        await until(lambda: m.status()['sequence']['state'] != 'running')
+        assert m.status()['sequence']['state'] == 'done'
+        await m.shutdown()
+    run(go())
