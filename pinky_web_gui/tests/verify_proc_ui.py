@@ -128,29 +128,29 @@ async def scenario_auth(chrome, tmp, shot):
         check('manager 비밀번호로 다시 전환하면 manager', await pg.wait("app.cfg && app.wsUp && app.me && app.me.role === 'manager' && app.procs", 12))
         await asyncio.sleep(0.6)
         check('manager: 명령 버튼 활성 (online 로봇 순찰 시작)', await pg.wait("document.querySelector('#robotCards .card .cmd-row button').disabled === false", 5))
-        check('manager: 설정된 프로세스의 시작 버튼 활성, 미설정은 사유 표시', await pg.js(f"!document.querySelector(\"{ROW('bridge_pinky1', 'start')}\").disabled && !document.querySelector(\"{ROW('bringup_pinky1', 'start')}\").disabled"))
-        check('manager: 정지 버튼은 실행 중이 아니면 꺼져 있다', await pg.js(f"document.querySelector(\"{ROW('bridge_pinky1', 'stop')}\").disabled"))
+        check('manager: 설정된 프로세스의 시작 버튼 활성, 미설정은 사유 표시', await pg.js(f"!document.querySelector(\"{ROW('bridge', 'start')}\").disabled && !document.querySelector(\"{ROW('bringup_pinky1', 'start')}\").disabled"))
+        check('manager: 정지 버튼은 실행 중이 아니면 꺼져 있다', await pg.js(f"document.querySelector(\"{ROW('bridge', 'stop')}\").disabled"))
 
         # 기능별 묶음 (도메인 브릿지 / zone_manager / bringup / map / 순찰 노드)
-        check('시스템 패널이 기능별 묶음으로 나뉜다', await pg.js("[...document.querySelectorAll('#procList .proc-group')].map(g => g.dataset.group).join('|')") == '도메인 브릿지|zone_manager|bringup|map|순찰 노드')
-        check('묶음마다 해당 프로세스만 들어 있다 (브릿지 2, bringup 2, map 2, 순찰 노드 2)', await pg.js("(() => { const n = (g) => document.querySelectorAll(`#procList .proc-group[data-group='${g}'] li`).length; return n('도메인 브릿지') === 2 && n('bringup') === 2 && n('map') === 2 && n('순찰 노드') === 2 && n('zone_manager') === 1; })()"))
+        check('시스템 패널이 기능별 묶음으로 나뉜다', await pg.js("[...document.querySelectorAll('#procList .proc-group')].map(g => g.dataset.group).join('|')") == 'zone_manager|bringup|map|순찰 노드|도메인 브릿지')
+        check('묶음마다 해당 프로세스만 들어 있다 (브릿지 1, bringup 2, map 2, 순찰 노드 2)', await pg.js("(() => { const n = (g) => document.querySelectorAll(`#procList .proc-group[data-group='${g}'] li`).length; return n('도메인 브릿지') === 1 && n('bringup') === 2 && n('map') === 2 && n('순찰 노드') === 2 && n('zone_manager') === 1; })()"))
         check('pinky2 순찰 노드가 목록에 있다', await pg.js("!!document.querySelector(\"#procList li[data-id='patrol_pinky2']\")"))
         # 개별 시작 / 로그 / 정지
-        await pg.click_sel(ROW('bridge_pinky1', 'start'))
-        check('묶음 머리글에 실행 중 개수가 표시', await pg.wait("document.querySelector(\"#procList .proc-group[data-group='도메인 브릿지'] .proc-group-sum\").textContent.startsWith('1/2 실행')", 6))
-        check('시작 중 → 실행 중 표시', await pg.wait(f"{STATE('bridge_pinky1')}.startsWith('실행 중')", 6))
-        check('실행 중에는 시작이 꺼지고 정지가 켜진다', await pg.js(f"document.querySelector(\"{ROW('bridge_pinky1', 'start')}\").disabled && !document.querySelector(\"{ROW('bridge_pinky1', 'stop')}\").disabled"))
+        await pg.click_sel(ROW('bridge', 'start'))
+        check('묶음 머리글에 실행 중 개수가 표시', await pg.wait("document.querySelector(\"#procList .proc-group[data-group='도메인 브릿지'] .proc-group-sum\").textContent.startsWith('1/1 실행')", 6))
+        check('시작 중 → 실행 중 표시', await pg.wait(f"{STATE('bridge')}.startsWith('실행 중')", 6))
+        check('실행 중에는 시작이 꺼지고 정지가 켜진다', await pg.js(f"document.querySelector(\"{ROW('bridge', 'start')}\").disabled && !document.querySelector(\"{ROW('bridge', 'stop')}\").disabled"))
         # 실행 시간이 서버의 새 메시지 없이도 흐른다 (이전에는 상태가 바뀔 때만 갱신돼 멈춰 보였다)
-        SUB = "document.querySelector(\"#procList li[data-id='bridge_pinky1'] .proc-sub\").textContent"
+        SUB = "document.querySelector(\"#procList li[data-id='bridge'] .proc-sub\").textContent"
         t1 = await pg.js(SUB)
-        n1 = await pg.js("app.procs.procs.find(p => p.id === 'bridge_pinky1').log_n")
+        n1 = await pg.js("app.procs.procs.find(p => p.id === 'bridge').log_n")
         await asyncio.sleep(2.6)
         t2 = await pg.js(SUB)
         check('실행 시간이 실시간으로 흐른다', t1 != t2 and '초' in t2, f'{t1!r} -> {t2!r}')
-        await pg.click_sel(ROW('bridge_pinky1', 'log'))
-        check('로그 보기: 출력이 나온다', await pg.wait("document.querySelector(\"#procList li[data-id='bridge_pinky1'] .proc-log\").textContent.includes('동작 중')", 6))
-        await pg.click_sel(ROW('bridge_pinky1', 'stop'))
-        check('정지 → 정지 표시', await pg.wait(f"{STATE('bridge_pinky1')} === '정지'", 8))
+        await pg.click_sel(ROW('bridge', 'log'))
+        check('로그 보기: 출력이 나온다', await pg.wait("document.querySelector(\"#procList li[data-id='bridge'] .proc-log\").textContent.includes('동작 중')", 6))
+        await pg.click_sel(ROW('bridge', 'stop'))
+        check('정지 → 정지 표시', await pg.wait(f"{STATE('bridge')} === '정지'", 8))
 
         # 로봇 프로세스: 정지는 확인 팝업
         await pg.click_sel(ROW('bringup_pinky1', 'start'))
@@ -166,7 +166,7 @@ async def scenario_auth(chrome, tmp, shot):
 
         # 전체 시작
         await pg.click_sel('#procStartAll')
-        check('전체 시작 확인 팝업(순서 나열)', await pg.wait("document.getElementById('confirmDlg').open && document.getElementById('confirmText').textContent.includes('1. 도메인 브릿지 pinky1')", 3))
+        check('전체 시작 확인 팝업(순서 나열)', await pg.wait("document.getElementById('confirmDlg').open && document.getElementById('confirmText').textContent.includes('1. zone_manager')", 3))
         await pg.click_sel('#confirmOk')
         check('전체 시작 진행 문구', await pg.wait("document.getElementById('procSeq').textContent.includes('전체 시작')", 4))
         check('전체 시작 완료 문구와 모두 실행 중', await pg.wait("document.getElementById('procSeq').textContent.includes('전체 시작 완료') && [...document.querySelectorAll('#procList .proc-state')].every(e => e.textContent.startsWith('실행 중'))", 20))
@@ -178,8 +178,8 @@ async def scenario_auth(chrome, tmp, shot):
         check('로그 화면에서는 레이아웃 편집 버튼이 숨겨지고 상단 비상 정지는 그대로', await pg.js("document.getElementById('layoutTools').hidden && document.getElementById('estopAll').getBoundingClientRect().height > 0"))
         check('로그가 들어온다 (전체)', await pg.wait("document.querySelectorAll('#logBody .ln').length >= 5", 8))
         check('전체 탭: 줄마다 [소스] 표시', await pg.js("document.querySelector('#logBody .ln .s').textContent.startsWith('[')"))
-        check('탭: 전체, GUI 서버, 설정된 프로세스', await pg.js("(() => { const t = [...document.querySelectorAll('#logTabs .tab')].map(b => b.dataset.src); return t[0] === 'all' && t.includes('gui') && t.includes('bridge_pinky1') && t.includes('zone_manager'); })()"))
-        await pg.click_sel('#logTabs .tab[data-src="bridge_pinky1"]')
+        check('탭: 전체, GUI 서버, 설정된 프로세스', await pg.js("(() => { const t = [...document.querySelectorAll('#logTabs .tab')].map(b => b.dataset.src); return t[0] === 'all' && t.includes('gui') && t.includes('bridge') && t.includes('zone_manager'); })()"))
+        await pg.click_sel('#logTabs .tab[data-src="bridge"]')
         check('프로세스 탭: 그 프로세스의 줄만, 소스 표시 없음', await pg.js("(() => { const l = [...document.querySelectorAll('#logBody .ln')]; return l.length > 0 && !document.querySelector('#logBody .ln .s'); })()")
               and await pg.js("!document.querySelector('#logBody').textContent.includes('[zone_manager]')"))
         await pg.click_sel('#logTabs .tab[data-src="gui"]')
@@ -248,16 +248,16 @@ async def scenario_auth(chrome, tmp, shot):
 
 async def scenario_failure(chrome, tmp):
     cfg = vp.write_config(tmp)
-    srv = vp.start_server(cfg, {}, ['--mock-proc-fail', 'bridge_pinky1'])
+    srv = vp.start_server(cfg, {}, ['--mock-proc-fail', 'bridge'])
     br = ws = None
     try:
         br, ws, pg = await open_page(chrome, vp.BASE + '/')
         await pg.wait("document.getElementById('loginDlg').open", 8)
         await login_via_ui(pg, vp.OP)
         await pg.wait("app.procs && app.me && app.me.role === 'manager' && app.wsUp", 12)
-        await pg.click_sel(ROW('bridge_pinky1', 'start'))
-        check('시작 직후 종료: 실패 배지 + 사유 문구', await pg.wait(f"{STATE('bridge_pinky1')} === '실패' && document.querySelector(\"#procList li[data-id='bridge_pinky1'] .proc-msg\").textContent.includes('시작 직후 종료')", 8))
-        check('실패한 뒤에는 시작이 다시 켜진다', await pg.js(f"!document.querySelector(\"{ROW('bridge_pinky1', 'start')}\").disabled"))
+        await pg.click_sel(ROW('bridge', 'start'))
+        check('시작 직후 종료: 실패 배지 + 사유 문구', await pg.wait(f"{STATE('bridge')} === '실패' && document.querySelector(\"#procList li[data-id='bridge'] .proc-msg\").textContent.includes('시작 직후 종료')", 8))
+        check('실패한 뒤에는 시작이 다시 켜진다', await pg.js(f"!document.querySelector(\"{ROW('bridge', 'start')}\").disabled"))
     finally:
         if ws:
             await ws.close()

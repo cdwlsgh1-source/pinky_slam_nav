@@ -34,7 +34,7 @@ GUI 의 시스템 패널로 도메인 브릿지, zone_manager, 로봇의 bringup
 | # | 할 일 | 기대 | 실패하면 |
 |---|---|---|---|
 | A1 | 로그인 | operator 는 시스템 패널 버튼이 모두 꺼짐. manager 는 켜짐 | |
-| A2 | 터미널에서 브릿지를 미리 켜 둔 채 GUI 로 `도메인 브릿지 pinky1` 시작 | "이미 실행 중인 같은 프로세스가 있습니다 (pid …)" 로 거절 | `ps aux \| grep domain_bridge` 로 패턴 확인 (`detect`) |
+| A2 | 터미널에서 브릿지를 미리 켜 둔 채 GUI 로 `도메인 브릿지` 시작 | "이미 실행 중인 같은 프로세스가 있습니다 (pid …)" 로 거절 | `ps aux \| grep domain_bridge` 로 패턴 확인 (`detect`) |
 | A3 | 터미널 브릿지를 끄고 GUI 로 시작 | 실행 중 → 로봇 토픽이 오면 초록, 아니면 "토픽 없음". `ros2 topic list` 에 `/pinky1/...` | 로그 보기 확인. `source` 경로 문제면 로그에 나온다 |
 | A4 | 로그 버튼 | 시작 줄(`$ local: …`)과 브릿지 출력 | |
 | A5 | 정지 | 정지. 브릿지 프로세스가 남지 않음 (`pgrep -fa domain_bridge`) | 자식이 남으면 알려 주세요 |

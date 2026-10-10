@@ -79,6 +79,7 @@ class ProcSpec:
     ssh_key: str = ''
     ssh_password_env: str = ''   # 있으면 이 환경 변수의 값을 sshpass -e 로 쓴다 (값 자체는 설정 파일에 두지 않는다)
     group: str = ''              # 시스템 패널에서 묶어 보여 줄 기능 이름 (예: '도메인 브릿지', 'bringup'). 같은 이름끼리 한 묶음
+    env: tuple = ()          # ((이름, 값), ...) 실행 전에 export 할 환경 변수. SSH 는 ~/.bashrc 를 읽지 않아 RMW/CYCLONEDDS_URI 가 빠지므로 여기에 적는다
 
 
 @dataclass(frozen=True)
@@ -311,6 +312,15 @@ def _load_processes(path, robots):
         group = str(p.get('group') or '').strip()
         if len(group) > 40:
             raise ValueError(f'{path}: {pid}.group 은 40자 이하여야 한다')
+        env = p.get('env', d.get(f'{kind}_env', {}))
+        if not isinstance(env, dict):
+            raise ValueError(f'{path}: {pid}.env 는 매핑이어야 한다')
+        for k, v in env.items():
+            if not isinstance(k, str) or not ENV_NAME.match(k) or k == 'ROS_DOMAIN_ID':
+                raise ValueError(f'{path}: {pid}.env 의 이름 {k!r} 이 올바르지 않다 (ROS_DOMAIN_ID 는 domain 으로 지정한다)')
+            if not isinstance(v, (str, int)) or isinstance(v, bool) or '\n' in str(v):
+                raise ValueError(f'{path}: {pid}.env.{k} 는 한 줄 문자열이어야 한다')
+        env = tuple((k, _expand(str(v), path, f'{pid}.env.{k}')) for k, v in env.items())
         def num(name, default, hi):
             try:
                 v = float(p.get(name, default))
@@ -327,7 +337,7 @@ def _load_processes(path, robots):
             flags[name] = v
         out.append(ProcSpec(pid, str(p.get('label') or pid), kind, command, domain, src, cwd, detect, stop_pattern, robot, health,
                             flags['stop_on_exit'], flags['confirm_stop'], num('settle_sec', 2.0, 60), num('stop_timeout_sec', 5.0, 60),
-                            host, user, port, key, pw_env, group))
+                            host, user, port, key, pw_env, group, env))
     return tuple(out)
 
 

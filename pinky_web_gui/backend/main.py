@@ -160,6 +160,8 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
                 for m in msgs:
                     if m['type'] == 'robot_update' and m['field'] == 'patrol':
                         hub.broadcast(tracker.on_patrol(m['robot'], (m['data'] or {}).get('state')))
+                    if m['type'] == 'robot_update' and m['field'] == 'online':
+                        bg['procs_dirty'] = True  # 시스템 패널의 '토픽 없음' 배지는 로봇 online 에서 계산한다 (바뀌면 다시 보낸다)
             except Exception:
                 log.exception('이벤트 처리 실패(무시하고 계속): %r', event)
 
@@ -167,7 +169,10 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         while True:
             await asyncio.sleep(TICK_SEC)
             try:
-                hub.broadcast(store.tick())
+                ticks = store.tick()
+                hub.broadcast(ticks)
+                if any(m.get('type') == 'robot_update' and m.get('field') == 'online' for m in ticks):
+                    bg['procs_dirty'] = True  # 타임아웃으로 offline 이 된 경우도 시스템 패널 배지를 갱신
                 hub.broadcast(tracker.tick())
                 if bg['procs_dirty']:
                     bg['procs_dirty'] = False
@@ -198,6 +203,12 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             log.info('mock 모드: ROS 를 사용하지 않는다')
         else:
             from .ros_bridge import RosBridge  # rclpy 는 여기서만 import
+            dom = os.environ.get('ROS_DOMAIN_ID', '(미설정=0)')
+            if dom != '50' or os.environ.get('ROS_LOCALHOST_ONLY') == '1':
+                log.warning('ROS 환경 확인: ROS_DOMAIN_ID=%s, ROS_LOCALHOST_ONLY=%s - 관제 도메인은 50 이고 localhost 전용이면 브릿지 토픽을 못 받는다',
+                            dom, os.environ.get('ROS_LOCALHOST_ONLY', '(미설정)'))
+            else:
+                log.info('ROS 환경: ROS_DOMAIN_ID=%s', dom)
             ros = RosBridge(cfg, loop, queue)
             ros.start()
             bg['commander'] = ros

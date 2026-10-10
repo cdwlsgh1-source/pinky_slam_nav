@@ -429,10 +429,10 @@ def test_config_rejects_bad_processes(tmp_path, body, msg):
 def test_default_config_processes():
     cfg = load_config()
     ids = [p.id for p in cfg.processes]
-    assert ids[:3] == ['bridge_pinky1', 'bridge_pinky2', 'zone_manager']
+    assert ids[0] == 'zone_manager' and ids[-1:] == ['bridge']   # 브릿지는 bringup 뒤 (QoS 때문)
     by = {p.id: p for p in cfg.processes}
-    assert by['bridge_pinky1'].command.startswith('ros2 run domain_bridge domain_bridge /')
-    assert 'pinky_bridge_pinky1.yaml' in by['bridge_pinky1'].command and '{repo}' not in by['bridge_pinky1'].command
+    assert by['bridge'].command == 'ros2 launch launch/bridges.launch.xml'   # pinky1, pinky2 브릿지를 launch 하나로
+    assert by['bridge'].cwd.startswith('/') and not by['bridge'].cwd.startswith('/home/pinky') and '{repo}' not in by['bridge'].cwd   # PC 의 저장소 경로
     b1, m1 = by['bringup_pinky1'], by['map_pinky1']
     assert b1.command == 'ros2 launch pinky_bringup bringup_robot.launch.xml' and b1.confirm_stop and b1.stop_on_exit   # 서버 종료 시 로봇 쪽도 정지
     assert m1.command == 'ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml'
@@ -443,7 +443,9 @@ def test_default_config_processes():
     assert pt.source[-1] == './install/setup.bash' and pt.domain == 20 and pt.confirm_stop and pt.stop_on_exit
     ids = [p.id for p in cfg.processes]
     assert ids.index('bringup_pinky1') < ids.index('map_pinky1') < ids.index('patrol_pinky1')   # 전체 시작 순서
-    assert by['bringup_pinky2'].command == ''   # pinky2 는 값을 받지 못해 비어 있다
+    b2, m2 = by['bringup_pinky2'], by['map_pinky2']
+    assert b2.command == b1.command and m2.command == m1.command and b2.domain == 22 and b2.ssh_host == '192.168.45.22'
+    assert dict(b2.env)['RMW_IMPLEMENTATION'] == 'rmw_cyclonedds_cpp' and ids.index('bringup_pinky2') < ids.index('map_pinky2') < ids.index('patrol_pinky2')
     assert by['zone_manager'].stop_on_exit
 
 
@@ -455,3 +457,52 @@ def test_group_is_read_from_config(tmp_path):
   - {id: b, kind: local, command: "echo b"}
 """, encoding='utf-8')
     assert [s.group for s in _load_processes(f, ())] == ['묶음 1', '']
+
+
+def test_env_is_exported_before_domain_and_quoted():
+    from backend.procs import build_script
+    spec = ProcSpec('a', 'a', 'ssh', 'ros2 run x y', 20, (), '/home/pinky', env=(('RMW_IMPLEMENTATION', 'rmw_cyclonedds_cpp'), ('X', 'a b; c')))
+    script = build_script(spec)
+    assert script == "cd /home/pinky && export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export X='a b; c' && export ROS_DOMAIN_ID=20 && exec ros2 run x y"
+
+
+def test_default_config_pinky1_robot_env():
+    by = {p.id: p for p in load_config().processes}
+    for pid in ('bringup_pinky1', 'map_pinky1', 'patrol_pinky1'):
+        assert dict(by[pid].env)['RMW_IMPLEMENTATION'] == 'rmw_cyclonedds_cpp' and 'cyclonedds_robot.xml' in dict(by[pid].env)['CYCLONEDDS_URI']
+
+
+@pytest.mark.parametrize('body,msg', [
+    ('processes: [{id: a, kind: local, command: x, env: {ROS_DOMAIN_ID: "1"}}]', 'ROS_DOMAIN_ID'),
+    ('processes: [{id: a, kind: local, command: x, env: {bad-name: "1"}}]', 'env'),
+    ('processes: [{id: a, kind: local, command: x, env: [1]}]', 'env'),
+])
+def test_config_rejects_bad_env(tmp_path, body, msg):
+    with pytest.raises(ValueError) as e:
+        load_config(write_cfg(tmp_path, body))
+    assert msg in str(e.value)
+
+
+def test_sweep_kills_children_left_after_leader_exits():
+    """ros2 launch(리더)가 먼저 끝나도 같은 그룹에 남은 자식(domain_bridge)을 정리한다 (서버 종료 때 브릿지가 남던 문제)."""
+    import asyncio
+    import os
+    from backend.procs import ProcessManager, SystemRunner
+
+    async def scenario():
+        runner = SystemRunner()
+        p = await runner.spawn(['bash', '-c', 'sleep 300 >/dev/null 2>&1 & echo $!; exit 0'])
+        child = int((await p.stdout.readline()).decode().strip())
+        await p.wait()
+        assert runner.group_alive(p.pid)            # 리더는 끝났지만 자식이 남아 있다
+        pm = ProcessManager([local()], runner)
+        await pm._sweep_group(p.pid)
+        assert not runner.group_alive(p.pid)
+        try:
+            os.kill(child, 0)
+            alive = True
+        except ProcessLookupError:
+            alive = False
+        return alive
+
+    assert asyncio.run(scenario()) is False

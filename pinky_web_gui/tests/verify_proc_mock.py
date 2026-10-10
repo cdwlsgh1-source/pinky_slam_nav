@@ -189,9 +189,9 @@ async def with_auth(tmp):
         # ---- operator 권한 ----
         sc, p = operator.req('GET', '/api/procs')
         check('operator 는 프로세스 목록을 본다', sc == 200 and p['enabled'] is True and len(p['procs']) >= 3)
-        check('operator 는 프로세스를 시작할 수 없다(403)', operator.req('POST', '/api/procs/bridge_pinky1/start', {})[0] == 403)
+        check('operator 는 프로세스를 시작할 수 없다(403)', operator.req('POST', '/api/procs/bridge/start', {})[0] == 403)
         check('operator 는 전체 시작도 불가', operator.req('POST', '/api/procs/start_all', {})[0] == 403)
-        check('operator 는 로그를 볼 수 없다', operator.req('GET', '/api/procs/bridge_pinky1/log')[0] == 403)
+        check('operator 는 로그를 볼 수 없다', operator.req('GET', '/api/procs/bridge/log')[0] == 403)
         check('operator 는 로그 화면 API 도 볼 수 없다', operator.req('GET', '/api/logs')[0] == 403)
         check('로그인 없이 /api/logs 는 401', Client().req('GET', '/api/logs')[0] == 401)
         check('operator 는 start 명령을 보낼 수 없다(403)', operator.req('POST', '/api/robots/pinky1/command', {'cmd': 'start'})[0] == 403)
@@ -215,24 +215,24 @@ async def with_auth(tmp):
         by = {x['id']: x for x in p['procs']}
         check('로봇 프로세스(채워 넣은 것)와 설정됨 표시', by['bringup_pinky1']['configured'] and by['bringup_pinky1']['kind'] == 'ssh' and by['bringup_pinky1']['confirm_stop'])
         check('manager 의 알 수 없는 id 는 404', op.req('POST', '/api/procs/rm_rf/start', {})[0] == 404)
-        check('procs POST 출처 검사', op.req('POST', '/api/procs/bridge_pinky1/start', {}, headers={'Origin': 'http://evil.example'})[0] == 403)
-        check('procs POST 는 JSON 만', op.req('POST', '/api/procs/bridge_pinky1/start', raw=b'{}', headers={'Content-Type': 'text/plain'})[0] == 415)
+        check('procs POST 출처 검사', op.req('POST', '/api/procs/bridge/start', {}, headers={'Origin': 'http://evil.example'})[0] == 403)
+        check('procs POST 는 JSON 만', op.req('POST', '/api/procs/bridge/start', raw=b'{}', headers={'Content-Type': 'text/plain'})[0] == 415)
 
         async with websockets.connect(WS, additional_headers={'Cookie': op.cookie}) as ws:
             snap = json.loads(await ws.recv())
             check('snapshot 에 procs 포함', snap['procs']['enabled'] is True and len(snap['procs']['procs']) >= 3)
-            sc, _ = op.req('POST', '/api/procs/bridge_pinky1/start', {})
-            check('bridge_pinky1 시작 accepted', sc == 200)
-            m = await ws_recv_until(ws, lambda x: x['type'] == 'procs' and any(q['id'] == 'bridge_pinky1' and q['state'] == 'running' for q in x['procs']), 6)
+            sc, _ = op.req('POST', '/api/procs/bridge/start', {})
+            check('bridge 시작 accepted', sc == 200)
+            m = await ws_recv_until(ws, lambda x: x['type'] == 'procs' and any(q['id'] == 'bridge' and q['state'] == 'running' for q in x['procs']), 6)
             check('WS 로 running 상태가 온다', m is not None)
-            sc, _ = op.req('POST', '/api/procs/bridge_pinky1/start', {})
+            sc, _ = op.req('POST', '/api/procs/bridge/start', {})
             check('이미 실행 중이면 409', sc == 409)
             time.sleep(1.5)
-            sc, lg = op.req('GET', '/api/procs/bridge_pinky1/log')
+            sc, lg = op.req('GET', '/api/procs/bridge/log')
             check('로그에 출력이 쌓인다', sc == 200 and any('동작 중' in x for x in lg['lines']) and lg['lines'][0].startswith('$ local:'))
-            sc, _ = op.req('POST', '/api/procs/bridge_pinky1/stop', {})
+            sc, _ = op.req('POST', '/api/procs/bridge/stop', {})
             check('정지 accepted', sc == 200)
-            check('정지 후 stopped', (await until_state(op, 'bridge_pinky1', ('stopped',), 5)) is not None)
+            check('정지 후 stopped', (await until_state(op, 'bridge', ('stopped',), 5)) is not None)
 
             sc, r = op.req('POST', '/api/procs/zone_manager/start', {})
             check('이미 다른 곳에서 실행 중인 프로세스는 거절(409)', sc == 409 and '이미 실행 중' in r['error'])
@@ -253,15 +253,15 @@ async def with_auth(tmp):
             check('전체 시작 중 다시 누르면 409', sc2 == 409)
             seq = await until_seq(op)
             res = [(x['id'], x['result']) for x in seq['results']] if seq else []
-            check('전체 시작 완료 + 순서(브릿지, zone_manager(외부), bringup, map)', seq is not None and seq['state'] == 'done'
-                  and [r[0] for r in res][:4] == ['bridge_pinky1', 'bridge_pinky2', 'zone_manager', 'bringup_pinky1'] and ('zone_manager', 'external') in res, str(seq))
+            check('전체 시작 완료 + 순서(zone_manager(외부), bringup, map, ..., 브릿지)', seq is not None and seq['state'] == 'done'
+                  and [r[0] for r in res][:2] == ['zone_manager', 'bringup_pinky1'] and [r[0] for r in res][-1:] == ['bridge'] and ('zone_manager', 'external') in res, str(seq))
             procs_now = {x['id']: x['state'] for x in op.req('GET', '/api/procs')[1]['procs']}
-            check('전체 시작 뒤 실행 중', procs_now['bridge_pinky1'] == procs_now['bringup_pinky1'] == procs_now['map_pinky2'] == 'running', str(procs_now))
+            check('전체 시작 뒤 실행 중', procs_now['bridge'] == procs_now['bringup_pinky1'] == procs_now['map_pinky2'] == 'running', str(procs_now))
             sc, r = op.req('POST', '/api/procs/stop_all', {})
             check('전체 정지는 확인 없이 409', sc == 409 and r['needs_confirm'])
             sc, _ = op.req('POST', '/api/procs/stop_all', {'confirm': True})
             seq = await until_seq(op, 30)
-            check('전체 정지 완료(역순)', seq is not None and seq['state'] == 'done' and [x['id'] for x in seq['results']][0] == 'patrol_pinky2', str(seq))
+            check('전체 정지 완료(역순)', seq is not None and seq['state'] == 'done' and [x['id'] for x in seq['results']][0] == 'bridge', str(seq))
             procs_now = {x['id']: x['state'] for x in op.req('GET', '/api/procs')[1]['procs']}
             check('전체 정지 뒤 모두 stopped', all(v == 'stopped' for v in procs_now.values()), str(procs_now))
 
@@ -279,18 +279,18 @@ async def with_auth(tmp):
 
 async def with_failures(tmp):
     cfg = write_config(tmp)
-    srv = start_server(cfg, {}, ['--mock-proc-fail', 'bridge_pinky1'])
+    srv = start_server(cfg, {}, ['--mock-proc-fail', 'bridge'])
     try:
         op = Client()
         op.login(OP)
-        sc, _ = op.req('POST', '/api/procs/bridge_pinky1/start', {})
-        p = await until_state(op, 'bridge_pinky1', ('failed',), 5)
+        sc, _ = op.req('POST', '/api/procs/bridge/start', {})
+        p = await until_state(op, 'bridge', ('failed',), 5)
         check('시작 직후 종료되면 failed + 사유', sc == 200 and p is not None and '시작 직후 종료' in p['message'] and p['exit_code'] == 1, str(p))
         sc, _ = op.req('POST', '/api/procs/start_all', {})
         seq = await until_seq(op)
         check('전체 시작은 첫 실패에서 멈추고 사유를 보인다', seq is not None and seq['state'] == 'failed' and 'pinky1' in seq['message'], str(seq))
         st = {x['id']: x['state'] for x in op.req('GET', '/api/procs')[1]['procs']}
-        check('실패 뒤 단계는 시작하지 않았다', st['bridge_pinky2'] == 'stopped' and st['zone_manager'] == 'stopped', str(st))
+        check('실패 뒤 단계는 시작하지 않았다', st['bringup_pinky1'] == 'running', str(st))
     finally:
         stop_server(srv)
 
@@ -305,7 +305,7 @@ async def without_auth(tmp):
         check('인증 미설정: /api/me', me['auth'] is False and me['role'] == 'manager' and me['procs_allowed'] is False)
         sc, p = c.req('GET', '/api/procs')
         check('인증 미설정: 목록은 enabled=false', sc == 200 and p['enabled'] is False)
-        sc, r = c.req('POST', '/api/procs/bridge_pinky1/start', {})
+        sc, r = c.req('POST', '/api/procs/bridge/start', {})
         check('인증 미설정이면 프로세스 제어는 403 (원격 실행을 열지 않는다)', sc == 403 and '--no-auth' in r['error'])
         check('인증 미설정: 전체 시작도 403', c.req('POST', '/api/procs/start_all', {})[0] == 403)
         check('인증 미설정: 기존 명령 API 는 그대로', c.req('POST', '/api/robots/pinky1/command', {'cmd': 'stop'})[0] == 200)

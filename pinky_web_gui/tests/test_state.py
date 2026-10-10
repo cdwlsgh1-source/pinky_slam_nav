@@ -94,3 +94,10 @@ def test_alive_event_only_keeps_robot_online_without_changing_values():
     assert s.tick() == [] and s.is_online('a')
     t[0] += 6
     assert not s.is_online('a') or s.tick() != []
+
+
+def test_last_kind_records_last_topic():
+    st = StateStore(['pinky1'], '/z', 5, 10, now=lambda: 100.0)
+    assert st.snapshot()['robots']['pinky1']['last_kind'] is None
+    st.apply(('alive', 'pinky1'))
+    assert st.snapshot()['robots']['pinky1']['last_kind'] == 'alive'

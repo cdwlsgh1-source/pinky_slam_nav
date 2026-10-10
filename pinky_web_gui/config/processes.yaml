@@ -1,5 +1,5 @@
 # GUI 의 "시스템" 패널에서 켜고 끄는 프로세스 목록. 이 목록에 있는 것만 실행할 수 있다.
-# 목록 순서가 [전체 시작] 순서이고, [전체 정지] 는 반대 순서다 (브릿지 -> zone_manager -> bringup -> map).
+# 목록 순서가 [전체 시작] 순서이고, [전체 정지] 는 반대 순서다 (zone_manager -> bringup -> map -> 순찰 노드 -> 브릿지).
 #
 # 로그인(manager 계정)이 필요하다. 서버를 --no-auth 로 띄우면 이 기능은 꺼진다.
 # 비밀번호를 이 파일에 적지 않는다.
@@ -15,28 +15,20 @@ defaults:
     - /opt/ros/jazzy/setup.bash
     - "{repo}/install/setup.bash"      # domain_bridge, zone_traffic_control 이 설치된 workspace
 
+  # 로봇 터미널(~/.bashrc)에는 있지만 SSH 로 실행하면 빠지는 DDS 설정. 이게 빠지면 로봇이 기본 DDS(FastDDS)로 떠서
+  # PC 의 CycloneDDS 브릿지와 토픽 이름만 보이고 데이터가 안 온다. 값은 로봇 터미널의 `env | grep -E "RMW|CYCLONE|ROS_"` 와 같게 둔다.
+  pinky1_env: &pinky1_env
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/pinky/.ros/cyclonedds_robot.xml
+    ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
+  
+  pinky2_env: &pinky2_env
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/pinky/.ros/cyclonedds_robot.xml   # pinky2 로봇 터미널의 값과 같게 둔다
+    ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
+
 processes:
   # ---- 관제 PC (도메인 50) ----
-  - id: bridge_pinky1
-    group: "도메인 브릿지"
-    label: 도메인 브릿지 pinky1
-    kind: local
-    domain: 50
-    command: "ros2 run domain_bridge domain_bridge {repo}/domain_bridge_pc/config/pinky_bridge_pinky1.yaml"
-    detect: "domain_bridge .*pinky_bridge_pinky1"
-    robot: pinky1
-    health: true            # 로봇 토픽이 오고 있으면 초록, 프로세스만 떠 있으면 노랑
-
-  - id: bridge_pinky2
-    group: "도메인 브릿지"
-    label: 도메인 브릿지 pinky2
-    kind: local
-    domain: 50
-    command: "ros2 run domain_bridge domain_bridge {repo}/domain_bridge_pc/config/pinky_bridge_pinky2.yaml"
-    detect: "domain_bridge .*pinky_bridge_pinky2"
-    robot: pinky2
-    health: true
-
   - id: zone_manager
     group: "zone_manager"
     label: zone_manager
@@ -55,6 +47,7 @@ processes:
   # pinky2(192.168.45.22) 도 키 등록이 필요하다: ssh-copy-id pinky@192.168.45.22 (비밀번호는 터미널에서만 입력).
   # cwd    : 로봇에서 cd 할 절대 경로 (~ 불가). source 의 ./install/setup.bash 와 command 의 상대 경로 인자(map:=...)의 기준이다.
   # source : 로봇의 경로. SSH 는 ~/.bashrc 를 읽지 않으므로 ROS 배포판 setup.bash 도 여기에 적는다.
+  # env    : 실행 전에 export 할 환경 변수. SSH 는 ~/.bashrc 를 안 읽어 RMW_IMPLEMENTATION, CYCLONEDDS_URI 도 빠지므로 여기서 준다.
   - id: bringup_pinky1
     group: bringup
     label: pinky1 bringup
@@ -64,6 +57,21 @@ processes:
     domain: 20
     ssh: {host: "192.168.45.20", user: "pinky", port: 22}
     cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
+    env: *pinky1_env
+    source: ["/opt/ros/jazzy/setup.bash", "/home/pinky/pinky_slam_nav/install/setup.bash"]   # jazzy 는 로봇에서 확인함. SSH 는 ~/.bashrc 를 읽지 않으므로 명시한다
+    command: "ros2 launch pinky_bringup bringup_robot.launch.xml"
+    detect: "ros2 launch pinky_bringup"
+  
+  - id: bringup_pinky2
+    group: bringup
+    label: pinky2 bringup
+    kind: ssh
+    robot: pinky2
+    health: true
+    domain: 22
+    ssh: {host: "192.168.45.22", user: "pinky", port: 22}
+    cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
+    env: *pinky2_env
     source: ["/opt/ros/jazzy/setup.bash", "/home/pinky/pinky_slam_nav/install/setup.bash"]   # jazzy 는 로봇에서 확인함. SSH 는 ~/.bashrc 를 읽지 않으므로 명시한다
     command: "ros2 launch pinky_bringup bringup_robot.launch.xml"
     detect: "ros2 launch pinky_bringup"
@@ -76,6 +84,20 @@ processes:
     domain: 20
     ssh: {host: "192.168.45.20", user: "pinky", port: 22}
     cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
+    env: *pinky1_env
+    source: ["/opt/ros/jazzy/setup.bash", "/home/pinky/pinky_slam_nav/install/setup.bash"]   # jazzy 는 로봇에서 확인함. SSH 는 ~/.bashrc 를 읽지 않으므로 명시한다
+    command: "ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml"
+    detect: "ros2 launch pinky_navigation"
+ 
+  - id: map_pinky2
+    group: map
+    label: pinky2 map (Nav2)
+    kind: ssh
+    robot: pinky2
+    domain: 22
+    ssh: {host: "192.168.45.22", user: "pinky", port: 22}
+    cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
+    env: *pinky2_env
     source: ["/opt/ros/jazzy/setup.bash", "/home/pinky/pinky_slam_nav/install/setup.bash"]   # jazzy 는 로봇에서 확인함. SSH 는 ~/.bashrc 를 읽지 않으므로 명시한다
     command: "ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml"
     detect: "ros2 launch pinky_navigation"
@@ -90,32 +112,10 @@ processes:
     domain: 20
     ssh: {host: "192.168.45.20", user: "pinky", port: 22}
     cwd: /home/pinky/pinky_slam_nav
+    env: *pinky1_env
     source: ["/opt/ros/jazzy/setup.bash", "./install/setup.bash"]
     command: "ros2 run my_pinky_package pinky_patrol_node_pinky1_v2"
     detect: "pinky_patrol_node_pinky1_v2"
-
-  - id: bringup_pinky2
-    group: bringup
-    label: pinky2 bringup
-    kind: ssh
-    robot: pinky2
-    health: true
-    domain: 22
-    ssh: {host: "192.168.45.22", user: "pinky", port: 22}
-    source: []
-    command: ""
-    detect: ""
-
-  - id: map_pinky2
-    group: map
-    label: pinky2 map (Nav2)
-    kind: ssh
-    robot: pinky2
-    domain: 22
-    ssh: {host: "192.168.45.22", user: "pinky", port: 22}
-    source: []
-    command: ""
-    detect: ""
 
   # pinky2 순찰 노드: pinky2 의 Nav2(map)가 올라온 뒤에 켠다. 로봇의 폴더와 ROS 경로는 pinky1 과 같다고 가정했다 (다르면 cwd/source 수정).
   - id: patrol_pinky2
@@ -126,6 +126,22 @@ processes:
     domain: 22
     ssh: {host: "192.168.45.22", user: "pinky", port: 22}
     cwd: /home/pinky/pinky_slam_nav
+    env: *pinky2_env
     source: ["/opt/ros/jazzy/setup.bash", "./install/setup.bash"]
     command: "ros2 run my_pinky_package pinky_patrol_node_pinky2_v2"
     detect: "pinky_patrol_node_pinky2_v2"
+
+  # ---- 도메인 브릿지: bringup/map 보다 뒤에 둔다 ----
+  # domain_bridge 는 시작할 때 로봇 쪽 토픽의 QoS 를 보고 구독을 만든다. 로봇 토픽이 아직 없으면 기본 QoS(reliable)로 만들어져
+  # best_effort 센서 토픽(/odom, /scan)이 전달되지 않는다. 그래서 [전체 시작] 이 bringup 뒤에 브릿지를 켠다.
+  # 로봇 bringup 을 다시 켰다면 브릿지도 정지했다가 다시 시작한다.
+  # pinky1(20<->50) 과 pinky2(22<->50) 브릿지를 launch/bridges.launch.xml 하나로 같이 띄운다 (터미널의 ros2 launch 와 같다).
+  # cwd 는 이 PC 의 저장소 경로다 (/home/pinky/... 는 로봇 경로라 PC 에 없다).
+  - id: bridge
+    group: "도메인 브릿지"
+    label: 도메인 브릿지 (pinky1, pinky2)
+    kind: local
+    domain: 50
+    cwd: "{repo}"
+    command: "ros2 launch launch/bridges.launch.xml"
+    detect: "domain_bridge .*pinky_bridge_pinky"

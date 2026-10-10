@@ -97,6 +97,9 @@ class MockRunner:
             return 0, '12345\n'
         return 1, ''
 
+    def group_alive(self, pid):
+        return False   # mock 에는 리더 없이 남는 자식이 없다
+
     def signal_group(self, pid, sig):
         self.signals.append((pid, sig))
         p = self.procs.get(pid)

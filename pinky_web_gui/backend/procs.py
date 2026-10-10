@@ -37,13 +37,14 @@ class ProcError(Exception):
 
 # ---- 명령 조립 (순수 함수: 테스트에서 직접 확인한다) ----
 def build_script(spec):
-    """cd -> source 들 -> ROS_DOMAIN_ID -> exec 명령. exec 로 셸을 명령으로 바꿔서 시그널이 명령에 직접 간다.
+    """cd -> source 들 -> env -> ROS_DOMAIN_ID -> exec 명령. exec 로 셸을 명령으로 바꿔서 시그널이 명령에 직접 간다.
 
     cd 가 맨 앞이라 source ./install/setup.bash 와 map:=x.yaml 같은 상대 경로가 cwd 기준으로 풀린다.
     SSH 의 비대화형 셸은 ~/.bashrc 를 읽지 않으므로, 로봇의 ROS 환경은 source 에 명시해야 한다.
     """
     parts = [f'cd {shlex.quote(spec.cwd)}'] if spec.cwd else []
     parts += [f'source {shlex.quote(f)}' for f in spec.source]
+    parts += [f'export {k}={shlex.quote(v)}' for k, v in spec.env]   # SSH 는 ~/.bashrc 를 안 읽으므로 RMW/DDS 설정을 여기서 준다
     if spec.domain is not None:
         parts.append(f'export ROS_DOMAIN_ID={int(spec.domain)}')
     parts.append(f'exec {spec.command}')
@@ -118,10 +119,20 @@ class SystemRunner:
         return p.returncode, out.decode(errors='replace')
 
     def signal_group(self, pid, sig):
+        # start_new_session=True 라 프로세스 그룹 id 는 pid 와 같다. getpgid(pid) 는 리더가 끝나면 실패하므로 쓰지 않는다
+        # (리더인 ros2 launch 가 먼저 끝나도 남은 자식에게 신호를 보낼 수 있어야 한다)
         try:
-            os.killpg(os.getpgid(pid), sig)
+            os.killpg(pid, sig)
         except (ProcessLookupError, PermissionError):
             pass
+
+    def group_alive(self, pid):
+        """리더가 끝난 뒤에도 그룹에 남은 프로세스(launch 가 먼저 죽고 남은 자식)가 있는지."""
+        try:
+            os.killpg(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
 
 
 class _Entry:
@@ -310,6 +321,21 @@ class ProcessManager:
         self._changed()
 
     # ---- 정지 ----
+    async def _sweep_group(self, pgid):
+        """리더가 끝난 뒤 그룹에 남은 프로세스를 정리한다: 잠시 기다림 -> SIGTERM -> SIGKILL."""
+        alive = getattr(self._runner, 'group_alive', None)
+        if alive is None:
+            return
+        for s, wait in ((None, 2.0), (signal.SIGTERM, 3.0), (signal.SIGKILL, 2.0)):
+            if s is not None:
+                self._runner.signal_group(pgid, s)
+            end = self._now() + wait
+            while alive(pgid) and self._now() < end:
+                await asyncio.sleep(0.1)
+            if not alive(pgid):
+                return
+        log.warning('프로세스 그룹 %s 에 종료되지 않은 프로세스가 남았다', pgid)
+
     async def _wait_exit(self, proc, sec):
         try:
             await asyncio.wait_for(asyncio.shield(proc.wait()), sec)
@@ -357,6 +383,8 @@ class ProcessManager:
                     break
                 sig(proc.pid, s)
                 gone = await self._wait_exit(proc, wait)
+        if gone and spec.kind == 'local':
+            await self._sweep_group(proc.pid)   # ros2 launch 가 먼저 끝나도 자식(domain_bridge 등)이 남지 않게 한다
         if not gone:
             e.state, e.message = FAILED, '프로세스가 종료되지 않습니다 (SIGKILL 후에도 살아 있음)'
             self._changed()

@@ -37,7 +37,7 @@ class StateStore:
         self._zone = ZoneTracker(now)
         self.zone_topic = zone_topic
         self._r = {
-            rid: {'online': False, 'last_seen': None, 'patrol': None, 'pose': None, 'battery': None}
+            rid: {'online': False, 'last_seen': None, 'last_kind': None, 'patrol': None, 'pose': None, 'battery': None}
             for rid in self._robots
         }
         # pose 속도 제한: 마지막 전송 시각, 아직 못 보낸 최신값
@@ -51,6 +51,7 @@ class StateStore:
             robots[rid] = {
                 'online': s['online'],
                 'last_seen': s['last_seen'],
+                'last_kind': s['last_kind'],
                 'patrol': s['patrol'],
                 'pose': s['pose'],
                 'battery': s['battery'],
@@ -80,7 +81,7 @@ class StateStore:
         if rid not in self._r:
             log.warning('알 수 없는 로봇 ID 이벤트 무시: %r', rid)
             return []
-        out = self._touch(rid)
+        out = self._touch(rid, kind)
         if kind == 'patrol':
             out += self._apply_patrol(rid, event[2])
         elif kind == 'pose':
@@ -95,10 +96,11 @@ class StateStore:
             log.warning('알 수 없는 이벤트 종류 무시: %r', kind)
         return out
 
-    def _touch(self, rid):
+    def _touch(self, rid, kind=None):
         """어떤 토픽이든 수신하면 last_seen 갱신 (FR1-5). 오프라인에서 돌아오면 online 이벤트."""
         s = self._r[rid]
         s['last_seen'] = self._now()
+        s['last_kind'] = kind  # 진단용: 마지막으로 받은 토픽 종류 (카드 툴팁)
         if not s['online']:
             s['online'] = True
             return [self._update(rid, 'online', True)]

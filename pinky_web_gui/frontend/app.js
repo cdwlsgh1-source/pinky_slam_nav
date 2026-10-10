@@ -446,6 +446,10 @@ function renderCards() {
     const r = app.robots[id], c = ensureCard(id), cfg = robotCfg(id);
     c.badge.textContent = r.online ? 'online' : 'offline';
     c.badge.classList.toggle('on', r.online);
+    // 진단: offline 일 때 서버가 이 로봇 토픽을 한 번이라도 받았는지 (없으면 브릿지/도메인/발견 문제)
+    c.badge.title = r.online ? '' : (r.lastSeen
+      ? '마지막 수신: ' + (r.lastKind || '?') + ' ' + new Date(r.lastSeen * 1000).toLocaleTimeString()
+      : '서버가 이 로봇의 토픽을 한 번도 받지 못했습니다 (브릿지, ROS_DOMAIN_ID, DDS 발견 확인)');
     c.root.classList.toggle('target', app.routeTarget === id);
     const p = r.patrol, state = p && p.state;
     c.stateBadge.textContent = state || '-';
@@ -611,7 +615,7 @@ function upsertHistory(entry) {
 // ---------- WebSocket ----------
 function robotModel(id, i, data) {
   return { color: PALETTE[i % PALETTE.length], online: !!data.online, patrol: data.patrol, pose: data.pose,
-           battery: data.battery, disp: null, lastCommand: data.last_command || null, lastTask: data.last_task || null, noRespDismissed: null,
+           battery: data.battery, lastSeen: data.last_seen || null, lastKind: data.last_kind || null, disp: null, lastCommand: data.last_command || null, lastTask: data.last_task || null, noRespDismissed: null,
            stateSince: data.patrol ? Date.now() : null };
 }
 
