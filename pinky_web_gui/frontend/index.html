@@ -44,7 +44,11 @@
     </div>
     <!-- 알람 목록: 서버가 만든 알람과 브라우저 전용 알람을 한 표로 (app.js renderAlarms). 비상정지 명령 이력도 여기 통합됐다 -->
     <div class="alarm-list" id="alarmList">
-      <div class="alarm-tools"><button type="button" id="alarmInfoBtn" aria-pressed="true" title="Show or hide info rows (sent commands, robot online)">Hide info</button></div>
+      <div class="alarm-tools">
+        <button type="button" id="alarmAckBtn" title="Acknowledge cleared alarms" disabled>ACK</button>
+        <button type="button" id="alarmSilBtn" aria-pressed="false" title="Silence current alarm sound" disabled>SIL</button>
+        <button type="button" id="alarmInfoBtn" aria-pressed="true" title="Show or hide info rows (sent commands, robot online)">Hide info</button>
+      </div>
       <div class="alarm-main">
         <div class="alarm-scroll" id="alarmScroll" tabindex="0" aria-label="Alarm list">
           <table>

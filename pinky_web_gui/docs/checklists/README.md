@@ -7,7 +7,8 @@
 |---|---|---|
 | `step3_real_robot_checklist.md` | PRD Step 3, 명령 패널 | `start`/`stop`/`goto` 버튼이 실제 로봇에서 동작하는지, 명령 응답과 상태 표시, 배터리 토픽 |
 | `step4_real_robot_checklist.md` | PRD Step 4, 구역·비상정지·LiDAR·수동 조작 | 구역 점유 표시, 비상정지가 실제로 먹히는지(소프트웨어 정지), LiDAR 방향, 수동 조작 데드맨 |
-| `alarm_a1_real_robot_checklist.md` | 알람바 PRD Step A1, 서버 알람과 이력 파일 | 오프라인·전송 실패·비상정지 실패·무응답 알람의 발생/해소, 두 화면 동일, 새로고침 유지, `data/alarms/` 이력 파일 100건 분할 |
+| `alarm_a1_real_robot_checklist.md` | 알람바 PRD Step A1, 서버 알람과 이력 파일 | 오프라인·전송 실패·비상정지 실패·무응답 알람의 발생/해소, 두 화면 동일, 새로고침 유지, `data/alarms/` 이력 파일 1000건 분할(시각 이름) |
+| `alarm_a2_real_robot_checklist.md` | 알람바 PRD Step A2, ACK / SIL | 활성·해소 알람 ACK 가 두 브라우저에 반영, `oper`/`mngr` 계정 기록, 로그인 없이 401, SIL 해제, 이력 파일 `acked` 줄 |
 | `step6_process_control_real_checklist.md` | PRD Step 6, 인증과 프로세스 제어 (시스템 패널) | 버튼으로 브릿지, zone_manager, 로봇 bringup/map/순찰 노드를 켜고 끄기, SSH, 서버 종료 시 정리 |
 
 ## 이름 규칙

@@ -35,6 +35,7 @@ const app = {
   wsUp: false,
   clicks: [],   // {x, y}
   hover: null,
+  silenced: false,    // SIL: 이 브라우저의 알람 소리 끄기 (저장하지 않는다)
   alarms: [],         // 알람바 행. 서버가 만든 알람(snapshot.alarms, WS alarm)과 브라우저 전용 알람(local: true)을 함께 둔다
   showInfo: true,     // 알람바에 info 행(명령 전송 기록 등)을 보일지
   dirtyCards: true,
@@ -81,16 +82,34 @@ app.showInfo = loadShowInfo();
 app.alarms = loadLocalAlarms().map((a) => (a.state === 'active' ? Object.assign(a, { state: 'cleared', t_cleared: a.t_cleared || Date.now() / 1000 }) : a));
 localAlarmSeq = app.alarms.reduce((m, a) => Math.max(m, parseInt(a.id.slice(6), 10) || 0), 0);
 
+// ACK 를 받은 해소 알람은 알람바에서 숨긴다 (서버 backend/alarms.py 의 is_hidden 과 같은 규칙. 이력 파일에는 남아 있다)
+const hiddenAlarm = (a) => a.state === 'cleared' && a.acked_by != null && a.level !== 'info';
+const stateText = (a) => {
+  if (a.level === 'info') return '-';
+  if (a.state === 'active' && a.acked_by != null) return STATE_LABEL.acked + ' ' + a.acked_by + ' ' + clock(a.acked_at);
+  return STATE_LABEL[a.state] + (a.state === 'cleared' && a.t_cleared ? ' ' + clock(a.t_cleared) : '');
+};
+// ACK 대상: info 가 아니고 아직 ACK 안 된 서버 알람(활성·해소), 이 브라우저에서 해소된 브라우저 전용 알람. SIL 대상: ACK 안 된 활성 알람 (소리가 나는 알람)
+const ackTargets = () => app.alarms.filter((a) => a.level !== 'info' && (a.local ? a.state !== 'active' && a.state !== 'event' : a.acked_by == null) );
+const silTargets = () => app.alarms.filter((a) => a.level !== 'info' && a.state === 'active' && a.acked_by == null);   // ACK 하면 그 알람의 소리는 멈춘다 (PRD FRA3-5)
+function updateAlarmButtons() {
+  const ack = el('alarmAckBtn'), sil = el('alarmSilBtn');
+  ack.disabled = ackTargets().length === 0;
+  if (silTargets().length === 0) app.silenced = false;   // 소리 낼 알람이 없으면 SIL 도 풀린다
+  sil.disabled = silTargets().length === 0;
+  sil.setAttribute('aria-pressed', String(app.silenced));
+}
+
 function renderAlarms() {
   const body = el('alarmBody');
   body.replaceChildren();
-  const rows = app.alarms.filter((a) => app.showInfo || a.level !== 'info');
+  const rows = app.alarms.filter((a) => (app.showInfo || a.level !== 'info') && !hiddenAlarm(a));
   el('alarmEmpty').hidden = rows.length > 0;
   for (const a of rows) {
     const tr = document.createElement('tr');
-    tr.className = 'lvl-' + a.level + ' st-' + a.state;
+    tr.className = 'lvl-' + a.level + ' st-' + a.state + (a.state === 'active' && a.acked_by != null ? ' acked' : '');
     tr.dataset.id = a.id; tr.dataset.code = a.code; tr.dataset.state = a.state;
-    const state = a.level === 'info' ? '-' : STATE_LABEL[a.state] + (a.state === 'cleared' && a.t_cleared ? ' ' + clock(a.t_cleared) : '');
+    const state = stateText(a);
     const msg = a.text + (a.count > 1 ? ' ×' + a.count : '');
     for (const [text, cls] of [[clock(a.t_last), 'time'], [a.robot || '-', 'robot'], [msg, 'msg'], [state, 'state']]) {
       const td = document.createElement('td'); td.textContent = text; td.className = cls; tr.appendChild(td);
@@ -100,6 +119,7 @@ function renderAlarms() {
   const btn = el('alarmInfoBtn');
   btn.textContent = app.showInfo ? 'Hide info' : 'Show info';
   btn.setAttribute('aria-pressed', String(app.showInfo));
+  updateAlarmButtons();
 }
 
 function sortAlarms() {
@@ -109,7 +129,10 @@ function sortAlarms() {
 
 function upsertAlarm(a) {
   const i = app.alarms.findIndex((x) => x.id === a.id);
-  if (i >= 0) app.alarms[i] = a; else app.alarms.unshift(a);
+  // 새 서버 알람 행이 생기거나 같은 알람이 또 일어나면(count 증가, info 제외) SIL 을 푼다: 지금 울리는 소리만 끄는 것이고 이후 알람은 다시 울려야 한다
+  if (!a.local && a.level !== 'info' && a.state === 'active' && (i < 0 || (a.count || 1) > (app.alarms[i].count || 1))) app.silenced = false;
+  if (hiddenAlarm(a)) { if (i >= 0) app.alarms.splice(i, 1); }   // ACK 로 숨겨진 알람은 목록에서 뺀다 (이력 파일에는 남아 있다)
+  else if (i >= 0) app.alarms[i] = a; else app.alarms.unshift(a);
   sortAlarms();
   renderAlarms();
   if (a.local) saveLocalAlarms();
@@ -119,7 +142,20 @@ function upsertAlarm(a) {
 function addAlarm(level, text, extra) {
   const t = Date.now() / 1000;
   upsertAlarm(Object.assign({ id: 'local-' + (++localAlarmSeq), code: 'LOCAL', level: LOCAL_LEVEL[level] || 'L', robot: null, text, detail: '',
-    state: 'event', t_raised: t, t_last: t, t_cleared: null, count: 1, local: true }, extra));
+    state: 'event', t_raised: t, t_last: t, t_cleared: null, count: 1, acked_by: null, acked_at: null, local: true }, extra));
+}
+
+// ACK: 서버 알람은 서버가 기록하고(모든 화면에 반영), 이 브라우저에서 해소된 브라우저 전용 알람은 여기서 지운다
+async function ackAlarms() {
+  const hadLocal = app.alarms.some((a) => a.local && a.level !== 'info' && a.state === 'cleared');
+  if (hadLocal) { app.alarms = app.alarms.filter((a) => !(a.local && a.level !== 'info' && a.state === 'cleared')); saveLocalAlarms(); renderAlarms(); }
+  if (!app.alarms.some((a) => !a.local && a.level !== 'info' && a.acked_by == null)) return;
+  try {
+    const res = await fetch('/api/alarms/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) });
+    if (!res.ok) addAlarm('bad', 'ACK was not accepted (HTTP ' + res.status + ')');   // 성공하면 서버가 보낸 WS alarm 으로 화면이 바뀐다
+  } catch (err) {
+    addAlarm('bad', 'ACK request failed: ' + err.message);
+  }
 }
 
 function clearLocalAlarms(code) {
@@ -164,6 +200,8 @@ function setAlarmH(px, save) {
 })();
 renderAlarms();   // 새로고침 전의 브라우저 전용 알람을 서버 스냅샷이 오기 전에도 보여 준다
 
+el('alarmAckBtn').onclick = ackAlarms;
+el('alarmSilBtn').onclick = () => { app.silenced = !app.silenced; updateAlarmButtons(); };   // 이 브라우저만 (서버 상태는 안 바뀐다). 소리 재생은 Step A3 이 app.silenced 를 읽는다
 el('alarmInfoBtn').onclick = () => { app.showInfo = !app.showInfo; saveShowInfo(app.showInfo); renderAlarms(); };
 
 function setChip(id, level, text) {

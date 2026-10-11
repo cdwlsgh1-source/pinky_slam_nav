@@ -72,13 +72,13 @@
 **제외**: ACK/SIL, 소리, 카탈로그 편집.
 
 ### 알람 데이터 구조(안)
-`id, code(카탈로그 ID), level(HH|H|L|LL|info), robot, text, detail, state(active|cleared|acked), t_raised, t_cleared, count`
+`id, code(카탈로그 ID), level(HH|H|L|LL|info), robot, text, detail, state(active|cleared), t_raised, t_last, t_cleared, acked_by, acked_at` (A2 에서 `acked_by/acked_at` 을 추가했다. `count` 는 유지)
 
 ### 기능 요구사항
 | ID | 요구사항 |
 |---|---|
 | FRA1-1 | 서버가 명령 결과(rejected/failed/no_response/비상정지 실패)·로봇 online 변화·patrol FAILED/RETRY/STOPPED 를 알람으로 만든다 |
-| FRA1-2 | 같은 `code`+`robot` 의 반복 알람은 새 행이 아니라 `count` 증가로 묶는다 |
+| FRA1-2 | 같은 `code`+`robot` 의 반복 알람은 **ACK 전까지만** `count` 증가로 묶는다. ACK 했거나 해소된 뒤에 또 생기면 새 행 (결정 19) |
 | FRA1-3 | 조건이 사라지면(온라인 복귀, 명령 성공 등) 알람이 `해소` 로 바뀌고 해소 시각을 표시한다 |
 | FRA1-4 | 새로 접속한 화면도 `snapshot.alarms` 로 현재 알람을 똑같이 본다 |
 | FRA1-5 | 알람바에 시각·로봇·메시지·상태 열을 두고 목록 영역은 스크롤된다(기존 4건 제한 폐지) |
@@ -86,18 +86,18 @@
 | FRA1-7 | 서버 시각(epoch)만 쓴다(브라우저 시각 혼용 제거) |
 | FRA1-8 | `docs/interfaces.md` 에 알람 WS/REST 와 `command` 이벤트 구조를 기록한다 |
 | FRA1-9 | 알람바의 고정 문구(열 제목 Time / Robot / Message / State, 상태 Active / Cleared / Acknowledged, 버튼, 안내)는 영문이다. 시각은 24시간제 `HH:MM:SS` 로 쓴다 |
-| FRA1-11 | (추가, 구현됨) 알람바(모니터링)는 최근 100건만 보이고, 일어난 모든 알람 이벤트는 `alarm_history_dir`(기본 `data/alarms/`)에 100건씩 파일로 나눠 저장한다. 파일 이름(`alarms_YYYY-MM-DD_NNN.jsonl`)과 각 레코드(`saved_at`)에 저장 날짜가 들어간다. 조회는 `GET /api/alarms/history[/files]`. 보관 기간 정리와 재시작 때 이력에서 복원은 미정 (`docs/interfaces.md` 6-7절) |
+| FRA1-11 | (추가, 구현됨) 알람바(모니터링)는 최근 100건만 보이고, 일어난 모든 알람 이벤트는 `alarm_history_dir`(기본 `data/alarms/`)에 1000건씩 파일로 나눠 저장한다(처음 100건에서 A2 때 1000건으로 변경). 파일 이름(`alarms_YYYY-MM-DD_HHMMSS.jsonl`)에는 파일을 만든 날짜와 시각이, 각 레코드(`saved_at`)에는 저장 시각이 들어가고, 가득 차면 그 시각의 이름으로 새 파일을 만든다. 조회는 `GET /api/alarms/history[/files]`. 보관 기간 정리와 재시작 때 이력에서 복원은 미정 (`docs/interfaces.md` 6-7절) |
 | FRA1-12 | (추가, 구현됨) 알람 목록은 안에서 스크롤되고, 아래 손잡이로 높이를 늘리고 줄인다(56px ~ 화면의 60%, 브라우저에 저장). 서버가 모르는 브라우저 전용 알람(서버 끊김, 로드 실패 등)은 `localStorage` 에 저장해 새로고침해도 남긴다 |
 | FRA1-10 | 알람 메시지(`Message` 열)는 카탈로그 템플릿으로 만들며 한글·영문 혼용을 허용한다. 기존 한국어 오류 원인 문구(`commands.py`, `main.py:do_estop`, `PatrolView.failReason`)는 번역 없이 `{reason}` 에 그대로 실어도 된다. 영문 대응(8절)은 있으면 쓰는 선택 사항이다 |
 
 ### 완료 기준
-- [x] `AlarmManager` 단위 테스트(생성, 묶기, 해소, 비상정지 비활성 불가)
+- [x] `AlarmManager` 단위 테스트(생성, 묶기(ACK 전까지, A2 에서 정의 확정), 해소, 비상정지 비활성 불가)
 - [x] mock 으로 구독자 없음·오프라인·FAILED 를 일으켜 알람바에 표시되고 새 탭에서도 동일
 - [x] 하단 이력 패널이 없고 지도·사이드 패널 레이아웃이 깨지지 않음(headless Chrome 스크린샷)
 - [x] 기존 `test_commands.py` 통과, `verify_step4_ui.py` 의 `#historyBody` 검사를 알람바 기준으로 수정
 - [x] 알람바의 고정 문구(열 제목·상태·버튼)에 한글이 없음(알람 메시지 문구는 제외, mock 시나리오로 확인)
 - [x] 알람 메시지 문구를 검사하는 기존 테스트(`test_commands.py` 등)가 새 알람 구조에서도 통과
-- [x] 알람 이력 파일 100건 분할·저장 날짜 파일명(`tests/test_alarmlog.py`, `verify_alarm_ui.py`)
+- [x] 알람 이력 파일 분할(1000건)·생성 시각 파일명(`tests/test_alarmlog.py`, `verify_alarm_ui.py`)
 - [ ] 실제 로봇 확인은 사용자가 수행 (`docs/checklists/alarm_a1_real_robot_checklist.md`)
 
 ### Claude Code 프롬프트
@@ -123,11 +123,13 @@ CLAUDE.md, docs/interfaces.md, docs/reference/known-pitfalls.md 를 먼저 읽�
 | FRA2-4 | SIL: 현재 울리는 소리만 끈다. 알람 상태는 그대로이며 이후 새 알람은 다시 울린다 |
 | FRA2-5 | 숨긴 알람은 사라지지 않고 Alarm 화면(Step A7)의 History 탭에서 조회 가능 |
 | FRA2-6 | operator 도 ACK/SIL 가능, ACK 한 계정이 기록된다 |
+| FRA2-7 | (추가, 구현됨) 이력 파일에는 발생·반복·ACK·해소를 **시도마다 시간 순서로 한 줄씩** 남긴다(화면은 ACK 전까지 `×N` 으로 묶어도 이력은 묶지 않는다). ACK 줄에 `acked_by`/`acked_at` 이 들어간다 (결정 19) |
 
 ### 완료 기준
-- [ ] 해소 알람 ACK → 두 브라우저 모두에서 사라짐, 활성 알람은 유지
-- [ ] SIL 후 새 알람이 오면 다시 소리가 남(수동 확인)
-- [ ] 권한 테스트(로그인 안 함 401)
+- [x] 해소 알람 ACK → 두 브라우저 모두에서 사라짐, 활성 알람은 유지 (`verify_alarm_ui.py`, mock)
+- [x] SIL 후 새 알람이 오면 SIL 이 풀림 (소리 재생은 A3 이므로 상태만 `verify_alarm_ui.py` 로 확인, 실제 소리는 A3 에서 수동 확인)
+- [x] 권한 테스트(로그인 안 함 401) (`tests/test_alarm_api.py`)
+- [ ] 실제 로봇 확인 (사용자): `docs/checklists/alarm_a2_real_robot_checklist.md`
 
 ### Claude Code 프롬프트
 
@@ -282,11 +284,11 @@ CLAUDE.md 와 docs/interfaces.md 를 먼저 읽고, frontend/ 의 app.js, index.
 | FRA7-1 | 왼쪽 메뉴바에 `Alarm` 버튼을 추가한다 (`Main`/`Log` 와 같은 메뉴, 화면 전환 방식은 로그 화면과 같다). 선택한 화면은 새로고침해도 유지한다. 레이아웃 편집 버튼은 로그 화면처럼 숨고, 위의 알람바(비상 정지 포함)는 그대로 보인다 |
 | FRA7-2 | 메뉴의 `Alarm` 버튼에 **지금 active 인 알람 수**를 작은 배지로 보인다 (HH/H 가 있으면 빨강, 없으면 숨김). 다른 화면(Main, Log)에서도 알람을 놓치지 않게 하려는 것이다 |
 | FRA7-3 | 화면은 탭 두 개: `History`(이 Step), `Catalog`(Step A4 가 채운다, 그 전에는 탭을 숨기거나 비활성) |
-| FRA7-4 | History 탭은 이력 파일의 **알람 한 건당 한 행**으로 보여 준다. 파일은 이벤트(`raised`/`repeated`/`cleared`)마다 한 줄이므로, 서버가 `(id, t_raised)` 로 묶어 마지막 상태를 한 행으로 만든다. 열: Raised(발생 시각), Robot, Level, Message, State(Active/Cleared/Acknowledged), Count, Cleared(해소 시각), Duration(지속 시간) |
+| FRA7-4 | History 탭은 이력 파일의 **알람 한 건당 한 행**으로 보여 준다. 파일은 이벤트(`raised`/`repeated`/`acked`/`cleared`)마다 한 줄이므로, 서버가 `(id, t_raised)` 로 묶어 마지막 상태를 한 행으로 만든다. 열: Raised(발생 시각), Robot, Level, Message, State(Active/Cleared/Acknowledged), Count, Acked(확인한 계정·시각), Cleared(해소 시각), Duration(지속 시간) |
 | FRA7-5 | 알람바의 100건 제한과 무관하게 저장된 모든 알람을 보며, 최신이 위다. 한 번에 최대 200행을 가져오고 `Load more`(또는 스크롤 끝)로 더 가져온다. 이력 전체를 한꺼번에 읽지 않는다 |
 | FRA7-6 | 필터: 기간(From ~ To, 기본은 오늘), Robot, Level(여러 개 선택), State, Code. 검색창은 Message·detail 문구에서 찾는다. 필터는 서버가 적용한다 |
 | FRA7-7 | 지금 active 인 알람은 목록 맨 위에 고정해 보이고 WS `alarm` 으로 실시간 갱신된다. 그 아래는 조회한 이력이다 (같은 알람이 두 번 보이지 않게 `id` 로 합친다) |
-| FRA7-8 | 행을 누르면 상세: 모든 이벤트 줄의 타임라인(`raised` → `repeated` N회 → `cleared` 각 시각), 전체 Message 와 detail 원문(긴 사유는 줄바꿈), Code, 저장된 파일 이름 |
+| FRA7-8 | 행을 누르면 상세: 모든 이벤트 줄의 타임라인(`raised` → `repeated` N회 → `acked` → `cleared` 각 시각, 계정 포함), 전체 Message 와 detail 원문(긴 사유는 줄바꿈), Code, 저장된 파일 이름 |
 | FRA7-9 | 화면 위에 이력 파일 요약(저장 폴더, 파일 수, 총 알람 수, 파일당 건수)을 한 줄로 보인다. 파일 목록 펼치기는 읽기 전용이다 (삭제는 GUI 에 두지 않는다) |
 | FRA7-10 | `Export`: 지금 필터에 맞는 결과를 CSV 로 내려받는다 (파일 이름에 기간 포함, 열은 FRA7-4 와 같고 시각은 `YYYY-MM-DD HH:MM:SS`). 행 수 상한을 두고 넘으면 안내한다 |
 | FRA7-11 | 서버가 저장 이력을 쓰지 못하는 설정(`alarm_history_dir` 없음)이면 이 화면은 "History is disabled" 안내만 보인다. 파일이 깨져 있어도(쓰다 끊긴 줄) 화면은 뜨고 그 줄만 건너뛴다 |
@@ -296,7 +298,7 @@ CLAUDE.md 와 docs/interfaces.md 를 먼저 읽고, frontend/ 의 app.js, index.
 | FRA7-15 | `docs/interfaces.md` 6-7절에 새 API 를 기록하고, `README.md` 의 화면 구성에 Alarm 화면을 추가한다 |
 
 ### 완료 기준
-- [ ] 단위 테스트: 이벤트 줄 묶기(raised/repeated/cleared → 한 행), 필터(기간·로봇·레벨·상태·코드·검색), 페이지 표지, 해소 줄이 없는 알람이 `Uncleared` 로 나오고 서버 메모리에 살아 있는 알람만 `Active` 로 나옴, 서버를 재시작해 `id` 가 겹쳐도 `(id, t_raised)` 로 서로 다른 알람으로 묶임, 깨진 줄 건너뛰기, 잘못된 파라미터 400
+- [ ] 단위 테스트: 이벤트 줄 묶기(raised/repeated/acked/cleared → 한 행, 시도마다 한 줄), 필터(기간·로봇·레벨·상태·코드·검색), 페이지 표지, 해소 줄이 없는 알람이 `Uncleared` 로 나오고 서버 메모리에 살아 있는 알람만 `Active` 로 나옴, 서버를 재시작해 `id` 가 겹쳐도 `(id, t_raised)` 로 서로 다른 알람으로 묶임, 깨진 줄 건너뛰기, 잘못된 파라미터 400
 - [ ] mock 으로 알람 수백 건을 만들어(100건 제한을 넘기고 이력 파일이 여러 개) Alarm 화면에서 오래된 알람까지 보이고 `Load more` 가 동작
 - [ ] 필터·검색 결과가 서버 응답과 일치, 새로고침 뒤에도 선택한 화면 유지
 - [ ] active 알람이 맨 위에 고정되고 실시간으로 Cleared 로 바뀜. 메뉴 배지가 active 수를 따라감
@@ -337,7 +339,7 @@ G1→A1, G2→A2, G3→A3, G4→A4·A5, G5→A1, G6→A6, G7→A7(알람 화면�
 1. 정상 명령(전송 성공)도 알람바에 보일까? → **확정(사용자 결정): info 행으로 보이되 소리·ACK 대상 아님, 필터로 숨김 가능**
 2. ACK 가 활성 알람에도 적용되나? → **확정(사용자 결정): 활성은 "확인됨" 표시만, 숨기는 것은 해소된 것만**
 3. SIL 범위: 이 브라우저만 vs 모든 화면? → **확정(사용자 결정): 이 브라우저만**(소리가 브라우저에서 나므로)
-4. 알람·ACK 이력을 디스크에 저장할까? → **따로 data 파일에 저장하기로 했음** (알람 이력은 구현됨: `data/alarms/`, `docs/reference/alarm-history-format.md`. ACK 기록은 Step A2 에서 같은 이력에 남긴다)
+4. 알람·ACK 이력을 디스크에 저장할까? → **따로 data 파일에 저장하기로 했음** (알람 이력은 구현됨: `data/alarms/`, `docs/reference/alarm-history-format.md`. ACK 는 A2 에서 같은 이력에 `acked` 줄로 구현됨, 시간 순서로 계속 추가만 한다)
 5. 소리 설정 위치: 브라우저 vs 서버(계정별)? → **확정(사용자 결정): 브라우저(localStorage)**, 알람별 소리 정책만 서버 카탈로그
 6. 네트워크 진단 PRD N5 와 순서? → **확정(사용자 결정): A1 먼저, N5 는 AlarmManager 규칙으로 구현**
 7. 카탈로그 화면 위치: 시스템 패널 탭 vs 별도 메뉴? → **확정(사용자 결정): 왼쪽 메뉴의 `Alarm` 항목(Step A7)의 Catalog 탭 (manager 만 편집)**. 전체 알람 목록(History 탭)과 한 화면을 공유한다
@@ -354,6 +356,9 @@ G1→A1, G2→A2, G3→A3, G4→A4·A5, G5→A1, G6→A6, G7→A7(알람 화면�
 16. Alarm 화면이 읽는 데이터는? → **저장된 이력 파일(서버가 묶어서 제공)**. 화면은 파일을 직접 읽지 않고 API 로만 받는다. 알람바의 100건 목록과 별개로 항상 전체를 볼 수 있다
 17. A7 을 언제 하나? → **A1 직후, A2 앞** 권장: 이력 파일이 이미 쌓이고 있어 화면만 있으면 되고, ACK(A2)·카탈로그(A4)가 같은 화면을 쓴다
 18. 이력의 보관 기간·용량 정리는? → **A7 에 넣지 않는다** (화면은 읽기 전용, 파일 삭제는 사용자가 직접). 정책(예: 30일)은 정해지면 서버 쪽에서 별도로 추가
+19. 반복되는 알람의 정의 → **확정(사용자 결정, A2 재작업): 묶되 ACK 이후는 새 행.** 같은 `code`+`robot` 이 active 이고 ACK 안 됐으면 새 행 없이 `×N`(`count`)으로 묶고, ACK 했거나 해소된 뒤에 또 생기면 새 행(새 `id`)이다. 이력 파일은 시간 순서로 줄을 추가만 한다. **이력에는 시도 하나하나를 시간 순서로 모두 남긴다(사용자 결정: 언제 어떤 조작을 했는지 트러블슈팅에 필요)**: 화면은 `×N` 으로 묶어도 반복마다 `repeated` 줄이 한 줄씩 쌓이며 조작·수신 이벤트 구분은 없다. 연타 때 파일이 빨리 차는 것은 감수한다
+20. ACK 한 알람과 SIL 대상 → **A2 구현**: ACK 는 `state` 를 바꾸지 않고 `acked_by/acked_at` 만 채운다. 해소된 알람이 ACK 되어 있으면 알람바에서 숨기고(메모리·이력 파일에는 남음), 활성 알람은 `Acknowledged <계정> <시각>` 으로 계속 보인다. SIL 은 ACK 안 된 활성 알람(소리가 나는 알람)이 있을 때만 켜지고, 새 서버 알람 행이 생기거나 같은 알람이 또 일어나면(`count` 증가) 풀린다
+21. 이력 파일 크기와 이름 → **확정(사용자 결정, A2 후속)**: 알람바는 100건 유지, 이력 파일은 **파일당 1000줄**, 가득 차면 **그 시점의 시각**으로 새 파일(`alarms_YYYY-MM-DD_HHMMSS.jsonl`). 기록은 이벤트마다 즉시 추가(넘칠 때 몰아 저장하지 않음). 예전 번호 이름 파일도 읽는다
 
 ## 7. 권장 진행 순서
 A1 → A6(영문화, 결정 14) → A7(Alarm 화면, 결정 17) → A2 → A3 → A4 → A5. A1 은 데이터 구조가 이후 모두의 기반이므로 먼저 검토·확정.

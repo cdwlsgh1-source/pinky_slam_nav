@@ -262,9 +262,11 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(인증이 켜져 있을 때만 true, `--no-auth` 면 false)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
 
-## 6-7. 웹 GUI 알람 (알람바 Step A1)
+## 6-7. 웹 GUI 알람 (알람바 Step A1, A2)
 
 알람바(화면 위)에 보이는 사건은 **서버가 만든다** (`backend/alarms.py` 의 `AlarmManager`). 접속한 모든 화면이 같은 알람을 보고, 하단 명령 이력 패널은 알람바에 통합돼 없어졌다. 서버가 알 수 없는 사건(WS 끊김, 지도·설정 불러오기 실패, 화면 안내, 요청이 서버에 닿지 못함)은 브라우저가 같은 목록에 직접 추가한다 (id 가 `local-N`, 시각은 브라우저 시계).
+
+**반복의 정의** (PRD 결정 19): 같은 `code`+`robot` 알람이 **active 이고 아직 ACK 안 됐으면** 새 행 없이 `count` 만 올린다(화면 `×N`, `t_last`·`text` 갱신). ACK 했거나 해소된 뒤에 또 생기면 새 행이다. **이력 파일에는 화면과 달리 시도 하나하나를 시간 순서로 모두 남긴다** (조작이든 로봇에서 받은 이벤트든 같다. 언제 어떤 조작을 했는지로 문제를 추적하기 위해서다).
 
 **알람 객체** (WS `alarm` 의 `alarm`, `snapshot.alarms` 의 원소, `GET /api/alarms`):
 
@@ -276,19 +278,21 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | `robot` | 로봇 id 또는 `null` |
 | `text` | 알람바에 보이는 문구 (코드별 템플릿, 한영 혼용 가능) |
 | `detail` | `{reason}` 원문 (한국어 오류 원인 그대로) |
-| `state` | `active`(조건 지속) \| `cleared`(조건 사라짐) \| `acked`(확인됨, Step A2 에서 사용). `info` 는 해소 개념이 없어 만들 때부터 `cleared` |
+| `state` | `active`(조건 지속) \| `cleared`(조건 사라짐). `info` 는 해소 개념이 없어 만들 때부터 `cleared`. ACK 는 상태를 바꾸지 않는다 (아래 `acked_by`) |
 | `t_raised`, `t_last`, `t_cleared` | 처음 발생, 마지막 발생, 해소 시각 (서버 epoch 초, 해소 전엔 `t_cleared` 가 `null`) |
-| `count` | 같은 `code`+`robot` 의 active 알람이 반복된 횟수. 새 행이 아니라 이 값만 오른다 (`t_last` 와 `text` 도 갱신) |
+| `count` | 같은 알람이 ACK 전에 반복된 횟수 (새 행은 1) |
+| `acked_by`, `acked_at` | ACK 한 계정 ID(`mngr` \| `oper`, `--no-auth` 서버는 `no-auth`)와 시각(epoch 초). ACK 전에는 `null`. `info` 는 ACK 대상이 아니라 항상 `null`. **해소된 알람이 ACK 되어 있으면 알람바에서 숨긴다** (활성 알람은 `Acknowledged` 로 계속 보이다가 해소되면 숨는다). 숨긴 알람은 서버 메모리와 이력 파일에는 남고 `snapshot.alarms`/`GET /api/alarms` 에서는 빠진다 |
 
 **메시지와 REST**
 
 | 방향 | 내용 |
 |---|---|
-| 서버 → 브라우저 WS | `{"type":"alarm","alarm":{…}}` 생성과 변경(count 증가, 해소)마다 하나. 같은 `id` 는 교체한다 |
+| 서버 → 브라우저 WS | `{"type":"alarm","alarm":{…}}` 생성과 변경(반복, 해소, ACK)마다 하나. 같은 `id` 는 교체하고, 해소+ACK 로 숨겨진 알람이면 목록에서 지운다 |
 | 서버 → 브라우저 WS | `snapshot` 의 `alarms`: 현재 보관 중인 알람 전체(최신이 앞). 접속(재접속)할 때마다 받으며, 브라우저는 서버 알람을 이것으로 통째로 바꾼다 |
-| `GET /api/alarms` | operator 이상. `{alarms:[…]}` (snapshot 과 같은 값, 최대 100건) |
+| `GET /api/alarms` | operator 이상. `{alarms:[…]}` (snapshot 과 같은 값, 숨긴 알람 제외 최대 100건) |
+| `POST /api/alarms/ack` | **operator 이상** (로그인 안 하면 401, 출처·Content-Type 검사는 다른 POST 와 같음). 본문 `{"id": 정수 \| [정수…] \| null}` (`id` 없음/`null` 이면 전체). 대상은 `info` 가 아니고 아직 ACK 안 된 알람(활성·해소). 응답 `{ok:true, acked:[id…]}` (이미 ACK 했거나 없는 id 는 빠진다). 형식이 틀리면 400 `{ok:false, error}`. 바뀐 알람마다 WS `alarm` 을 모든 화면에 보내고 이력 파일에 `acked` 줄을 남긴다 |
 | `GET /api/alarms/history?date=YYYY-MM-DD&limit=N` | operator 이상. 저장된 이력 레코드(아래 "알람 이력 파일"), 최신이 앞. `date` 를 주면 그날 것만, `limit` 기본 100 최대 1000. 날짜 형식이 틀리면 400, 저장이 꺼져 있으면 404 |
-| `GET /api/alarms/history/files` | operator 이상. `{dir, chunk, files:[{name, date, seq, records, size}]}` (최신이 앞) |
+| `GET /api/alarms/history/files` | operator 이상. `{dir, chunk, files:[{name, date, started, seq, records, size}]}` (최신이 앞). `started` 는 시각 이름 파일의 `HH:MM:SS`, `seq` 는 예전 번호 이름 파일의 번호이고 해당 없으면 `null` |
 | (mock 전용) `POST /api/mock/robot/{id}/silent` `{on}` | 그 로봇이 신호를 끊어 online 타임아웃 뒤 오프라인이 된다 |
 | (mock 전용) `POST /api/mock/no-subscriber` `{on}` | patrol_cmd/cmd_vel 구독자가 없는 것처럼 명령 전송이 실패한다 |
 | (mock 전용) `POST /api/mock/robot/{id}/patrol` `{state, detail}` | 임의 patrol 상태를 주입한다 (GUI 로는 못 만드는 FAILED/RETRY 시험용) |
@@ -313,9 +317,9 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | 항목 | 규칙 |
 |---|---|
 | 위치 | `config/robots.yaml` 의 `alarm_history_dir` (기본 `data/alarms/`, `.gitignore` 대상). `--alarm-history-dir` 로 바꿀 수 있고, `--mock` 은 기본적으로 뒤에 `-mock` 을 붙인 폴더(`data/alarms-mock/`)에 써서 실제 이력과 섞이지 않는다. 설정 줄을 지우면 저장하지 않는다 |
-| 파일 이름 | `alarms_YYYY-MM-DD_NNN.jsonl`. 날짜는 **저장한 날**(서버 PC 현지 날짜), `NNN` 은 그날의 파일 번호 |
-| 분할 | 한 파일에 `alarm_history_chunk`(기본 **100**)건. 차면 다음 번호의 새 파일. 날짜가 바뀌면 안 찼어도 새 날짜의 `001` 부터. 서버를 다시 켜면 오늘 마지막 파일이 안 찼을 때 이어서 쓴다 |
-| 한 줄(JSON) | 저장 일시 `saved_at`·`t`, 이벤트 `event`(`raised` \| `repeated` \| `cleared`)에 알람 객체의 모든 필드를 더한 14개 키. 필드별 타입, 예시, 읽는 법은 `reference/alarm-history-format.md` |
+| 파일 이름 | `alarms_YYYY-MM-DD_HHMMSS.jsonl`. 날짜와 시각은 **그 파일을 처음 만든 시각**(서버 PC 현지 시각, 첫 줄의 `saved_at` 과 같음). 같은 초에 파일이 또 필요하면 `-2` 가 붙는다. 예전 버전의 번호 이름(`…_001.jsonl`)도 읽고 이어서 쓴다 |
+| 분할 | 한 파일에 `alarm_history_chunk`(기본 **1000**)건. 차면 **다음 이벤트가 오는 시각**의 이름으로 새 파일을 만든다. 날짜가 바뀌면 안 찼어도 새 파일. 서버를 다시 켜면 오늘 가장 최근 파일이 안 찼을 때 이어서 쓴다. 알람바(화면)의 100건 한도와는 별개다 |
+| 한 줄(JSON) | 저장 일시 `saved_at`·`t`, 이벤트 `event`(`raised` \| `repeated` \| `acked` \| `cleared`)에 알람 객체의 모든 필드를 더한 16개 키. **일어난 순서대로 줄을 추가만 하고 기존 줄은 고치지 않는다** (묶인 알람도 반복마다 `repeated` 줄이 한 줄씩 쌓여, 시도마다 시각·`text`·`count` 가 남는다). 필드별 타입, 예시, 읽는 법은 `reference/alarm-history-format.md` |
 | 저장 대상 | 서버가 만든 알람 전부(info 행 포함). 브라우저 전용 알람(서버 끊김 등)은 서버가 모르므로 저장하지 않는다 |
 | 쓰기 시점 | 이벤트가 올 때마다 즉시 한 줄 추가 (갑자기 꺼져도 직전까지 남는다). 쓰기에 실패해도 알람은 계속 동작하고 경고 로그만 남기며, 복구되면 다시 쓴다 |
 | 보관 | 파일은 자동으로 지우지 않는다 (오래된 것은 직접 지운다) |

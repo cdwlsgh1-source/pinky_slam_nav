@@ -55,13 +55,13 @@ PROC_STATUS = {'unknown': 404, 'unset': 409, 'busy': 409, 'external': 409, 'conf
 PUBLIC_API = ('/api/health', '/api/login', '/api/logout', '/api/me')  # 로그인 없이 부를 수 있는 API
 
 
-def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None, alarm_dir: str = None) -> FastAPI:
+def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None, alarm_dir: str = None, alarm_chunk: int = None) -> FastAPI:
     auth = auth if auth is not None else Auth()   # 고정 계정 (backend/auth.py). 끄려면 Auth.disabled() 또는 --no-auth
     store = StateStore(cfg.robots, cfg.zone_status_topic, cfg.online_timeout_sec, cfg.pose_max_hz)
     tracker = CommandTracker(cfg.robots, cfg.command_history_size, cfg.no_response_sec)
     # 알람 이력 폴더: 인자 > 설정. mock 은 실제 이력과 섞이지 않게 '-mock' 폴더를 쓴다 (인자로 정하면 그대로)
     hist_dir = alarm_dir or (cfg.alarm_history_dir + ('-mock' if mock else '') if cfg.alarm_history_dir else None)
-    alarm_history = AlarmHistory(hist_dir, cfg.alarm_history_chunk) if hist_dir else None
+    alarm_history = AlarmHistory(hist_dir, alarm_chunk or cfg.alarm_history_chunk) if hist_dir else None
     if alarm_history:
         log.info('알람 이력 저장: %s (파일당 %d건)', alarm_history.dir, alarm_history.chunk)
     alarms = AlarmManager(sink=alarm_history.record if alarm_history else None)   # 알람바에 보이는 모든 사건. 서버가 만들어 모든 화면에 같은 알람을 보낸다
@@ -608,6 +608,27 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             return JSONResponse({'error': '알람 이력 저장이 꺼져 있습니다 (alarm_history_dir)'}, status_code=404)
         return {'dir': str(alarm_history.dir), 'chunk': alarm_history.chunk, 'files': alarm_history.files()}
 
+    @app.post('/api/alarms/ack')
+    async def api_alarm_ack(request: Request):
+        """알람 확인(ACK). body {"id": 정수 | [정수…] | null}, id 가 없으면 전체. operator 이상.
+        결과는 바뀐 알람마다 WS `alarm` 으로 모든 화면에 보낸다 (해소된 알람은 숨겨지고, 활성 알람은 Acknowledged 표시)."""
+        denied = guard_post(request) or require(request, OPERATOR)
+        if denied:
+            return denied
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        raw = body.get('id') if isinstance(body, dict) else None
+        ids = raw if isinstance(raw, list) else (None if raw is None else [raw])
+        if not isinstance(body, dict) or (ids is not None and not all(isinstance(i, int) and not isinstance(i, bool) for i in ids)):
+            return JSONResponse({'ok': False, 'error': 'body must be {"id": <int | [int, ...] | null>}'}, status_code=400)
+        user = auth.user_of(request.cookies.get(COOKIE)) or 'no-auth'
+        msgs = alarms.ack(ids, user)
+        hub.broadcast(msgs)
+        log.info('알람 ACK: %s (%s)', [m['alarm']['id'] for m in msgs], user)
+        return {'ok': True, 'acked': [m['alarm']['id'] for m in msgs]}
+
     if mock:
         def mock_body_error(body, *need):
             return None if isinstance(body, dict) and all(k in body for k in need) else JSONResponse(
@@ -764,6 +785,7 @@ def main():
     ap.add_argument('--mock-proc-fail', default='', help='--mock 에서 시작 직후 실패하는 프로세스 id (쉼표로 구분)')
     ap.add_argument('--mock-proc-external', default='', help='--mock 에서 이미 다른 곳에서 실행 중인 것으로 보이는 프로세스 id (쉼표로 구분)')
     ap.add_argument('--no-auth', action='store_true', help='로그인을 끈다 (개발/시험용. 프로세스 제어도 꺼진다)')
+    ap.add_argument('--alarm-history-chunk', type=int, default=None, help='이력 파일 하나에 담는 건수 (기본: 설정의 alarm_history_chunk, 시험용)')
     ap.add_argument('--alarm-history-dir', default=None, help='알람 이력 폴더 (기본: 설정의 alarm_history_dir, mock 이면 뒤에 -mock)')
     ap.add_argument('--config', default=None, help='robots.yaml 경로 (기본 config/robots.yaml)')
     args = ap.parse_args()
@@ -788,7 +810,7 @@ def main():
                                                  'scan_mount_tf': not args.mock_scan_no_tf,
                                                  'proc_opts': {'fail_start': [x for x in args.mock_proc_fail.split(',') if x],
                                                                'external': [x for x in args.mock_proc_external.split(',') if x]}},
-                                            auth=auth, alarm_dir=args.alarm_history_dir), host=args.host, port=args.port, log_level='info')
+                                            auth=auth, alarm_dir=args.alarm_history_dir, alarm_chunk=args.alarm_history_chunk), host=args.host, port=args.port, log_level='info')
 
 
 if __name__ == '__main__':

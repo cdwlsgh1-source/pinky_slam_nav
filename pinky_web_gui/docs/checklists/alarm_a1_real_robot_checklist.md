@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | 1 | 로봇 오프라인 | 로봇 한 대의 전원을 끈다 (또는 브리지를 끈다) | 약 5초 뒤 `... is offline` (H, 빨강, Active). **두 화면 모두** | |
 | 2 | 오프라인 해소 | 로봇을 다시 켠다 | 같은 행이 `Cleared HH:MM:SS` 로 바뀌고 `... is online`(info) 행이 생긴다 | |
-| 3 | 브리지 꺼짐 + 명령 | 브리지를 끄고 `순찰 정지` | 503, `Command ... could not be sent` (H). 다시 누르면 새 행이 아니라 `×2` | |
+| 3 | 브리지 꺼짐 + 명령 | 브리지를 끄고 `순찰 정지` | 503, `Command ... could not be sent` (H). 다시 누르면 새 행이 아니라 `×2` (ACK 전까지만 묶는다, Step A2) | |
 | 4 | 비상정지 실패 | 브리지를 끈 채 `비상 정지` | `E-STOP failed on ...` (HH, 굵은 빨강). 사유 두 가지 | |
 | 5 | 비상정지 성공과 해소 | 브리지를 켜고 `비상 정지` | 4번 행이 Cleared, `Command estop sent` (info) 행 | |
 | 6 | 무응답 | 순찰 중인 로봇에 `순찰 시작` 한 번 더 | 5초 뒤 `No response from ...` (L). 로봇이 응답하거나 새 명령이 나가면 Cleared | |
@@ -36,8 +36,8 @@
 ## C. 알람 이력 파일 (`data/alarms/`)
 한 줄의 필드와 타입은 `../reference/alarm-history-format.md`.
 
-- [ ] A 의 사건들이 `data/alarms/alarms_<오늘 날짜>_001.jsonl` 에 한 줄씩 쌓인다 (`tail -f` 로 확인). 줄마다 `saved_at`, `event`(raised/repeated/cleared), `code`, `robot`, `text` 가 있다.
-- [ ] 100건이 차면 `_002` 파일이 생긴다 (파일당 100줄). 서버를 다시 켜도 안 찬 파일에 이어서 쓴다.
-- [ ] 자정을 넘기면 새 날짜의 `_001` 이 생긴다 (자정을 기다리기 어려우면 생략하고 알려 준다).
+- [ ] A 의 사건들이 `data/alarms/alarms_<오늘 날짜>_<HHMMSS>.jsonl` 에 한 줄씩 쌓인다 (`tail -f` 로 확인). 줄마다 `saved_at`, `event`(raised/acked/cleared, 로봇에서 받은 알람은 repeated 도), `code`, `robot`, `text` 가 있다.
+- [ ] 1000줄이 차면 그 시각의 이름(`_<HHMMSS>`)으로 새 파일이 생긴다 (파일당 1000줄, 실물에서 채우기 어려우면 `--alarm-history-chunk 20` 으로 서버를 띄워 확인). 서버를 다시 켜도 안 찬 파일에 이어서 쓴다.
+- [ ] 자정을 넘기면 새 날짜의 파일이 생긴다 (자정을 기다리기 어려우면 생략하고 알려 준다).
 - [ ] `curl localhost:8000/api/alarms/history/files` 로 파일 목록이 나온다.
 - [ ] 폴더 권한을 막아 쓰기를 실패시켜도 알람바는 계속 동작하고 로그에 경고가 한 번 나온다 (선택).

@@ -1,7 +1,7 @@
 """알람바(Step A1)를 headless Chrome(CDP)으로 확인한다. mock 서버를 직접 띄우고 정리한다.
 
 실행: .venv/bin/python tests/verify_alarm_ui.py [--shot docs/alarm_a1.png] [--narrow-shot docs/alarm_a1_narrow.png]   (google-chrome 필요, 없으면 SKIP)
-확인: 서버 알람(오프라인, 구독자 없음, 비상정지 실패, patrol FAILED, 거절, 무응답) 표시와 해소, 같은 알람의 count 묶기,
+확인: 서버 알람(오프라인, 구독자 없음, 비상정지 실패, patrol FAILED, 거절, 무응답) 표시와 해소, 반복 알람은 묶지 않음(사건형 새 행, 상태형 한 행),
       새로 연 두 번째 탭에서도 같은 알람, info 필터와 저장, 고정 문구에 한글 없음, 브라우저 전용 알람(서버 연결 끊김),
       하단 이력 패널 없음. /api/mock/* 훅(backend/main.py)으로 mock 에서 장애를 일으킨다.
 """
@@ -64,7 +64,7 @@ async def run(shot, narrow_shot):
         return
     hist_dir = Path(tempfile.mkdtemp())   # 알람 이력 폴더 (실제 data/alarms 와 섞이지 않게 임시 폴더)
     srv = subprocess.Popen([sys.executable, '-m', 'backend.main', '--mock', '--mock-wait-scale', '0.2', '--port', str(PORT), '--no-auth',
-                            '--alarm-history-dir', str(hist_dir)],
+                            '--alarm-history-dir', str(hist_dir), '--alarm-history-chunk', '100'],
                            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     prof = tempfile.mkdtemp()
     br = subprocess.Popen([chrome, '--headless=new', '--no-sandbox', '--disable-gpu', f'--remote-debugging-port={CDP}',
@@ -135,7 +135,7 @@ async def run(shot, narrow_shot):
             check('CMD_SEND_FAILED 알람 (H)', await pg.wait(ROW_COUNT('CMD_SEND_FAILED', 'pinky1', 'active') + ' === 1', 4)
                   and (await pg.js(ROW('CMD_SEND_FAILED', 'pinky1') + '[0].className')).startswith('lvl-H'))
             api('POST', '/api/robots/pinky1/command', {'cmd': 'start'})
-            check('같은 알람이 반복되면 새 행이 아니라 ×2 로 묶임', await pg.wait(ROW_TEXT('CMD_SEND_FAILED', 'pinky1', 'active') + ".includes('×2')", 4)
+            check('ACK 전의 같은 알람이 반복되면 새 행이 아니라 ×2 로 묶임', await pg.wait(ROW_TEXT('CMD_SEND_FAILED', 'pinky1', 'active') + ".includes('×2')", 4)
                   and await pg.js(ROW_COUNT('CMD_SEND_FAILED', 'pinky1')) == 1)
             st, body = api('POST', '/api/robots/pinky1/estop', {})
             check('비상정지가 둘 다 실패하면 503', st == 503, (st, body))
@@ -255,7 +255,7 @@ async def run(shot, narrow_shot):
             _, before = api('GET', '/api/alarms/history/files')
             n0 = sum(f['records'] for f in before['files'])
             check('이력 파일이 생겼고 지금까지의 알람 이벤트가 저장됨', n0 > 10 and len(before['files']) >= 1, before)
-            for i in range(130):   # info 행(CMD_SENT)은 묶이지 않아 하나씩 새 알람이 된다
+            for i in range(130):   # 알람은 묶지 않으므로 하나씩 새 알람이 된다
                 api('POST', '/api/robots/pinky1/command', {'cmd': 'start'})
             await asyncio.sleep(1.0)
             check('모니터링 화면은 100건까지만 보임', await pg.js("app.alarms.length") <= 100 and await pg.js("document.querySelectorAll('#alarmBody tr').length") <= 100,
@@ -268,15 +268,105 @@ async def run(shot, narrow_shot):
             check('저장된 이력은 모니터링 100건 제한과 무관하게 모두 남음 (130건 이상 추가)', total >= n0 + 130, (n0, total))
             check('파일은 100건씩 나뉨 (마지막 하나만 100건 미만)', all(f['records'] == 100 for f in files[1:]) and 1 <= files[0]['records'] <= 100, [f['records'] for f in files])
             today = datetime.now().strftime('%Y-%m-%d')
-            check('파일 이름에 저장 날짜가 들어감', all(f['name'].startswith(f'alarms_{today}_') and f['name'].endswith('.jsonl') for f in files), [f['name'] for f in files])
+            check('파일 이름에 파일을 만든 날짜와 시각이 들어감 (alarms_<날짜>_<HHMMSS>.jsonl)', all(re.fullmatch(rf'alarms_{today}_\d{{6}}(-\d+)?\.jsonl', f['name']) for f in files), [f['name'] for f in files])
             on_disk = sorted(p.name for p in hist_dir.iterdir())
             check('실제 파일이 이력 폴더에 있음', on_disk == sorted(f['name'] for f in files), on_disk)
             first = json.loads((hist_dir / sorted(on_disk)[0]).read_text(encoding='utf-8').splitlines()[0])
-            check('레코드에 저장 일시와 이벤트가 적힘', first['saved_at'].startswith(today) and first['event'] in ('raised', 'repeated', 'cleared') and 'code' in first, first)
+            check('레코드에 저장 일시와 이벤트가 적힘', first['saved_at'].startswith(today) and first['event'] in ('raised', 'repeated', 'acked', 'cleared') and 'code' in first, first)
             st, rec = api('GET', f'/api/alarms/history?date={today}&limit=5')
             check('이력 조회 API (최신이 앞, limit 적용)', st == 200 and len(rec['records']) == 5 and rec['records'][0]['t'] >= rec['records'][-1]['t'])
             st, _ = api('GET', '/api/alarms/history?date=bad')
             check('날짜 형식이 틀리면 400', st == 400)
+
+            # ---- Step A2: ACK / SIL (브라우저 2개) ----
+            api('POST', '/api/alarms/ack', {'id': None})       # 앞 단계의 알람을 모두 확인 처리해 두고 새로 시작한다
+            api('POST', '/api/robots/pinky2/command', {'cmd': 'stop'})   # 앞 단계에서 쌓인 거절 알람(활성)을 해소 -> ACK 했으므로 숨겨진다
+            api('POST', '/api/robots/pinky1/command', {'cmd': 'stop'})
+            await pg.call('Page.navigate', url=BASE + '/')
+            check('A2 시작: 새로고침 뒤 로드', await pg.wait("app.cfg && app.wsUp", 10))
+            req = urllib.request.Request(f'http://127.0.0.1:{CDP}/json/new?about:blank', method='PUT')
+            tab3 = json.load(urllib.request.urlopen(req))
+            async with websockets.connect(tab3['webSocketDebuggerUrl'], max_size=None) as ws3:
+                pgb = v3.Page(ws3)
+                await pgb.call('Page.enable')
+                await pgb.call('Emulation.setDeviceMetricsOverride', width=1400, height=900, deviceScaleFactor=1, mobile=False)
+                await pgb.call('Page.navigate', url=BASE + '/')
+                check('두 번째 브라우저 로드', await pgb.wait("app.cfg && app.wsUp", 10))
+                BTN = lambda i, prop: f"document.getElementById('{i}').{prop}"  # noqa: E731
+                check('ACK / SIL 버튼과 툴팁 문구', await pg.js(BTN('alarmAckBtn', 'title')) == 'Acknowledge cleared alarms'
+                      and await pg.js(BTN('alarmSilBtn', 'title')) == 'Silence current alarm sound'
+                      and await pg.js(BTN('alarmAckBtn', 'textContent')) == 'ACK' and await pg.js(BTN('alarmSilBtn', 'textContent')) == 'SIL')
+                await asyncio.sleep(1.0)
+                api('POST', '/api/alarms/ack', {'id': None})   # stop 으로 새로 생긴 PATROL_STOPPED 도 확인 처리해 깨끗한 상태로 시작
+                check('대상이 없으면 ACK / SIL 이 비활성', await pg.wait(BTN('alarmAckBtn', 'disabled') + ' && ' + BTN('alarmSilBtn', 'disabled'), 4)
+                      and await pgb.js(BTN('alarmAckBtn', 'disabled') + ' && ' + BTN('alarmSilBtn', 'disabled')))
+
+                # 활성 알람을 ACK: 숨기지 않고 누가 언제 확인했는지 표시
+                api('POST', '/api/mock/robot/pinky2/silent', {'on': True})
+                both = lambda expr, t=12: asyncio.gather(pg.wait(expr, t), pgb.wait(expr, t))  # noqa: E731
+                check('활성 알람이 생기면 ACK / SIL 이 켜짐 (두 브라우저)', all(await both(ROW_COUNT('ROBOT_OFFLINE', 'pinky2', 'active') + ' === 1 && !' + BTN('alarmAckBtn', 'disabled') + ' && !' + BTN('alarmSilBtn', 'disabled'))))
+                await pg.click_sel('#alarmAckBtn')
+                ack_state = ROW('ROBOT_OFFLINE', 'pinky2', 'active') + '[0].children[3].textContent'
+                check('활성 알람을 ACK 하면 숨기지 않고 Acknowledged (계정, 시각) 표시 - 두 브라우저',
+                      all(await both(ack_state + ".startsWith('Acknowledged no-auth ')")), (await pg.js(ack_state), await pgb.js(ack_state)))
+                check('ACK 로 대상이 없어지면 ACK / SIL 이 모두 비활성 (ACK 한 알람은 소리가 멈춤)',
+                      await pg.wait(BTN('alarmAckBtn', 'disabled') + ' && ' + BTN('alarmSilBtn', 'disabled'), 4))
+                # ACK 한 활성 알람이 해소되면 숨는다
+                api('POST', '/api/mock/robot/pinky2/silent', {'on': False})
+                check('ACK 한 알람이 해소되면 두 브라우저에서 사라짐', all(await both(ROW_COUNT('ROBOT_OFFLINE', 'pinky2') + ' === 0')))
+
+                # 해소된 알람 ACK: 한 브라우저에서 누르면 두 브라우저 모두에서 사라짐, 활성 알람은 유지
+                api('POST', '/api/robots/pinky1/command', {'cmd': 'stop'})
+                api('POST', '/api/robots/pinky2/command', {'cmd': 'goto', 'points': ['P99']})   # 거절 -> 활성 (pinky2)
+                api('POST', '/api/robots/pinky1/command', {'cmd': 'goto', 'points': ['P99']})   # 거절 -> 활성 (pinky1)
+                api('POST', '/api/robots/pinky1/command', {'cmd': 'stop'})                      # pinky1 새 명령 -> pinky1 거절 해소
+                check('pinky1 거절은 해소(Cleared), pinky2 거절은 활성', all(await both(ROW_COUNT('CMD_REJECTED', 'pinky1', 'cleared') + ' === 1 && '
+                                                                                        + ROW_COUNT('CMD_REJECTED', 'pinky2', 'active') + ' === 1')))
+                await pgb.click_sel('#alarmAckBtn')                                              # 다른 브라우저에서 누른다
+                check('해소 알람 ACK 는 두 브라우저 모두에서 사라지고 활성 알람은 유지됨',
+                      all(await both(ROW_COUNT('CMD_REJECTED', 'pinky1') + ' === 0 && ' + ROW_COUNT('CMD_REJECTED', 'pinky2', 'active') + ' === 1')))
+                check('유지된 활성 알람에 ACK 한 계정이 표시됨', await pg.wait(ROW('CMD_REJECTED', 'pinky2', 'active') + "[0].children[3].textContent.startsWith('Acknowledged no-auth')", 4))
+
+                # 같은 사건이 또 일어나면 새 행 (ACK 는 행마다)
+                api('POST', '/api/robots/pinky2/command', {'cmd': 'goto', 'points': ['P99']})
+                check('ACK 한 뒤 같은 사건이 또 일어나면 ACK 안 된 새 행이 생김', all(await both(ROW_COUNT('CMD_REJECTED', 'pinky2', 'active') + ' === 2'))
+                      and await pg.js(ROW('CMD_REJECTED', 'pinky2', 'active') + ".filter(tr => tr.children[3].textContent === 'Active').length") == 1)
+
+                # SIL: 이 브라우저의 소리만 끈다 (상태는 서버에 저장되지 않는다), 새 알람이 오면 해제
+                await pg.click_sel('#alarmSilBtn')
+                check('SIL 을 누르면 이 브라우저만 눌림 상태', await pg.js("app.silenced === true && " + BTN('alarmSilBtn', "getAttribute('aria-pressed')") + " === 'true'")
+                      and await pgb.js("app.silenced === false && " + BTN('alarmSilBtn', "getAttribute('aria-pressed')") + " === 'false'"))
+                check('SIL 은 알람 상태를 바꾸지 않음 (서버 알람 목록 그대로)', len(api('GET', '/api/alarms')[1]['alarms']) == await pg.js("app.alarms.filter(a => !a.local).length"))
+                api('POST', '/api/robots/pinky2/command', {'cmd': 'goto', 'points': ['P98']})
+                check('새 알람이 오면 SIL 이 해제됨', await pg.wait("app.silenced === false && " + BTN('alarmSilBtn', "getAttribute('aria-pressed')") + " === 'false'", 4))
+
+                # 새로 접속한 화면에는 숨겨진 알람이 없다
+                api('POST', '/api/robots/pinky1/command', {'cmd': 'goto', 'points': ['P97']})
+                api('POST', '/api/robots/pinky1/command', {'cmd': 'stop'})
+                await pgb.click_sel('#alarmAckBtn')
+                await pg.call('Page.navigate', url=BASE + '/')
+                check('새로고침 뒤 다시 로드', await pg.wait("app.cfg && app.wsUp", 10))
+                check('새로 접속한 화면에도 ACK 로 숨긴 알람이 없음', await pg.js(ROW_COUNT('CMD_REJECTED', 'pinky1') + ' === 0'))
+
+                # 이력 파일: 시간 순서로 쌓이고 ACK 줄이 남는다
+                await asyncio.sleep(0.3)
+                rows = [json.loads(l) for f in sorted(hist_dir.glob('alarms_*.jsonl')) for l in f.read_text(encoding='utf-8').splitlines()]
+                acked = [r for r in rows if r['event'] == 'acked']
+                check('이력에 acked 줄이 남고 계정이 기록됨', len(acked) >= 3 and all(r['acked_by'] == 'no-auth' and r['acked_at'] for r in acked), acked[:1])
+                check('이력은 시간 순서로 계속 쌓임 (줄을 고치지 않음)', [r['t'] for r in rows] == sorted(r['t'] for r in rows))
+                check('이력 레코드에 count 가 있음', all('count' in r for r in rows))
+                sf = [r for r in rows if r['code'] == 'CMD_SEND_FAILED']
+                check('조작 반복(CMD_SEND_FAILED)도 시도마다 한 줄이 시간순으로 남음 (raised 후 repeated, count 증가)',
+                      [r['event'] for r in sf][:2] == ['raised', 'repeated'] and [r['count'] for r in sf][:2] == [1, 2], [(r['event'], r['count']) for r in sf])
+                api('POST', '/api/mock/robot/pinky2/patrol', {'state': 'FAILED', 'detail': 'first'})
+                api('POST', '/api/mock/robot/pinky2/patrol', {'state': 'FAILED', 'detail': 'second'})
+                await asyncio.sleep(0.5)
+                rows = [json.loads(l) for f in sorted(hist_dir.glob('alarms_*.jsonl')) for l in f.read_text(encoding='utf-8').splitlines()]
+                ev = [(r['event'], r['count']) for r in rows if r['code'] == 'PATROL_FAILED'][-2:]
+                check('수신 이벤트(patrol FAILED)도 발생마다 repeated 줄이 남음', ev == [('raised', 1), ('repeated', 2)], ev)
+                check('알람바에는 ×2 로 묶여 보임', await pg.wait(ROW_TEXT('PATROL_FAILED', 'pinky2', 'active') + ".includes('×2')", 4))
+                st, body = api('POST', '/api/alarms/ack', {'id': 'x'})
+                check('잘못된 ACK 요청은 400', st == 400, (st, body))
 
             # ---- 좁은 화면 ----
             await pg.call('Emulation.setDeviceMetricsOverride', width=800, height=900, deviceScaleFactor=1, mobile=False)

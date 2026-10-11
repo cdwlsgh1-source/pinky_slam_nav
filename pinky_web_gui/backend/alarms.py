@@ -4,8 +4,12 @@
 rclpy 와 무관한 순수 클래스이며 시계는 주입한다 (CommandTracker, StateStore 와 같은 `now=` 관례).
 쓰기 함수는 모두 브로드캐스트할 메시지 목록을 돌려준다 (호출자가 `hub.broadcast`).
 
-알람 상태: active(조건 지속) -> cleared(조건 사라짐). acked 는 Step A2 에서 쓰며 여기서는 값만 정의한다.
-같은 (code, robot) 의 active 알람이 있으면 새 행을 만들지 않고 count 만 올린다. 해소된 뒤 다시 생기면 새 행이다.
+알람 상태: active(조건 지속) -> cleared(조건 사라짐). ACK 는 상태를 바꾸지 않고 acked_by/acked_at 만 채운다.
+  해소된 알람을 ACK 하거나, ACK 한 활성 알람이 해소되면 알람바에서 숨긴다 (메모리와 이력 파일에는 남는다).
+
+반복의 정의 (PRD 결정 19): 같은 (code, robot) 의 알람이 아직 active 이고 ACK 되지 않았으면 새 행을 만들지 않고 count 만 올린다(×N).
+  ACK 했거나 해소된 뒤에 또 생기면 새 행이다. 화면에서는 묶지만 **이력 파일에는 발생 하나하나를 시간 순서로 모두 남긴다**
+  (raised / repeated 줄마다 그 시도의 시각·문구·count). 운영자가 언제 어떤 조작을 했는지로 문제를 추적하려면 중간 시도가 빠지면 안 된다.
 """
 import time
 
@@ -14,7 +18,7 @@ MONITOR_SIZE = 100   # 알람바(모니터링 화면)에 두는 최대 알람 �
 HH, H, L, LL, INFO = 'HH', 'H', 'L', 'LL', 'info'
 LEVELS = (HH, H, L, LL, INFO)   # 심각도 순서 (높을수록 앞). PRD 결정 9 로 확정
 
-ACTIVE, CLEARED, ACKED = 'active', 'cleared', 'acked'
+ACTIVE, CLEARED = 'active', 'cleared'
 
 # code -> (레벨, 메시지 템플릿). 메시지는 한영 혼용을 허용한다 (PRD 8-2절). 치환 가능한 키는 TEMPLATE_KEYS 뿐이다.
 CATALOG = {
@@ -39,6 +43,7 @@ BROWSER_ONLY = ('SERVER_DISCONNECTED', 'LOAD_FAILED')
 # 비상정지 계열은 어떤 설정으로도 끌 수 없다 (Step A5 의 Enable/Disable 이 이 값을 보고 거부한다)
 PROTECTED = ('ESTOP_FAILED', 'ESTOP_PARTIAL')
 
+
 PATROL_CODES = {'FAILED': 'PATROL_FAILED', 'RETRY': 'PATROL_RETRY', 'STOPPED': 'PATROL_STOPPED'}
 COMMAND_FAIL_CODES = ('CMD_SEND_FAILED', 'CMD_REJECTED', 'CMD_NO_RESPONSE')   # 로봇이 응답하거나 새 명령이 나가면 해소
 ESTOP_CODES = ('ESTOP_FAILED', 'ESTOP_PARTIAL')
@@ -53,6 +58,11 @@ def is_protected(code):
     return code in PROTECTED
 
 
+def is_hidden(a):
+    """알람바에서 숨기는 알람: ACK 를 받은 해소 알람. info 행은 ACK 대상이 아니라 숨기지 않는다."""
+    return a['state'] == CLEARED and a['acked_by'] is not None and a['level'] != INFO
+
+
 def command_text(cmd, points=None):
     """알람 문구에 쓰는 명령 표기. goto 는 지점을 붙인다 (예: 'goto P2 P3')."""
     cmd = str(cmd) if cmd is not None else '?'
@@ -63,7 +73,7 @@ def command_text(cmd, points=None):
 
 class AlarmManager:
     def __init__(self, now=time.time, max_alarms=MONITOR_SIZE, sink=None):
-        """sink(event, alarm): 알람 이벤트(raised | repeated | cleared)마다 부른다 (이력 파일 저장용). 예외는 알람 동작에 영향을 주지 않는다."""
+        """sink(event, alarm): 알람 이벤트(raised | repeated | acked | cleared)마다 부른다 (이력 파일 저장용). 예외는 알람 동작에 영향을 주지 않는다."""
         self._now = now
         self._sink = sink
         self._max = max(1, int(max_alarms))
@@ -72,7 +82,7 @@ class AlarmManager:
 
     # ---- 기본 동작 ----
     def raise_(self, code, robot=None, **fmt):
-        """알람을 만들거나(없으면) count 를 올린다(active 가 이미 있으면). 메시지 목록을 돌려준다."""
+        """알람 행을 만들거나, ACK 전의 같은 알람이 active 이면 count 를 올린다. 반복도 이력에는 매번 한 줄 남긴다. 메시지 목록을 돌려준다."""
         if code not in CATALOG:
             raise ValueError(f'알 수 없는 알람 코드: {code}')
         level, template = CATALOG[code]
@@ -81,9 +91,9 @@ class AlarmManager:
         text = template.format_map(keys).rstrip().rstrip(':').rstrip()
         reason = keys['reason']
         t = self._now()
-        if level != INFO:
-            for a in self._alarms:
-                if a['code'] == code and a['robot'] == robot and a['state'] == ACTIVE:
+        for a in self._alarms:
+            if a['code'] == code and a['robot'] == robot and a['state'] == ACTIVE:
+                if a['acked_by'] is None:   # ACK 전의 같은 알람은 묶는다 (ACK 했다면 새 확인이 필요하므로 아래에서 새 행)
                     a['count'] += 1
                     a['t_last'] = t
                     a['text'], a['detail'] = text, reason
@@ -91,7 +101,7 @@ class AlarmManager:
                     return [self._msg(a)]
         a = {'id': self._next_id, 'code': code, 'level': level, 'robot': robot, 'text': text, 'detail': reason,
              'state': CLEARED if level == INFO else ACTIVE,   # info 는 해소 개념이 없는 기록 행이다
-             't_raised': t, 't_last': t, 't_cleared': t if level == INFO else None, 'count': 1}
+             't_raised': t, 't_last': t, 't_cleared': t if level == INFO else None, 'count': 1, 'acked_by': None, 'acked_at': None}
         self._next_id += 1
         self._alarms.append(a)
         self._emit('raised', a)
@@ -115,9 +125,22 @@ class AlarmManager:
             msgs += self.clear(code, robot)
         return msgs
 
+    def ack(self, ids=None, user='', t=None):
+        """ACK: ids(None 이면 전체)에서 info 가 아니고 아직 ACK 안 된 알람에 acked_by/acked_at 을 기록한다.
+        활성 알람은 그대로 보이고 해소 알람은 숨겨진다. 바뀐 알람의 메시지 목록을 돌려준다 (이미 ACK 했거나 없는 id 는 건너뛴다)."""
+        t = self._now() if t is None else t
+        want = None if ids is None else set(ids)
+        msgs = []
+        for a in self._alarms:
+            if (want is None or a['id'] in want) and a['level'] != INFO and a['acked_by'] is None:
+                a['acked_by'], a['acked_at'] = user, t
+                self._emit('acked', a)
+                msgs.append(self._msg(a))
+        return msgs
+
     def snapshot(self):
-        """새 화면에 보낼 전체 알람 (최신이 앞)."""
-        return [dict(a) for a in reversed(self._alarms)]
+        """새 화면에 보낼 알람 (최신이 앞). ACK 로 숨긴 알람은 뺀다."""
+        return [dict(a) for a in reversed(self._alarms) if not is_hidden(a)]
 
     def _emit(self, event, a):
         if self._sink is None:
@@ -131,9 +154,11 @@ class AlarmManager:
         return {'type': 'alarm', 'alarm': dict(a)}
 
     def _trim(self):
-        """상한을 넘으면 해소된 것 중 가장 오래된 것부터, 그래도 넘으면 가장 오래된 것부터 버린다 (active 는 최대한 남긴다)."""
+        """상한을 넘으면 숨긴 것, 해소된 것 순으로 가장 오래된 것부터, 그래도 넘으면 가장 오래된 것부터 버린다 (active 는 최대한 남긴다)."""
         while len(self._alarms) > self._max:
-            idx = next((i for i, a in enumerate(self._alarms) if a['state'] != ACTIVE), 0)
+            idx = next((i for i, a in enumerate(self._alarms) if is_hidden(a)), None)
+            if idx is None:
+                idx = next((i for i, a in enumerate(self._alarms) if a['state'] != ACTIVE), 0)
             del self._alarms[idx]
 
     # ---- 이벤트 -> 알람 (main.py 가 부른다) ----

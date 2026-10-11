@@ -58,6 +58,8 @@ h2 small { font-weight: 400; }
 .alarm-list { flex: 1 1 100%; min-width: 0; display: flex; gap: 8px; align-items: flex-start; }
 .alarm-tools { flex: none; }
 .alarm-tools button { padding: 2px 8px; font-size: 13px; }
+.alarm-tools button[aria-pressed="true"]#alarmSilBtn { background: var(--accent); color: #fff; border-color: var(--accent); }   /* SIL 로 소리를 끈 상태 */
+.alarm-tools button:disabled { opacity: .45; cursor: default; }
 .alarm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .alarm-scroll { min-width: 0; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; }   /* 높이는 app.js 가 손잡이 값으로 바꾼다 */
 .alarm-grip { height: 10px; margin-top: 2px; cursor: row-resize; border-radius: 4px; touch-action: none; position: relative; }
@@ -77,6 +79,7 @@ h2 small { font-weight: 400; }
 .alarm-scroll tr.lvl-info td.msg { color: var(--dim); }
 .alarm-scroll tr.st-cleared:not(.lvl-info) td.msg { opacity: .65; }   /* 해소된 알람은 흐리게 */
 .alarm-scroll tr.st-cleared td.state { color: var(--ok); }
+.alarm-scroll tr.acked td.state { color: var(--accent); }   /* ACK 한 활성 알람: 계속 보이지만 확인됐다는 표시 */
 .alarm-scroll .hint { margin: 2px 0 0; }
 .alarm-scroll .hint[hidden] { display: none; }
 

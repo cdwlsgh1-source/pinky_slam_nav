@@ -1,4 +1,4 @@
-"""AlarmManager 단위 테스트: 생성, 묶기(count), 해소, 이벤트 -> 알람 규칙, 비상정지 보호. 실행: .venv/bin/python -m pytest tests -q"""
+"""AlarmManager 단위 테스트: 생성, 반복(사건형은 새 행, 상태형은 한 행), 해소, ACK, 이벤트 -> 알람 규칙, 비상정지 보호. 실행: .venv/bin/python -m pytest tests -q"""
 import pytest
 
 from backend.alarms import ACTIVE, CATALOG, CLEARED, LEVELS, PROTECTED, AlarmManager, command_text, is_protected
@@ -32,7 +32,7 @@ def test_raise_creates_active_alarm_and_message():
     assert len(msgs) == 1 and msgs[0]['type'] == 'alarm'
     al = msgs[0]['alarm']
     assert al['code'] == 'ROBOT_OFFLINE' and al['level'] == 'H' and al['robot'] == 'pinky1'
-    assert al['text'] == 'pinky1 is offline' and al['state'] == ACTIVE and al['count'] == 1
+    assert al['text'] == 'pinky1 is offline' and al['state'] == ACTIVE and al['acked_by'] is None and al['count'] == 1
     assert al['t_raised'] == 1000.0 and al['t_cleared'] is None
 
 
@@ -42,14 +42,46 @@ def test_unknown_code_is_rejected():
         a.raise_('NOPE', 'pinky1')
 
 
-def test_repeat_is_grouped_by_count():
+def test_event_alarms_are_grouped_until_acked_or_cleared():
+    """사건형: ACK 전의 active 같은 알람은 count 만 오르고, ACK 하거나 해소된 뒤에는 새 행이다."""
     a, c = make()
     a.raise_('CMD_REJECTED', 'pinky1', cmd='goto P9', reason='unknown point')
     c.t += 5
     msgs = a.raise_('CMD_REJECTED', 'pinky1', cmd='goto P9', reason='unknown point')
-    assert len(a.snapshot()) == 1
-    al = msgs[0]['alarm']
-    assert al['count'] == 2 and al['t_raised'] == 1000.0 and al['t_last'] == 1005.0
+    rows = a.snapshot()
+    assert len(rows) == 1 and msgs[0]['alarm']['count'] == 2 and rows[0]['t_raised'] == 1000.0 and rows[0]['t_last'] == 1005.0
+    a.ack(user='oper')
+    a.raise_('CMD_REJECTED', 'pinky1', cmd='goto P9', reason='unknown point')
+    rows = a.snapshot()
+    assert [(r['count'], r['acked_by']) for r in rows] == [(1, None), (2, 'oper')]
+    a.clear('CMD_REJECTED', 'pinky1')
+    a.raise_('CMD_REJECTED', 'pinky1', cmd='goto P9', reason='unknown point')
+    assert len(a._alarms) == 3 and len(a.snapshot()) == 2   # ACK 한 첫 행은 해소되어 숨겨졌다
+
+
+def test_grouping_is_per_code_and_robot():
+    a, _ = make()
+    a.raise_('ESTOP_FAILED', 'pinky1', reason='x')
+    a.raise_('ESTOP_FAILED', 'pinky2', reason='x')
+    a.raise_('ESTOP_PARTIAL', 'pinky1', reason='x')
+    assert len(a.snapshot()) == 3
+
+
+def test_every_occurrence_is_logged_in_time_order_even_when_grouped():
+    """화면에서는 ×N 으로 묶어도 이력에는 시도마다 한 줄이 시간순으로 남는다 (트러블슈팅: 언제 무슨 조작을 했는지)."""
+    seen = []
+    c = Clock()
+    a = AlarmManager(now=c, sink=lambda e, al: seen.append((e, al['id'], al['count'], al['t_last'])))
+    a.raise_('ESTOP_FAILED', 'pinky1', reason='x')
+    c.t += 5
+    a.raise_('ROBOT_OFFLINE', 'pinky2')           # 사이에 다른 알람이 끼어도 묶임은 끊기지 않는다
+    c.t += 5
+    a.raise_('ESTOP_FAILED', 'pinky1', reason='x')
+    c.t += 5
+    a.raise_('ESTOP_FAILED', 'pinky1', reason='x')
+    a.ack([1], 'oper')
+    assert seen == [('raised', 1, 1, 1000.0), ('raised', 2, 1, 1005.0), ('repeated', 1, 2, 1010.0), ('repeated', 1, 3, 1015.0), ('acked', 1, 3, 1015.0)]
+    assert len(a.snapshot()) == 2
 
 
 def test_same_code_other_robot_is_separate():
@@ -108,11 +140,12 @@ def test_patrol_states():
     assert a.patrol('pinky1', 'MOVING') == []                   # 해소할 것이 없으면 메시지도 없다
 
 
-def test_patrol_same_failed_again_counts():
+def test_patrol_same_failed_again_groups_and_updates_detail():
     a, _ = make()
     a.patrol('pinky1', 'FAILED', 'x')
-    a.patrol('pinky1', 'FAILED', 'x')
-    assert active(a, 'PATROL_FAILED')[0]['count'] == 2
+    assert a.patrol('pinky1', 'FAILED', 'detail changed')
+    rows = active(a, 'PATROL_FAILED')
+    assert len(rows) == 1 and rows[0]['count'] == 2 and rows[0]['detail'] == 'detail changed'
 
 
 def test_command_failures_clear_on_new_send_or_ack():
@@ -162,3 +195,77 @@ def test_trim_drops_cleared_first():
 
 def test_command_text():
     assert command_text('goto', ['P2', 'P3']) == 'goto P2 P3' and command_text('start') == 'start' and command_text(None) == '?'
+
+
+# ---- ACK ----
+def test_ack_active_keeps_row_and_records_who_and_when():
+    a, c = make()
+    a.raise_('ROBOT_OFFLINE', 'pinky1')
+    c.t += 3
+    msgs = a.ack(user='oper')
+    assert len(msgs) == 1 and msgs[0]['type'] == 'alarm'
+    row = a.snapshot()[0]
+    assert row['state'] == ACTIVE and row['acked_by'] == 'oper' and row['acked_at'] == 1003.0   # 숨기지 않는다
+    assert a.ack(user='mngr') == []                                                                # 이미 ACK 한 것은 건너뛴다
+    assert a.snapshot()[0]['acked_by'] == 'oper'
+
+
+def test_ack_cleared_hides_and_clearing_acked_hides():
+    a, _ = make()
+    a.raise_('ROBOT_OFFLINE', 'pinky1')
+    a.raise_('ROBOT_OFFLINE', 'pinky2')
+    a.clear('ROBOT_OFFLINE', 'pinky1')
+    a.ack(user='mngr')                              # pinky1 은 해소됨 -> 숨김, pinky2 는 활성 -> 남음
+    assert [x['robot'] for x in a.snapshot()] == ['pinky2']
+    a.clear('ROBOT_OFFLINE', 'pinky2')              # ACK 한 활성 알람이 해소되면 그때 숨는다
+    assert a.snapshot() == []
+
+
+def test_ack_by_id_and_unknown_id():
+    a, _ = make()
+    first = a.raise_('CMD_REJECTED', 'pinky1', cmd='stop', reason='r')[0]['alarm']['id']
+    second = a.raise_('CMD_REJECTED', 'pinky2', cmd='stop', reason='r')[0]['alarm']['id']
+    assert a.ack([999], 'oper') == []
+    assert [m['alarm']['id'] for m in a.ack([first], 'oper')] == [first]
+    rows = {x['id']: x for x in a.snapshot()}
+    assert rows[first]['acked_by'] == 'oper' and rows[second]['acked_by'] is None
+
+
+def test_new_occurrence_after_ack_is_a_new_unacked_row():
+    a, _ = make()
+    a.raise_('ESTOP_FAILED', 'pinky1', reason='x')
+    a.raise_('ESTOP_FAILED', 'pinky1', reason='x')
+    a.ack(user='oper')
+    a.raise_('ESTOP_FAILED', 'pinky1', reason='x')
+    rows = a.snapshot()
+    assert [(r['acked_by'], r['count']) for r in rows] == [(None, 1), ('oper', 2)]
+
+
+def test_info_rows_are_not_ack_targets():
+    a, _ = make()
+    a.command_sent('pinky1', 'start')
+    assert a.ack(user='oper') == []
+    row = a.snapshot()[0]
+    assert row['level'] == 'info' and row['acked_by'] is None
+
+
+def test_hidden_alarms_are_dropped_first_when_full():
+    a, _ = make(max_alarms=3)
+    a.raise_('CMD_REJECTED', 'pinky1', cmd='a', reason='r')
+    a.raise_('ROBOT_OFFLINE', 'pinky1')
+    a.clear('ROBOT_OFFLINE', 'pinky1')               # 해소(ACK 안 함)
+    a.ack([1], 'oper')                                # 1번은 활성 + ACK
+    a.raise_('ROBOT_OFFLINE', 'pinky2')
+    assert len(a._alarms) == 3 and a.snapshot()[0]['robot'] == 'pinky2'
+
+
+def test_ack_events_go_to_sink():
+    seen = []
+    a = AlarmManager(sink=lambda e, al: seen.append((e, al['id'], al['acked_by'])))
+    a.raise_('ROBOT_OFFLINE', 'pinky1')
+    a.ack(user='oper')
+    a.clear('ROBOT_OFFLINE', 'pinky1')
+    assert seen == [('raised', 1, None), ('acked', 1, 'oper'), ('cleared', 1, 'oper')]
+
+
+
