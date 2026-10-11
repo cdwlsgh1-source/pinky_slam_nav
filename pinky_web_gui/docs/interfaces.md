@@ -2,7 +2,7 @@
 
 관제 PC(`ROS_DOMAIN_ID=50`)에서 본 토픽 규약, 명령 문법, 상태 스키마, 포인트 좌표, 순찰 노드 동작을 정리한다.
 
-- 근거 표기: `파일:줄`. 약칭 — **P1v2** = `my_pinky_package/my_pinky_package/pinky_patrol_node_pinky1_v2.py`, **P2v2** = 같은 폴더의 `pinky_patrol_node_pinky2_v2.py`, **Y1** = `domain_bridge_pc/config/pinky_bridge_pinky1.yaml`, **Y2** = `pinky_bridge_pinky2.yaml`.
+- 근거 표기: `파일:줄`. 약칭 — **P1v2** = `my_pinky_package/my_pinky_package/pinky_patrol_node_pinky1_v2.py`, **P2v2** = 같은 폴더의 `pinky_patrol_node_pinky2_v2.py`, **Y1** = `domain_bridge/config/pinky_bridge_pinky1.yaml`, **Y2** = `pinky_bridge_pinky2.yaml`.
 - 확인하지 못한 것은 **확인 필요**로 표시했다. 정적 분석(파일 읽기)만 했고 로봇이나 ROS 그래프에서 실행해 확인한 것은 없다.
 - 두 로봇의 순찰 노드(`_v2`)는 `WAYPOINTS`(구성과 개수), `ZONE_ENTRY/EXIT_INDEX`, `ZONE_ENTRY/EXIT_NAME`, `HOME_NAME`, `robot_id` 기본값만 다르고 나머지(`POINTS`, `ZONE_POINTS`, `GOTO_ALLOWED` 등)는 같다. `pinky_patrol_node_pinky2_v2.py`는 현재 작업 트리(미커밋) 기준이며, 84줄 이후 줄 번호가 pinky1과 1씩 다르다. **pinky2는 인덱스 상수가 `WAYPOINTS`와 맞지 않는다** (아래 5절, 7절).
 
@@ -246,25 +246,28 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 | 메서드 경로 | 권한 | 설명 |
 |---|---|---|
-| `GET /api/me` | 공개 | `{auth, role, procs_allowed, procs_configured}` |
-| `POST /api/login` `{password}` | 공개 | 성공 시 `pinky_session` 쿠키. 틀리면 401, 5회 연속(1분) 실패 시 429. 인증이 꺼져 있으면 400 |
+| `GET /api/me` | 공개 | `{auth, role, user, procs_allowed, procs_configured}` |
+| `POST /api/login` `{id, password}` | 공개 | 성공 시 `pinky_session` 쿠키와 `{ok, role, user}`. 이미 로그인한 상태에서 부르면 이전 세션을 끝낸다(계정 전환). 틀리면 401, 5회 연속(1분) 실패 시 429. 인증이 꺼져 있으면 400 |
 | `POST /api/logout` | 공개 | 세션 삭제 |
 | 그 밖의 `/api/*`, `/ws` | operator 이상 | 인증이 켜져 있으면 로그인 필요 (401). `/api/health` 는 공개 |
 | `POST /api/robots/{id}/command`, WS `drive` | manager | operator 는 403 / `drive_denied` |
 | `POST /api/robots/{id}/estop`, `POST /api/estop` | operator 이상 | 정지는 누구나 누를 수 있다 |
 | `GET /api/procs` | operator 이상 | `{enabled, procs:[{id,label,kind,robot,host,configured,state,message,pid,uptime_sec,exit_code,confirm_stop,health,log_n}], sequence}` |
 | `POST /api/procs/{id}/start`, `/stop` | manager | stop 은 `confirm_stop` 인 프로세스(로봇)에 `{"confirm": true}` 필요 (없으면 409 + `needs_confirm`) |
-| `POST /api/procs/start_all`, `/stop_all` | manager | 백그라운드 시퀀스. 진행은 `sequence` (`{kind, state: running\|done\|failed, step, message, results}`). stop_all 도 로봇 프로세스가 돌면 `confirm` 필요 |
+| `POST /api/procs/start_all`, `/stop_all` | manager | 백그라운드 시퀀스. 진행은 `sequence` (`{kind, state: running\|done\|failed, step, message, results}`). `start_all` 순서는 `config/processes.yaml` 의 목록 순서(도메인 브릿지 → bringup → map → zone_manager → 순찰 노드)이고, 각 단계가 켜진 것을 확인한 뒤 다음으로 간다: `message` 에 대기 사유가 나오고, 로봇 토픽이 `ready_sec`(기본 25초) 안에 안 오면 `restart_if_stalled` 인 브릿지를 한 번 재시작하며, 그래도 안 오면 `failed` 와 사유로 멈춘다. stop_all 도 로봇 프로세스가 돌면 `confirm` 필요 |
 | `GET /api/procs/{id}/log` | manager | 최근 200줄 |
+| `GET /api/logs?since=<번호>&limit=<개수>` | manager | 로그 화면용. `{epoch, last, entries, sources}`: 프로세스 출력과 GUI 서버 로그를 한 목록으로, `since` 이후 새 줄만 (소스마다 최근 1000줄, 메모리에만 둠). `sources` 는 `[{id, label, configured}]` |
 
-프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(manager 비밀번호 설정)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
+로봇의 생존 확인: `online` 은 `patrol_status`, `amcl_pose`, `battery/*` 외에 `/{id}/odom`(`qos_profile_sensor_data`, 초당 2번만 반영, 값은 쓰지 않음)으로도 유지된다. bringup 만 켠 로봇도 online 으로 보이게 하려는 것이다 (`backend/ros_bridge.py`). `odom` 은 두 브리지 YAML 에 이미 있다.
+
+프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(인증이 켜져 있을 때만 true, `--no-auth` 면 false)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
 
 ## 7. 확인 필요 목록
 
-- (프로세스 제어) 로봇의 bringup/map 정확한 명령, source 경로, SSH 계정/주소 (`config/processes.yaml` 의 빈칸)
+- (프로세스 제어) pinky1/pinky2 의 bringup/map/순찰 노드 명령, source 경로, SSH 주소(`192.168.45.20`/`.22`)는 `config/processes.yaml` 에 채워져 있지만 **로봇에서 실제로 실행해 확인하지 않았다** (`docs/step6_process_control_real_checklist.md`)
 - (프로세스 제어) SSH pty 에 Ctrl-C 를 보내 `ros2 launch` 가 로봇에서 깨끗이 종료되는지, 자식 프로세스가 남는지 (`detect` 확인 단계가 남은 것을 잡는다)
 - (프로세스 제어) 서버 종료 때 로봇의 bringup/map 이 실제로 정지하는지 (SSH Ctrl-C → 원격 pkill → SSH 끊기 순서, 남아 있으면 종료 로그에 남는다)
-- (프로세스 제어) 브릿지를 GUI 가 따로 띄울 때 `ros2 run domain_bridge domain_bridge` 가 `launch/bridges.launch.xml` 과 같은 동작을 하는지, `install/setup.bash` 에 domain_bridge 가 있는지 (이 PC 에서는 확인됨)
+- (프로세스 제어) 브릿지는 `ros2 launch domain_bridge bridges.launch.xml` 하나로 띄운다 (이 PC 에서 `install/setup.bash` 로 확인됨). 실제 로봇 토픽이 넘어오는지, 센서 QoS 때문에 bringup 뒤에 켜야 하는지는 실물 확인 필요
 
 - `goto`에 같은 지점을 중복해서 보냈을 때의 동작
 - `goto`의 `STOPPED`/`FAILED` 분기별 `waypoint`/`detail` 전수 확인

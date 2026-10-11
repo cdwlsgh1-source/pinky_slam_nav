@@ -5,7 +5,7 @@ mock 으로는 `tests/verify_step3_mock.py`, `tests/verify_step3_ui.py`, `pytest
 
 ## 사전 조건
 - [ ] 로봇: Nav2 bringup, `pinky_patrol_node_pinky1_v2` (pinky2 도 쓰면 `..._pinky2_v2`) 실행. 주변을 비운다.
-- [ ] 관제 PC: 브리지(`launch/bridges.launch.xml`)를 **재시작**한다 (배터리 토픽이 추가된 YAML). `zone_manager_node` 실행.
+- [ ] 관제 PC: 브리지(`ros2 launch domain_bridge bridges.launch.xml`)를 **재시작**한다 (배터리 토픽이 추가된 YAML). `zone_manager_node` 실행.
 - [ ] 관제 PC: `export ROS_DOMAIN_ID=50` 후 `.venv/bin/python -m backend.main` (**`--mock` 없이**). 브라우저 `http://localhost:8000/`.
 - [ ] `config/robots.yaml` 의 `robot_settings` 가 노드 상수와 같다 (`goto_allowed` = 노드 `GOTO_ALLOWED`, `home` = `HOME_NAME`, `goto_wait_sec` = `GOTO_WAIT_SEC`, `start_route` = `WAYPOINTS`).
 - [ ] **pinky2 주의**: `pinky_patrol_node_pinky2_v2.py` 의 `ZONE_ENTRY_INDEX/ZONE_EXIT_INDEX` 가 1/4 로 남아 있으면 start 의 구역 진입·이탈 시점이 틀린다 (`CLAUDE.md` 7절). 구역 항목은 pinky1 단독으로 먼저 확인하고, pinky2 는 0/3 으로 고친 뒤 확인한다.

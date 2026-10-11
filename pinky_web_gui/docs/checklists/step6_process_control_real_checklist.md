@@ -14,7 +14,7 @@ GUI 의 시스템 패널로 도메인 브릿지, zone_manager, 로봇의 bringup
    ssh <user>@<pinky1 주소> true        # 처음 접속 확인(known_hosts 등록). 이후 서버는 BatchMode 로만 접속한다
    ```
    키를 못 쓰면 `processes.yaml` 의 `ssh.password_env` 에 환경 변수 이름을 적고 `sshpass` 를 설치한다.
-3. `config/processes.yaml` 의 pinky1 항목은 아래 값으로 채워져 있다. **로봇에서 직접 확인한 값이 아니므로** 먼저 맞는지 본다 (pinky2 는 비어 있다).
+3. `config/processes.yaml` 의 pinky1 항목은 아래 값으로 채워져 있다. **로봇에서 직접 확인한 값이 아니므로** 먼저 맞는지 본다 (pinky2 는 `192.168.45.22` 로 같은 형식이며 `ssh-copy-id pinky@192.168.45.22` 를 먼저 한다. 마찬가지로 직접 확인한 값이 아니다).
    ```yaml
    ssh: {host: "192.168.45.20", user: "pinky"}
    cwd: /home/pinky                         # 터미널의 기본 위치(~). 지도 my_pinky_map10.yaml 이 여기서 찾아진다
@@ -53,6 +53,9 @@ GUI 의 시스템 패널로 도메인 브릿지, zone_manager, 로봇의 bringup
 | B4 | `pinky1 map` 정지 (확인 팝업) | 팝업이 뜨고 승인하면 정지. 로봇에서 `ros2 node list` 에 Nav2 노드가 사라지고 `pgrep -fa <detect>` 가 비어 있음 |
 | B5 | 정지했는데 로봇에 남은 경우 | 패널이 "SSH 는 종료했지만 로봇에서 아직 실행 중입니다 (pid …)" 로 **실패** 표시. 로봇에서 직접 종료 |
 | B6 | 전체 시작 | 도메인 브릿지 → bringup → map → zone_manager → 순찰 노드 순서. bringup 뒤에 로봇 토픽이 올 때까지 기다리고, 안 오면 브릿지를 한 번 자동 재시작. 그래도 안 오면 거기서 멈춤. 중간에 실패하면 거기서 멈추고 사유가 표시됨 |
+| B6a | 전체 시작 중 진행 문구 | 각 단계에서 "켜지는 중 / 로봇 토픽 대기" 문구가 나오고, bringup 을 건너뛰면 브릿지 재시작 뒤 사유와 함께 멈춤 | |
+| B6b | SSH 로 띄운 프로세스의 DDS 환경 | 로봇의 `env`(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)가 적용돼 토픽이 관제 PC 로 넘어옴. 서버 시작 로그에 `ROS_DOMAIN_ID`/`ROS_LOCALHOST_ONLY` 가 찍힘 | 로봇에서 `ros2 doctor --report \| grep -i rmw` |
+| B6c | pinky2 순찰 노드 | `patrol_pinky2` 시작 시 SSH 접속 성공 (키 등록 선행) | |
 | B7 | 전체 정지 | 반대 순서로 정지. 확인 팝업에 로봇 경고가 나옴 |
 
 ## C. 서버 재시작
@@ -70,4 +73,5 @@ GUI 의 시스템 패널로 도메인 브릿지, zone_manager, 로봇의 bringup
 - SSH 로 원격 프로세스를 끄는 것은 네트워크가 끊기면 보장되지 않는다. 로봇에서 `ros2 node list` 로 확인한다.
 - 소프트웨어 버튼이다. 주행 중 비상 상황은 기존 비상정지(하드웨어 정지 포함)로 대응한다.
 - 평문 HTTP 로 비밀번호가 오간다. 신뢰하는 내부망/VPN 에서만 쓴다.
+- 서버 종료 때 `ros2 launch` 리더가 끝난 뒤 남은 자식(`domain_bridge`)은 프로세스 그룹에 SIGTERM → SIGKILL 로 정리한다. 이 정리도 로봇 쪽(SSH)에는 해당하지 않는다.
 - `kill -9` 로 서버를 죽이면 관제 PC 쪽 자식 프로세스가 남을 수 있다 (`pgrep -fa domain_bridge`).

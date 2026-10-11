@@ -1,8 +1,8 @@
-# pinky_web_gui (Step 1~4: 백엔드, 지도, 명령 패널, 구역/비상정지/오버레이)
+# pinky_web_gui (백엔드, 지도, 명령 패널, 구역/비상정지/오버레이, 인증·프로세스 제어·로그, 화면 편집)
 
 관제 PC(`ROS_DOMAIN_ID=50`)에서 두 로봇의 상태 토픽을 구독해 하나의 상태 모델로 합치고 WebSocket으로 중계하는 FastAPI 백엔드다. 로봇으로는 허용 목록 검증을 거친 `start`/`stop`/`goto`(Step 3)와, 비상정지·수동 조작의 `cmd_vel`(Step 4)만 나간다.
 브라우저에서 `http://localhost:8000/` 로 지도 화면(`frontend/`)이 열린다 (빌드 단계 없음).
-토픽 규약은 `docs/interfaces.md`, 작업 규칙은 `CLAUDE.md`를 본다.
+토픽 규약은 `docs/interfaces.md`, 작업 규칙은 `CLAUDE.md`를 본다. 문서 전체 지도는 `CLAUDE.md` 의 "문서 지도"에 있다 (체크리스트 `docs/checklists/`, 계획서 `docs/prd/`, 참고 `docs/reference/`).
 
 ## 설치 (한 번만)
 
@@ -31,7 +31,7 @@ export ROS_DOMAIN_ID=50
 .venv/bin/python -m backend.main
 ```
 
-먼저 브리지(`launch/bridges.launch.xml`)가 떠 있어야 `/{id}/...` 토픽이 보인다 (`CLAUDE.md` 3절).
+먼저 브리지(`ros2 launch domain_bridge bridges.launch.xml`)가 떠 있어야 `/{id}/...` 토픽이 보인다 (`CLAUDE.md` 3절).
 
 ### 옵션
 
@@ -204,16 +204,16 @@ mock 모드에서 두 마커가 지도 오른쪽 방 안의 사각형을 돌고,
 
 ### 시스템 패널: 브릿지, zone_manager, 로봇 bringup/map 을 버튼으로
 
-사이드바의 **시스템** 패널에서 프로세스 목록을 보고 시작/정지/로그 보기와 **전체 시작/정지**(도메인 브릿지 → bringup → map → zone_manager → 순찰 노드 순서, 정지는 반대. 각 단계가 켜진 것을 확인한 뒤 다음으로 넘어간다: 프로세스가 살아 있어야 하고, bringup 은 로봇 토픽이 올 때까지 기다린다. 토픽이 안 오면 브릿지를 한 번 자동 재시작하고, 그래도 안 오면 거기서 중단하고 사유를 보인다. 브릿지를 로봇 토픽보다 먼저 켜면 센서 QoS 가 안 맞을 수 있어서다)를 한다. 스크린샷: `docs/process_panel.png`. 목록은 `processes.yaml` 의 `group` 이름(도메인 브릿지 / zone_manager / bringup / map / 순찰 노드)별로 카드로 묶여 보이고, 카드 머리글에 실행 중 개수가 나온다. pinky2 순찰 노드(`patrol_pinky2`)는 `192.168.45.22` 로 접속하며 `ssh-copy-id pinky@192.168.45.22` 로 키 등록이 먼저 필요하다.
+사이드바의 **시스템** 패널에서 프로세스 목록을 보고 시작/정지/로그 보기와 **전체 시작/정지**(도메인 브릿지 → bringup → map → zone_manager → 순찰 노드 순서, 정지는 반대. 각 단계가 켜진 것을 확인한 뒤 다음으로 넘어간다: 프로세스가 살아 있어야 하고, bringup 은 로봇 토픽이 올 때까지 기다린다. 토픽이 안 오면 브릿지를 한 번 자동 재시작하고, 그래도 안 오면 거기서 중단하고 사유를 보인다. 브릿지를 로봇 토픽보다 먼저 켜면 센서 QoS 가 안 맞을 수 있어서다)를 한다. 스크린샷: `docs/process_panel.png`. 목록은 `processes.yaml` 의 `group` 이름(도메인 브릿지 / zone_manager / bringup / map / 순찰 노드)별로 카드로 묶여 보이고, 카드 머리글에 실행 중 개수가 나온다. 로봇마다 `ssh-copy-id pinky@<주소>` 로 키 등록이 먼저 필요하다 (pinky2 는 `pinky@192.168.45.22`). 로봇 프로세스에는 `env`(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI` 등)를 `processes.yaml` 에 적어 둔다: SSH 비대화형 셸은 `~/.bashrc` 를 읽지 않아 DDS 설정이 빠지기 때문이다. 스크린샷: `docs/process_panel_log.png` (로그 화면).
 
 - 실행할 수 있는 것은 `config/processes.yaml` 에 적힌 프로세스뿐이다 (브라우저가 보낸 것은 id 로만 쓰고 명령으로 쓰지 않는다). 관제 PC 쪽(`kind: local`)은 `bash -c 'source ... && export ROS_DOMAIN_ID=.. && exec <command>'` 로, 로봇 쪽(`kind: ssh`)은 SSH 로 같은 스크립트를 원격에서 실행한다.
-- **pinky1 의 `bringup`/`map` 은 채워져 있고(`192.168.45.20`, `pinky`), pinky2 는 비어 있다.** `processes.yaml` 에서 `ssh.host`, `ssh.user`, `cwd`, `source`, `command`, `detect` 를 채우면 활성화된다 (비어 있으면 "명령 미설정"). `cwd` 는 로봇에서 `cd` 할 절대 경로(`~` 불가)로 `source: ./install/setup.bash` 와 `map:=my_pinky_map10.yaml` 같은 상대 경로의 기준이다. **SSH 의 비대화형 셸은 `~/.bashrc` 를 읽지 않으므로** 로봇의 ROS 배포판(`/opt/ros/jazzy/setup.bash`)도 `source` 에 적는다. pinky1 의 `cwd` 는 `/home/pinky`(터미널의 기본 위치. 지도 `my_pinky_map10.yaml` 이 여기서 찾아진다)이고 `pinky_slam_nav/install/setup.bash` 는 절대 경로로 source 한다. `/opt/ros/jazzy` 와 `pinky_slam_nav` 폴더는 로봇에서 `ls` 로 확인했다.
+- **pinky1(`192.168.45.20`)과 pinky2(`192.168.45.22`)의 `bringup`/`map`/순찰 노드는 `processes.yaml` 에 채워져 있다** (둘 다 로봇에서 직접 실행해 확인한 값은 아니다). 새 로봇이나 비어 있는 항목은 `ssh.host`, `ssh.user`, `cwd`, `source`, `command`, `detect` 를 채우면 활성화된다 (비어 있으면 "명령 미설정"). `cwd` 는 로봇에서 `cd` 할 절대 경로(`~` 불가)로 `source: ./install/setup.bash` 와 `map:=my_pinky_map10.yaml` 같은 상대 경로의 기준이다. **SSH 의 비대화형 셸은 `~/.bashrc` 를 읽지 않으므로** 로봇의 ROS 배포판(`/opt/ros/jazzy/setup.bash`)도 `source` 에 적는다. pinky1 의 `cwd` 는 `/home/pinky`(터미널의 기본 위치. 지도 `my_pinky_map10.yaml` 이 여기서 찾아진다)이고 `pinky_slam_nav/install/setup.bash` 는 절대 경로로 source 한다. `/opt/ros/jazzy` 와 `pinky_slam_nav` 폴더는 로봇에서 `ls` 로 확인했다.
 - **SSH 는 키 로그인이 기본이다** (`BatchMode=yes`, `StrictHostKeyChecking=yes`). 비밀번호를 설정 파일에 두지 않는다. 키를 한 번 등록한다: `ssh-copy-id <user>@<host>` (비밀번호는 이때 터미널에 직접 입력). 꼭 비밀번호가 필요하면 `ssh.password_env: PINKY1_SSH_PASSWORD` 처럼 환경 변수 **이름**을 적고 서버를 그 변수와 함께 실행한다 (`sshpass` 설치 필요, `sshpass -e` 로 쓰므로 명령줄에 값이 나타나지 않는다).
 - 시작 전에 같은 프로세스가 이미 도는지(`detect` 의 pgrep 패턴) 확인해서, 터미널에서 직접 켠 것과 겹치면 시작하지 않는다. 그런 프로세스는 GUI 로 끌 수 없다. 전체 시작은 이런 프로세스를 "건너뜀"으로 처리한다.
 - 정지는 프로세스 그룹에 SIGINT → (5초 후) SIGTERM → SIGKILL 이다. SSH 는 pty 에 Ctrl-C 를 보내고, 안 되면 로봇에서 `pkill -INT`, 그래도 안 되면 SSH 를 끊고, 마지막에 로봇에서 아직 도는지 다시 확인해서 남아 있으면 "실패"로 표시한다.
 - 로봇 프로세스를 정지하거나 전체 정지에 포함되면 확인 팝업과 서버의 `confirm: true` 가 필요하다. **서버를 종료하면(Ctrl-C, 터미널 닫기=SIGHUP, SIGTERM) 이 GUI 가 켠 프로세스를 모두 정지한다** (브릿지, zone_manager, 로봇의 bringup/map. 비상정지의 마지막 0 속도를 먼저 보낸 뒤 정지한다). 특정 프로세스만 남기려면 `processes.yaml` 에 `stop_on_exit: false`. 종료는 로봇 프로세스를 정지하느라 몇 초 걸릴 수 있다. `kill -9` 나 전원 차단은 정리하지 못하므로 다음 실행에서 "이미 실행 중" 으로 거절된다 (아래 한계 참고).
 - 배지는 두 겹이다. 초록 "실행 중"은 프로세스가 떠 있고(`health: true` 인 것은 그 로봇의 토픽도 오는 것), 노랑 "실행 중 · 토픽 없음"은 프로세스만 떠 있고 로봇 토픽이 안 오는 것이다.
-- 실제 절차와 한계는 `docs/process_control_real_checklist.md`.
+- 실제 절차와 한계는 `docs/checklists/step6_process_control_real_checklist.md`.
 
 ## 구조
 
@@ -227,16 +227,25 @@ backend/hub.py         WebSocket 클라이언트별 큐와 브로드캐스트
 backend/map_loader.py  지도 yaml/pgm -> 메타데이터 + PNG (표준 라이브러리만 사용)
 backend/static/        콘솔 확인용 HTML
 backend/commands.py    명령 검증(validate), 이력과 응답 추적(CommandTracker, 비상정지 기록 포함)
+backend/auth.py        고정 계정, 세션, 로그인 시도 제한
+backend/procs.py       프로세스 관리(시작/정지/전체 시퀀스, SSH, 종료 시 정리)
+backend/mock_runner.py --mock 용 가짜 실행기 (ros2/ssh 를 실행하지 않음)
+backend/logstore.py    프로세스 출력과 서버 로그 보관 (소스마다 1000줄)
+config/processes.yaml  GUI 가 실행할 수 있는 프로세스 목록 (브릿지, zone_manager, 로봇 bringup/map/순찰)
 backend/zone.py        구역 상태 해석(v1/v2)과 점유 시간 (rclpy 무관)
 backend/scan.py        LiDAR 점 감소, 빈도 제한, 극좌표 -> 지도 좌표 (rclpy 무관)
 backend/planner.py     지도 점유 격자 위의 최단 경로 추정 (A*), 경로 선과 mock 이동에 사용
 backend/motion.py      cmd_vel 발행 관리: 비상정지 burst, 수동 조작 데드맨 (rclpy 무관, 시계/발행 주입)
 config/zone.yaml       위험 구역 사각형과 문 (confirmed: false 는 초안)
 frontend/              지도 화면 (index.html, style.css, app.js, mapmath.js, patrolview.js, zoneview.js)
+frontend/procview.js   시스템 패널 화면 로직
+frontend/logview.js    로그 화면 필터/검색 로직
+frontend/theme.js      라이트/다크 전환
+frontend/addrobot.js   [로봇 추가] 안내 팝업
 frontend/zoneview.js   구역 배지 문구, 구역 진입 대기 문구, 경로 오버레이 계산 (순수 함수)
 frontend/patrolview.js 배지 색, 버튼 활성 조건, 진행 문구 등 명령 패널 화면 로직 (순수 함수)
 frontend/mapmath.js    월드<->픽셀 변환과 occupancy 판정 (변환식이 있는 유일한 곳)
-tests/                 단위 테스트, verify_transform.py (변환식 대조), verify_step{3,4}_mock.py (API/WS), verify_step{3,4}_ui.py (headless Chrome 화면), verify_step4_ros.py (격리 도메인)
+tests/                 단위 테스트, verify_transform.py (변환식 대조), verify_step{3,4}_mock.py (API/WS), verify_step{3,4}_ui.py (headless Chrome 화면), verify_step4_ros.py (격리 도메인), test_auth/procs/logstore.py 와 verify_proc_{mock,ui}.py (인증, 프로세스 제어)
 ```
 
 스레드 모델: rclpy 콜백(별도 스레드)은 값을 뽑아 `loop.call_soon_threadsafe` 로 `asyncio.Queue` 에 넣는다. 큐를 소비하는 단일 태스크만 `StateStore` 를 바꾸고 브로드캐스트하므로 락이 없다. mock 도 같은 큐로 같은 이벤트를 넣는다.
@@ -252,7 +261,7 @@ tests/                 단위 테스트, verify_transform.py (변환식 대조),
 │        │                      │ 경로이동│            │
 │        │  pixel / map / occ.  │ 클릭좌표│            │
 └────────┴──────────────────────┴───────┴────────────┘
-* 구조만 있고 비활성 (로그, 포인트 화면은 이후 Step)
+* 로그는 구현됨(아래 "로그 화면"), 포인트는 구조만 있고 비활성
 ```
 
 Step 3 에서 카드에 `순찰 시작`/`정지`/`경로 이동` 버튼과 상태 배지·진행 문구가 생겼고, 지도에 goto 포인트(P1~P7, 구역 안은 사각형)가, 아래에 명령 이력(최근 50건)이 생겼다. 스크린샷: `docs/step3_screenshot.png`.
@@ -284,3 +293,11 @@ Step 3 에서 카드에 `순찰 시작`/`정지`/`경로 이동` 버튼과 상�
 - **구역 진입 대기**: `WAITING_ZONE` 이면 카드와 마커에 "구역 진입 대기 (P3)" 와 점유 중인 로봇, 마커에 빨간 점선 고리.
 - **오버레이 (LiDAR)**: 로봇별 체크박스. 켠 로봇만 서버가 `/scan` 을 구독한다. 로봇 이름 옆에 그리는 기준(`tf: 센서 프레임 …` 또는 `amcl 위치 + 보정 N°, tf 없음`)이 표시된다.
 - **수동 조작**: "수동 조작 켜기"를 체크하면 방향 버튼(또는 방향키/WASD)이 활성화되고 누르는 동안만 움직인다. 버튼을 뗌, 창이 포커스를 잃음, 탭이 숨겨짐, 연결 끊김, 체크 해제, 로봇 변경은 즉시 정지한다. 순찰 중·오프라인이면 체크박스가 비활성이다.
+
+## 라이트/다크 모드와 메뉴바
+
+왼쪽 메뉴의 `다크 모드`/`라이트 모드` 버튼으로 바꾼다. 선택은 이 브라우저의 `localStorage`(`pinky.theme`)에만 저장하고, 저장된 값이 없으면 OS 설정(`prefers-color-scheme`)을 따른다. 첫 화면이 깜빡이지 않도록 `theme.js` 를 `<head>` 에서 먼저 불러 `data-theme` 를 정하고, 색은 `style.css` 의 CSS 변수로 바뀐다. 메뉴바 글자는 가운데 정렬이고 좁으면 줄바꿈한다.
+
+## 로봇 추가 안내 팝업
+
+왼쪽 메뉴의 `로봇 추가` 버튼은 이름, 도메인 ID, IP(와 SSH 사용자)를 입력하면 `robots.yaml`, `zone.yaml`, `processes.yaml` 에 붙여 넣을 조각과, GUI 밖에서 할 일(SSH 키 등록, DDS 설정, 브릿지 YAML·순찰 노드 만들기, 문 지점 좌표 추가, 서버 재시작)을 **단계 카드**로 보여 준다. 입력값이 들어간 자리는 입력칸과 같은 색으로 칠해져 무엇이 입력에 따라 바뀌는지 보이고, 조각은 복사할 때 색 표시를 뺀 순수 텍스트가 된다. 팝업은 크기를 조절할 수 있다. **서버 설정을 자동으로 바꾸지는 않는다.** 로봇 목록과 문(`RED*`) 지점이 어긋나면 서버가 시작하지 못하므로, 지점 좌표를 확인한 뒤 직접 붙여 넣게 하려는 것이다. 이 조각의 순찰 경로(`start_route`)와 홈은 pinky2 형식을 예시로 쓰므로 새 로봇의 순찰 노드(`POINTS`/`WAYPOINTS`)와 같게 고쳐야 한다.

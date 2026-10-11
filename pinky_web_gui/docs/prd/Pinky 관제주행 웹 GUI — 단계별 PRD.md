@@ -54,6 +54,7 @@ Oct 6, 2026 · @JinHo
 4. **Step 3** 명령 패널: start / stop / goto
 5. **Step 4** 구역 상태, 비상정지, 경로와 LiDAR 시각화
 6. **Step 5** 카메라, 로그와 이력, 인증 (선택)
+7. **Step 6** 인증과 프로세스 제어: 시스템 패널로 브릿지·zone_manager·로봇 bringup/map/순찰 노드를 켜고 끈다 (하위 Step 6-1 ~ 6-8, 개발 중에 추가됨)
 
 ## Step 0. 레포 분석과 CLAUDE.md
 
@@ -336,7 +337,7 @@ PRD의 Step 4 FR4-1 ~ FR4-9를 구현해줘. FR4-9(수동 조작)는 마지막�
 | FR5-5 | 이벤트 이력을 SQLite(표준 라이브러리 `sqlite3`)에 저장한다: 시각, 로봇, 종류(상태 변경, 명령, 구역 점유·해제, 비상정지, 온라인·오프라인), 상세(JSON). 30일이 지난 기록은 자동 삭제한다. |
 | FR5-6 | 이력 화면에서 로봇·종류·기간으로 거르고, CSV로 내려받을 수 있다. |
 | FR5-7 | 로봇이 오프라인이 되거나 `FAILED`가 되면 화면 상단에 알림을 띄운다. 확인 버튼을 누르기 전까지 유지한다. |
-| FR5-8 | 인증: 환경 변수로 지정한 비밀번호 두 개를 둔다. 보기 전용(viewer)과 명령 가능(operator). viewer는 모든 명령 API와 비상정지 외의 제어 버튼이 비활성화된다. 로그인은 서버 세션 쿠키로 유지한다. |
+| FR5-8 | (**Step 6-1에서 대체됨**: 고정 계정 `mngr`/`oper`) 인증: 환경 변수로 지정한 비밀번호 두 개를 둔다. 보기 전용(viewer)과 명령 가능(operator). viewer는 모든 명령 API와 비상정지 외의 제어 버튼이 비활성화된다. 로그인은 서버 세션 쿠키로 유지한다. |
 | FR5-9 | `run.sh` 하나로 ROS 환경 `source`, 도메인 ID 설정, 서버 실행까지 한다. (선택) systemd 유닛 파일 예시를 제공한다. |
 | FR5-10 | `robots.yaml`에 로봇을 추가하면 코드 수정 없이 카드, 마커, 이력에 나타난다. |
 
@@ -362,6 +363,114 @@ PRD의 Step 5 FR5-1 ~ FR5-10 중에서 내가 지금 요청하는 것만 구현�
 - 카메라는 보는 사람이 있을 때만 구독, 5fps 제한
 - 비밀번호는 코드에 쓰지 말고 환경 변수에서 읽을 것
 - 새 의존성이 필요하면 requirements.txt에 적고 이유를 알려줘
+```
+
+## Step 6. 인증과 프로세스 제어 (시스템 패널)
+
+> 상태: 6-1 ~ 6-5 구현됨(mock 검증), 6-6 ~ 6-8 **실물 확인 대기**. 이 Step은 처음 계획(Step 0~5)에는 없었고 개발 중에 추가됐다. Step 5의 인증(FR5-8)은 여기서 **대체**됐다: 환경 변수 비밀번호 2개(viewer/operator) 대신 프로그램에 고정된 ID/비밀번호 계정(`mngr`=manager, `oper`=operator)을 쓴다. 역할 이름은 `operator`→`manager`, `viewer`→`operator`로 바뀌었다.
+> 실물 확인 절차: `../checklists/step6_process_control_real_checklist.md`. 사용법: `../../README.md`의 "인증과 프로세스 제어" 절.
+
+관제 PC의 터미널과 로봇의 SSH 터미널을 오가며 켜던 것을 시스템 패널의 버튼으로 옮긴다. 켜고 끄는 대상: 도메인 브릿지(`ros2 launch launch/bridges.launch.xml`), `zone_manager`, 로봇별 bringup, map(Nav2), 순찰 노드.
+
+### 범위
+
+- **포함**: 로그인과 역할, 허용 목록 기반 프로세스 시작·정지, 전체 시작·정지, 시스템 패널과 로그 화면, 로봇 추가 안내 팝업, 실물 확인.
+- **제외**: 임의 명령 실행, 비밀번호 저장, 다수 계정 관리, 로봇의 ROS 패키지 설치와 빌드, 외부 인터넷 공개(HTTPS).
+
+### 설계 전제
+
+- 실행할 수 있는 것은 `config/processes.yaml`에 적힌 프로세스뿐이다. 브라우저가 보낸 값은 id로만 쓰고 명령으로 쓰지 않는다.
+- 관제 PC 쪽(`kind: local`)은 `bash -c 'source ... && export ROS_DOMAIN_ID=.. && exec <command>'`로, 로봇 쪽(`kind: ssh`)은 SSH 키 로그인(`BatchMode=yes`, `StrictHostKeyChecking=yes`)으로 같은 스크립트를 원격 실행한다. SSH 비대화형 셸은 `~/.bashrc`를 읽지 않으므로 DDS 환경(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)과 ROS 배포판은 `env`/`source`에 명시한다.
+- 브릿지를 로봇 토픽보다 먼저 켜면 센서 QoS(best_effort)가 안 맞아 데이터가 안 넘어온다 (격리 도메인에서 재현). 그래서 시작 순서는 브릿지 → bringup → map → zone_manager → 순찰 노드이고 정지는 반대다.
+- 인증이 꺼져 있으면(`--no-auth`) 프로세스 제어와 로그 화면의 원격 실행은 강제로 꺼진다.
+- 로봇 IP와 명령은 `processes.yaml`의 값이 **로봇에서 직접 확인한 값이 아니다**. 기존 파일(`launch/`, 순찰 노드 등)은 수정하지 않는다.
+
+### Step 6-1. 인증과 계정 (구현됨)
+
+| ID | 요구사항 |
+| --- | --- |
+| FR6-1 | 계정은 `backend/auth.py`에 고정한다: `mngr`(manager: 명령, 수동 조작, 프로세스 제어, 로그 화면), `oper`(operator: 보기 전용, 비상정지는 가능). 환경 변수나 설정 파일로 바꾸지 않는다. |
+| FR6-2 | `POST /api/login {id, password}`, 서버 세션 쿠키(HttpOnly, SameSite=Strict, 12시간, 재시작 시 만료). 같은 주소에서 1분 안에 5번 틀리면 잠시 막는다(429). 비교는 상수 시간. |
+| FR6-3 | `계정 전환` 버튼: 로그아웃 없이 다른 계정으로 바꾼다. 틀리면 지금 계정을 유지하고, 성공하면 이전 세션을 끝낸다. |
+| FR6-4 | `--no-auth`로 인증을 끈다 (개발용). 정적 화면, `/api/health`, `/api/me`, `/api/login` 외의 `/api/*`와 `/ws`는 로그인이 필요하다. 다른 사이트의 요청을 막기 위해 POST는 JSON + 같은 Origin만, WebSocket은 같은 Origin만 받는다. |
+
+완료 기준: 비밀번호 없이 또는 operator로 `start` API를 부르면 401/403 · 계정 전환 성공/실패 동작 · 5회 실패 후 429 (`tests/test_auth.py`, `verify_proc_mock.py`).
+
+### Step 6-2. 프로세스 관리 코어 (구현됨)
+
+| ID | 요구사항 |
+| --- | --- |
+| FR6-5 | `config/processes.yaml`에 프로세스 id, 이름, 묶음(`group`), 종류(`local`/`ssh`), 도메인, `cwd`, `source`, `env`, `command`, `detect`, `health`, `stop_on_exit`을 둔다. 명령이 비어 있으면 "명령 미설정"으로 비활성이다. |
+| FR6-6 | 시작 전에 `detect`(pgrep 패턴)로 같은 프로세스가 이미 도는지 확인해서, 터미널에서 직접 켠 것과 겹치면 시작하지 않는다 (409). 그런 프로세스는 GUI로 끌 수 없다. |
+| FR6-7 | 정지: 프로세스 그룹에 SIGINT → 5초 후 SIGTERM → SIGKILL. SSH는 pty에 Ctrl-C를 보내고, 안 되면 로봇에서 `pkill -INT`, 그래도 안 되면 SSH를 끊는다. 마지막에 로봇에서 아직 도는지 다시 확인해서 남아 있으면 "실패"로 표시한다. |
+| FR6-8 | 로봇 프로세스를 정지하거나 전체 정지에 포함하면 확인 팝업과 서버의 `confirm: true`가 필요하다 (없으면 409 `needs_confirm`). |
+| FR6-9 | 서버를 종료하면(Ctrl-C, SIGHUP, SIGTERM) GUI가 켠 프로세스를 모두 정지한다. 비상정지의 마지막 0 속도를 먼저 보낸 뒤 정지하고, `ros2 launch` 리더가 끝난 뒤 남은 자식(`domain_bridge`)은 그룹에 SIGTERM/SIGKILL로 정리한다. `stop_on_exit: false`인 것은 남긴다. |
+| FR6-10 | 상태 `stopped\|starting\|running\|stopping\|failed\|exited`. 배지는 두 겹이다: 초록 "실행 중"(프로세스가 떠 있고 `health: true`면 그 로봇의 토픽도 옴), 노랑 "실행 중 · 토픽 없음". |
+| FR6-11 | 로봇이 bringup만 켜져 있어도 online이 되도록 `/odom`을 생존 확인용으로 받는다 (초당 2번 반영). |
+
+완료 기준: 중복 실행 거절 · 정지 후 프로세스가 남지 않음 · 서버 종료 시 정리 (`tests/test_procs.py`, mock 검증).
+
+### Step 6-3. 전체 시작·정지 시퀀스 (구현됨)
+
+| ID | 요구사항 |
+| --- | --- |
+| FR6-12 | `POST /api/procs/start_all`, `/stop_all`은 백그라운드 시퀀스로 돌고 진행은 `sequence`(`{kind, state: running\|done\|failed, step, message, results}`)로 알린다. 순서는 `processes.yaml` 목록 순서다. |
+| FR6-13 | 각 단계가 **켜진 것을 확인한 뒤** 다음으로 간다: 프로세스가 settle 시간 동안 살아 있어야 하고, `health`가 있는 bringup은 로봇 토픽이 올 때까지(`ready_sec`, 기본 25초) 기다린다. 진행 문구에 대기 사유를 보인다. |
+| FR6-14 | 토픽이 안 오면 `restart_if_stalled`인 브릿지를 한 번 재시작하고, 그래도 안 오면 거기서 중단하고 사유를 보인다. 터미널에서 이미 켠 프로세스는 "건너뜀"으로 처리한다. |
+
+완료 기준: 켜짐 대기, 브릿지 재시작, 실패 시 중단, `health` 없는 프로세스 흐름 (`tests/test_procs.py`).
+
+### Step 6-4. 시스템 패널과 로그 화면 (구현됨)
+
+| ID | 요구사항 |
+| --- | --- |
+| FR6-15 | 사이드바 `시스템` 탭: `group`별 카드(브릿지 / bringup / map / zone_manager / 순찰 노드), 카드 머리글에 실행 중 개수, 프로세스별 시작·정지·로그, 실행 시간 실시간 표시, 전체 시작·정지 버튼, 진행 문구. operator에게는 버튼이 꺼진다. |
+| FR6-16 | 로그 화면(왼쪽 메뉴 `로그`): GUI가 켠 프로세스의 출력과 GUI 서버 로그를 `전체 | GUI 서버 | 프로세스별` 탭으로 본다. 레벨 필터, 검색, 일시정지, 따라가기, 복사, 지우기. 소스마다 최근 1000줄을 메모리에만 두고 1초마다 새 줄만 받는다 (`GET /api/logs?since=`). manager만 볼 수 있다. |
+| FR6-17 | 로봇 online/offline이 바뀌면 시스템 패널을 다시 보내 낡은 "토픽 없음" 배지를 없앤다. offline 배지에 마지막 수신 토픽/시각을 툴팁으로 보인다. 서버 시작 때 `ROS_DOMAIN_ID`/`ROS_LOCALHOST_ONLY`를 로그로 남긴다. |
+
+### Step 6-5. 로봇 추가 안내 팝업 (구현됨)
+
+| ID | 요구사항 |
+| --- | --- |
+| FR6-18 | 왼쪽 메뉴 `로봇 추가`: 이름, 도메인 ID, IP(SSH 사용자)를 입력하면 `robots.yaml`, `zone.yaml`, `processes.yaml`에 붙여 넣을 조각과 GUI 밖에서 할 일(SSH 키 등록, DDS 설정, 브릿지 YAML·순찰 노드 만들기, 문 지점 좌표, 서버 재시작)을 단계 카드로 보여 준다. 입력값이 들어간 자리는 입력칸 색으로 표시하고, 복사할 때는 색 표시를 뺀다. 서버 설정을 자동으로 바꾸지 않는다. |
+
+### Step 6-6. 실물 확인 A: 로봇이 움직이지 않는 확인 (대기)
+
+체크리스트 A1~A7. 로그인 역할별 버튼, 터미널에서 미리 켠 브릿지와의 중복 거절, GUI로 브릿지 시작·로그·정지(자식 프로세스 잔존 없음), zone_manager 시작·정지와 구역 배지, 잘못된 SSH host 실패 표시. 준비: SSH 키 등록(`ssh-copy-id`)과 `processes.yaml` 값 확인(`ls ~/pinky_slam_nav /opt/ros/*/setup.bash`, `map:=my_pinky_map10.yaml`을 `cwd`에서 찾는지).
+
+### Step 6-7. 실물 확인 B: 로봇 프로세스 (대기, **로봇이 움직일 수 있음**)
+
+체크리스트 B1~B7 + B6a~c. pinky1 bringup 시작과 online·health, 이미 켠 프로세스 거절, map(Nav2) 시작과 `/amcl_pose`, 확인 팝업 후 정지(Nav2 노드 소멸), 정지 후 로봇에 남은 경우의 "실패" 표시, 전체 시작 진행 문구(브릿지 자동 재시작 1회), SSH로 띄운 프로세스의 DDS `env` 적용, pinky2 순찰 노드(`ssh-copy-id pinky@192.168.45.22` 선행), 전체 정지(반대 순서, 로봇 경고 팝업). 주변을 비우고 한다.
+
+### Step 6-8. 실물 확인 C: 서버 재시작과 한계 (대기)
+
+체크리스트 C1~C4. 서버를 Ctrl-C로 끄면 관제 PC 프로세스와 로봇의 bringup/map이 같이 정지하는지, 다시 켜면 "이미 실행 중"이 나오지 않는지, `kill -9`/전원 차단 뒤에는 잔존 프로세스 때문에 거절되는지(로봇에서 직접 `pkill -INT -f "[r]os2 launch pinky_bringup"`).
+
+### 완료 기준 (Step 6 전체)
+
+- [ ] 6-1 ~ 6-5: 단위 테스트와 mock 검증 통과 (`tests/test_auth.py`, `test_procs.py`, `test_logstore.py`, `verify_proc_mock.py`, `verify_proc_ui.py`) — 구현 시 통과 확인됨
+- [ ] 6-6: A1~A7 모두 통과 (사용자 확인)
+- [ ] 6-7: B1~B7 모두 통과 (사용자 확인)
+- [ ] 6-8: C1~C4 모두 통과 (사용자 확인)
+- [ ] 위가 끝나면 `../reference/known-pitfalls.md`의 "프로세스 제어는 실물에서 실행하지 않았다" 항목과 `CLAUDE.md` 7절의 같은 줄을 지운다.
+
+### 알려진 한계
+
+- GUI는 자기가 띄운 프로세스만 정지할 수 있다. 터미널에서 켠 것은 감지만 한다.
+- SSH 원격 정지는 네트워크가 끊기면 보장되지 않는다. 로봇에서 `ros2 node list`로 확인한다.
+- 소프트웨어 버튼이다. 주행 중 비상 상황은 기존 비상정지(하드웨어 정지 포함)로 대응한다.
+- 비밀번호는 소스에 고정돼 있고 평문 HTTP로 오간다. 신뢰하는 내부망에서만 쓴다. 저장소를 GitHub에 올리면 비밀번호도 공개된다.
+- `kill -9`로 서버를 죽이면 정리하지 못해 관제 PC 쪽 자식이 남는다 (`pgrep -fa domain_bridge`).
+
+### Claude Code 프롬프트 (실물 확인 결과 반영용)
+
+```text
+CLAUDE.md와 docs/checklists/step6_process_control_real_checklist.md를 먼저 읽어줘.
+내가 아래에 적는 실물 확인 결과(통과/실패, 화면 캡처, 백엔드 로그)를 Step 6-6 ~ 6-8의 완료 기준에 반영해줘.
+- 통과한 항목은 체크리스트와 PRD의 체크박스를 채우고, 실패한 항목은 원인을 코드로 확인한 뒤 수정안을 먼저 보여줘
+- 로봇에서 직접 실행하지는 말고, 확인이 필요한 명령은 내가 실행할 수 있게 적어줘
+- processes.yaml의 값이 실제와 달랐다면 어떤 값인지 알려줘
+[여기에 결과 붙여넣기]
 ```
 
 ## 실물 로봇 테스트 가이드
@@ -436,6 +545,10 @@ python3 pinky_control_client_v2.py pinky1 monitor   # 기준선: patrol_status �
 6. `lane_follower_node`가 실행 중일 때도 비상정지가 먹히는지 본다.
 
 **합격**: 3\~6이 모두 통과한다. 하나라도 실패하면 GUI 비상정지를 안전장치로 쓰지 않고, 원인(`cmd_vel` 경합 등)을 해결한 뒤 다시 시험한다.
+
+### Step 6. 인증과 프로세스 제어
+
+`../checklists/step6_process_control_real_checklist.md`를 따른다 (6-6 로봇이 움직이지 않는 확인 → 6-7 로봇 프로세스 → 6-8 서버 재시작). 이 Step의 실물 확인은 아직 한 번도 하지 않았다.
 
 ### Step 5. 부가 기능
 

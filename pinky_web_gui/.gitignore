@@ -1,3 +1,6 @@
 .venv/
 __pycache__/
 *.pyc
+
+# 세션 요약 등 작업 메모 (문서가 아님)
+docs/notes/*.txt

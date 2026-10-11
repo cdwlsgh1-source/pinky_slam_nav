@@ -10,7 +10,7 @@ mock 으로는 `pytest`, `tests/verify_step4_mock.py`, `tests/verify_step4_ui.py
 ## 사전 조건
 - [ ] Step 3 체크리스트의 A, B 항목이 통과했다 (명령 경로가 정상).
 - [ ] 로봇: Nav2 bringup, 순찰 노드 실행. 주변을 비운다.
-- [ ] 관제 PC: 브리지 실행(`launch/bridges.launch.xml`). **브리지 YAML 은 Step 4 에서 바꾸지 않았다** (`/{id}/scan`, `/{id}/cmd_vel` 은 이미 들어 있다). `zone_manager_node` 실행.
+- [ ] 관제 PC: 브리지 실행(`ros2 launch domain_bridge bridges.launch.xml`). **브리지 YAML 은 Step 4 에서 바꾸지 않았다** (`/{id}/scan`, `/{id}/cmd_vel` 은 이미 들어 있다). `zone_manager_node` 실행.
 - [ ] 관제 PC: `export ROS_DOMAIN_ID=50` 후 `.venv/bin/python -m backend.main` (**`--mock` 없이**). 브라우저 `http://localhost:8000/`.
 - [ ] 터미널을 하나 더 열어 `ros2 topic echo /pinky1/cmd_vel` (도메인 50), 로봇 쪽(도메인 20)에서 `ros2 topic echo /cmd_vel` 을 볼 수 있게 한다.
 - [ ] pinky2 를 쓰려면 `pinky_patrol_node_pinky2_v2.py` 의 `ZONE_ENTRY_INDEX/ZONE_EXIT_INDEX` 가 0/3 으로 고쳐졌는지 확인한다 (`CLAUDE.md` 7절). 구역 항목은 pinky1 단독으로 먼저 한다.
