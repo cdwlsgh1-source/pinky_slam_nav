@@ -17,7 +17,7 @@
     <button class="menu-item" data-view="log" id="logMenu" title="GUI 가 켠 프로세스의 출력과 GUI 서버 로그">로그</button>
     <button class="menu-item" disabled title="준비 중">포인트</button>
     <div class="layout-tools" id="layoutTools" data-only-view="main">
-      <button type="button" class="menu-item" id="layoutEditBtn" aria-pressed="false" title="지도, 사이드바, 명령 이력 패널을 끌어서 옮기고 크기를 조절합니다">레이아웃 편집</button>
+      <button type="button" class="menu-item" id="layoutEditBtn" aria-pressed="false" title="지도와 사이드바 패널을 끌어서 옮기고 크기를 조절합니다">레이아웃 편집</button>
       <div class="layout-edit-actions" id="layoutEditActions" hidden>
         <button type="button" id="layoutDone" class="primary">완료</button>
         <button type="button" id="layoutReset" title="기본 배치로 되돌립니다">초기화</button>
@@ -35,17 +35,27 @@
   </nav>
 
   <!-- 위: 시스템 알람 -->
-  <header class="alarmbar" aria-label="시스템 알람">
+  <header class="alarmbar" aria-label="System alarms">
     <span class="chip" id="connChip" data-level="warn">연결 중...</span>
     <span class="chip" id="zoneChip" data-level="dim">구역: -</span>
     <!-- 비상정지: 항상 보이고, 확인 팝업 없이 한 번 누르면 동작한다 (FR4-7). 로봇별 비상 정지는 로봇 카드 안에 있다 -->
     <div class="estop" id="estopBar" role="group" aria-label="비상정지">
       <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">비상 정지</button>
     </div>
-    <ul class="alarm-list" id="alarmList"><li class="dim">알람 없음</li></ul>
+    <!-- 알람 목록: 서버가 만든 알람과 브라우저 전용 알람을 한 표로 (app.js renderAlarms). 비상정지 명령 이력도 여기 통합됐다 -->
+    <div class="alarm-list" id="alarmList">
+      <div class="alarm-tools"><button type="button" id="alarmInfoBtn" aria-pressed="true" title="Show or hide info rows (sent commands, robot online)">Hide info</button></div>
+      <div class="alarm-scroll">
+        <table>
+          <thead><tr><th>Time</th><th>Robot</th><th>Message</th><th>State</th></tr></thead>
+          <tbody id="alarmBody"></tbody>
+        </table>
+        <p class="hint" id="alarmEmpty">No alarms</p>
+      </div>
+    </div>
   </header>
 
-  <!-- 작업 영역: 지도 / 사이드바 / 명령 이력 패널을 자유롭게 배치한다 (레이아웃 편집, app.js) -->
+  <!-- 작업 영역: 지도 / 사이드바 패널을 자유롭게 배치한다 (레이아웃 편집, app.js) -->
   <div class="workspace" id="workspace">
 
   <!-- 지도 화면 -->
@@ -123,18 +133,6 @@
       <ul class="points" id="pointsList"></ul>
     </section>
   </aside>
-
-  <!-- 아래: 명령 이력 -->
-  <section class="history panel" id="panelHist" data-panel="hist" data-title="명령 이력" aria-label="명령 이력">
-    <h2>명령 이력 <small>(최근 50건)</small></h2>
-    <div class="history-scroll">
-      <table>
-        <thead><tr><th>시각</th><th>로봇</th><th>명령</th><th>결과</th></tr></thead>
-        <tbody id="historyBody"></tbody>
-      </table>
-      <p class="hint" id="historyEmpty">보낸 명령이 없습니다.</p>
-    </div>
-  </section>
 
   </div><!-- /workspace -->
 

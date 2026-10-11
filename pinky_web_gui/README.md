@@ -140,6 +140,7 @@ curl -s -X POST localhost:8000/api/robots/pinky1/command -H 'Content-Type: appli
 .venv/bin/python tests/verify_step4_mock.py   # Step 4 API/WS: LiDAR 구독 수, 비상정지, 데드맨, 출처 검사
 .venv/bin/python tests/verify_step3_ui.py     # headless Chrome (Chrome 필요)
 .venv/bin/python tests/verify_step4_ui.py --shot docs/step4_screenshot.png --zone-shot docs/step4_zone_draft.png --scan-shot docs/step4_lidar.png
+.venv/bin/python tests/verify_alarm_ui.py --shot docs/alarm_a1.png --narrow-shot docs/alarm_a1_narrow.png   # 알람바 (Chrome 필요, mock 훅으로 장애를 일으킨다)
 ```
 
 `RosBridge` 의 ROS 경로(스캔 구독/해제, tf 로 센서 방향 구하기, `cmd_vel`, 종료 시 0 속도)는 **실제 로봇 도메인과 분리된** 격리 도메인에서만 확인한다. 이 스크립트는 `ROS_DOMAIN_ID=77`, `ROS_LOCALHOST_ONLY=1` 이 아니면 실행을 거부한다 (이 PC 의 기본 `ROS_DOMAIN_ID` 는 관제 도메인 50 이다).
@@ -245,7 +246,7 @@ frontend/addrobot.js   [로봇 추가] 안내 팝업
 frontend/zoneview.js   구역 배지 문구, 구역 진입 대기 문구, 경로 오버레이 계산 (순수 함수)
 frontend/patrolview.js 배지 색, 버튼 활성 조건, 진행 문구 등 명령 패널 화면 로직 (순수 함수)
 frontend/mapmath.js    월드<->픽셀 변환과 occupancy 판정 (변환식이 있는 유일한 곳)
-tests/                 단위 테스트, verify_transform.py (변환식 대조), verify_step{3,4}_mock.py (API/WS), verify_step{3,4}_ui.py (headless Chrome 화면), verify_step4_ros.py (격리 도메인), test_auth/procs/logstore.py 와 verify_proc_{mock,ui}.py (인증, 프로세스 제어)
+tests/                 단위 테스트, verify_transform.py (변환식 대조), verify_step{3,4}_mock.py (API/WS), verify_step{3,4}_ui.py, verify_alarm_ui.py (headless Chrome 화면), test_alarms.py (알람 규칙), verify_step4_ros.py (격리 도메인), test_auth/procs/logstore.py 와 verify_proc_{mock,ui}.py (인증, 프로세스 제어)
 ```
 
 스레드 모델: rclpy 콜백(별도 스레드)은 값을 뽑아 `loop.call_soon_threadsafe` 로 `asyncio.Queue` 에 넣는다. 큐를 소비하는 단일 태스크만 `StateStore` 를 바꾸고 브로드캐스트하므로 락이 없다. mock 도 같은 큐로 같은 이벤트를 넣는다.
@@ -254,7 +255,7 @@ tests/                 단위 테스트, verify_transform.py (변환식 대조),
 
 ```
 ┌────────┬──────────────────────────────┬────────────┐
-│ 메뉴바  │ 시스템 알람 (연결, 구역, 이벤트)  │            │
+│ 메뉴바  │ 알람바 (연결, 구역, 알람 표)      │            │
 │ 메인    ├──────────────────────┬───────┤            │
 │ 로그*   │                      │ 로봇   │            │
 │ 포인트* │     지도 (Canvas)     │ 카드   │            │
@@ -264,7 +265,7 @@ tests/                 단위 테스트, verify_transform.py (변환식 대조),
 * 로그는 구현됨(아래 "로그 화면"), 포인트는 구조만 있고 비활성
 ```
 
-Step 3 에서 카드에 `순찰 시작`/`정지`/`경로 이동` 버튼과 상태 배지·진행 문구가 생겼고, 지도에 goto 포인트(P1~P7, 구역 안은 사각형)가, 아래에 명령 이력(최근 50건)이 생겼다. 스크린샷: `docs/step3_screenshot.png`.
+Step 3 에서 카드에 `순찰 시작`/`정지`/`경로 이동` 버튼과 상태 배지·진행 문구가 생겼고, 지도에 goto 포인트(P1~P7, 구역 안은 사각형)가, 아래에 명령 이력(최근 50건)이 생겼다 (알람바 Step A1 에서 알람바로 통합되어 없어졌다, 아래 "알람바"). 스크린샷: `docs/step3_screenshot.png`.
 
 ## 명령 패널 사용 (Step 3)
 
@@ -284,12 +285,13 @@ Step 3 에서 카드에 `순찰 시작`/`정지`/`경로 이동` 버튼과 상�
 
 스크린샷: `docs/step4_screenshot.png`(구역 점유와 진입 대기), `docs/step4_lidar.png`(LiDAR 점이 벽 위에 겹침), 구역 영역 초안 확인용 `docs/step4_zone_draft.png`.
 
+- **알람바** (Step A1): 화면 위 칩·비상 정지 아래의 표 `Time / Robot / Message / State`. 알람은 서버가 만들어 모든 접속 화면이 같은 것을 본다 (명령 거절·전송 실패·무응답, 비상정지 실패, 로봇 오프라인, 순찰 FAILED/RETRY/STOPPED). 같은 알람이 반복되면 `×N`, 조건이 사라지면 `Cleared HH:MM:SS` 로 바뀌며 새로 열린 화면에도 보인다. 명령 전송 성공 같은 기록 행(info)은 `Hide info` 로 숨기고(브라우저에 저장), 목록은 영역 안에서 스크롤한다. 코드·레벨·해소 조건은 `docs/interfaces.md` 6-7절. 하단 명령 이력 패널은 없어졌고 레이아웃 저장 키는 `pinky.layout.v3` 로 올랐다 (이전 배치는 무시하고 기본 배치로 돌아간다).
 - **상단**: 구역 배지("구역: 비어 있음" / "구역: pinky1 점유 중 (42초)" / "구역: 상태 수신 전")와 **항상 보이는 `비상 정지`**(모든 로봇). 로봇별 `비상 정지`는 사이드바 **로봇** 탭의 카드 안에 있다(카드의 `순찰 정지`는 순찰 stop 명령이고 비상 정지와 다르다). 확인 팝업도 연타 잠금도 없고 오프라인 로봇과 operator 도 누를 수 있다. 좁은 화면에서는 상단이 고정된다.
 - **지도**: 구역 사각형(점유 중이면 빨갛게, 초안이면 점선과 모서리 좌표), 진입·이탈 문(로봇 색 마름모), 작업 중인 로봇의 경로 선(**기본 꺼짐**, 지도 오른쪽 위의 `경로` 버튼으로 켠다. 지난 구간은 연하게, 현재 목표로 가는 구간은 굵게, 남은 구간은 점선, 현재 목표는 고리). `goto` 는 `lastTask.points` + `patrol_status` 의 `waypoint`/`detail` 로, `start` 는 `start_route` + `waypoint` 번호로 그린다. 지점 사이의 선은 직선이 아니라 **지도의 벽을 피하는 최단 경로 추정**이다 (`backend/planner.py`, `GET /api/plans`, 벽에서 `planner_inflation_m` 0.08 m 이상 떨어진 칸만 지난다). 이것은 지도 점유 격자 위의 A* 계산이며 **Nav2 의 실제 경로가 아니다** (`/plan` 토픽은 브리지에 없다). 실제 경로는 코스트맵 팽창과 평활화 때문에 조금 다를 수 있다. mock 로봇도 같은 경로를 따라 움직이고 수동 조작으로 벽 안에 들어가지 않는다. `waypoint` 가 -1 이면 강조하지 않는다 (예외: `RETURNING` 은 `detail` 이 홈 이름이라 홈을 강조). 경로 선은 이 서버가 기억하는 명령(`last_task`)만 그린다 (서버를 껐다 켠 뒤 CLI 로 시작한 작업은 그리지 않는다).
 - **사이드바 탭**: 사이드바는 `로봇` | `시스템` | `경로` | `조작`(LiDAR 오버레이와 수동 조작) | `좌표` 탭으로 나뉜다. 선택한 탭은 브라우저(`localStorage`)에 저장되고 방향키로도 옮길 수 있다.
-- **분할선**: 지도와 사이드바 사이, 지도와 명령 이력 사이의 틈을 끌면 사이드바 너비와 이력 높이가 바뀌고 지도가 따라간다. 더블클릭(또는 `Home`)은 기본 크기, 방향키는 조금씩 조절한다. 놓으면 저장된다. 레이아웃 편집 중에는 숨는다.
+- **분할선**: 지도와 사이드바 사이의 틈을 끌면 사이드바 너비가 바뀌고 지도가 따라간다. 더블클릭(또는 `Home`)은 기본 크기, 방향키는 조금씩 조절한다. 놓으면 저장된다. 레이아웃 편집 중에는 숨는다.
 - **로그 화면**: 왼쪽 메뉴의 `로그`. GUI 가 켠 프로세스(브릿지, zone_manager, 로봇 bringup/map/순찰 노드)의 터미널 출력과 GUI 서버 자신의 로그를 `전체 | GUI 서버 | 프로세스별` 탭으로 본다. 레벨 필터(전체 / WARN 이상 / ERROR 만), 검색, 일시정지, 맨 아래 따라가기, 복사, 화면 지우기가 있고 탭에는 WARN/ERROR 개수가 표시된다. 서버는 소스마다 최근 1000줄을 메모리에만 두며(재시작하면 사라진다), 화면은 1초마다 새 줄만 받는다(`GET /api/logs?since=`). 레벨은 줄 내용(`[WARN]`, `[ERROR]`, `Traceback` 등)으로 추정한다. manager 만 볼 수 있다. 터미널에서 직접 켠 프로세스의 출력은 서버가 받을 수 없어 나오지 않는다.
-- **레이아웃 편집**: 왼쪽 메뉴의 `레이아웃 편집`을 누르면 지도, 사이드바, 명령 이력 패널이 점선 틀로 바뀐다. 틀 안을 끌면 이동, 가장자리나 모서리를 끌면 크기가 바뀐다(작업 영역을 24x20 칸으로 나눈 격자에 맞춘다, 최소 4x3칸, 영역 밖으로는 못 나간다). `완료`는 저장(브라우저 `localStorage`), `초기화`는 기본 배치, `취소`(또는 `Esc`)는 편집 전으로 되돌린다. 패널이 겹치면 최근에 만진 패널이 위에 온다. 상단 알람바(비상 정지)와 메뉴바는 옮길 수 없다. 860px 이하 좁은 화면에서는 세로로 쌓이고 편집 버튼이 없다.
+- **레이아웃 편집**: 왼쪽 메뉴의 `레이아웃 편집`을 누르면 지도와 사이드바 패널이 점선 틀로 바뀐다. 틀 안을 끌면 이동, 가장자리나 모서리를 끌면 크기가 바뀐다(작업 영역을 24x20 칸으로 나눈 격자에 맞춘다, 최소 4x3칸, 영역 밖으로는 못 나간다). `완료`는 저장(브라우저 `localStorage`), `초기화`는 기본 배치, `취소`(또는 `Esc`)는 편집 전으로 되돌린다. 패널이 겹치면 최근에 만진 패널이 위에 온다. 상단 알람바(비상 정지)와 메뉴바는 옮길 수 없다. 860px 이하 좁은 화면에서는 세로로 쌓이고 편집 버튼이 없다.
 - **구역 진입 대기**: `WAITING_ZONE` 이면 카드와 마커에 "구역 진입 대기 (P3)" 와 점유 중인 로봇, 마커에 빨간 점선 고리.
 - **오버레이 (LiDAR)**: 로봇별 체크박스. 켠 로봇만 서버가 `/scan` 을 구독한다. 로봇 이름 옆에 그리는 기준(`tf: 센서 프레임 …` 또는 `amcl 위치 + 보정 N°, tf 없음`)이 표시된다.
 - **수동 조작**: "수동 조작 켜기"를 체크하면 방향 버튼(또는 방향키/WASD)이 활성화되고 누르는 동안만 움직인다. 버튼을 뗌, 창이 포커스를 잃음, 탭이 숨겨짐, 연결 끊김, 체크 해제, 로봇 변경은 즉시 정지한다. 순찰 중·오프라인이면 체크박스가 비활성이다.

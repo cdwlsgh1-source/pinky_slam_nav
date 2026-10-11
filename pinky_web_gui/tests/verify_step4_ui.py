@@ -277,8 +277,8 @@ async def run(shot, zone_shot, scan_shot):
             await asyncio.sleep(0.8)
             cmds = api('GET', '/api/state')['commands']
             check('누른 횟수만큼 비상정지가 전송되고 이력에 남음', len([c for c in cmds[n0:] if c['cmd'] == 'estop' and c['robot'] == 'pinky1']) == 2, cmds[n0:])
-            check('이력 표에 "비상정지" 표시', await pg.js("[...document.querySelectorAll('#historyBody td.cmd')].some(td => td.textContent.startsWith('비상정지'))"))
-            check('알람바에 비상정지 전송 표시', await pg.js("document.getElementById('alarmList').textContent.includes('비상정지 전송')"))
+            check('알람바에 비상정지 전송 행이 표시됨 (이력 통합)', await pg.wait("[...document.querySelectorAll('#alarmBody tr[data-code=\"CMD_SENT\"] td.msg')].some(td => td.textContent.includes('Command `estop` sent to pinky1'))", 4))
+            check('하단 명령 이력 패널이 없음', await pg.js("!document.getElementById('panelHist') && !document.getElementById('historyBody')"))
             await pg.click_sel('#estopAll')
             await asyncio.sleep(0.8)
             cmds = api('GET', '/api/state')['commands']
@@ -308,17 +308,15 @@ async def run(shot, zone_shot, scan_shot):
             rect = lambda sel: pg.js(f"(() => {{ const r = document.querySelector('{sel}').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }})()")  # noqa: E731
             wsr = await rect('#workspace')
             cw, ch = wsr[2] / 24, wsr[3] / 20
-            m0, s0, h0 = await rect('#panelMap'), await rect('#panelSide'), await rect('#panelHist')
-            check('기본 배치: 사이드바가 오른쪽, 이력이 아래', s0[0] > m0[0] + m0[2] - 2 and h0[1] > m0[1] + m0[3] - 2 and abs(h0[2] - (wsr[2] - 8)) < 2, (m0, s0, h0))
+            m0, s0 = await rect('#panelMap'), await rect('#panelSide')
+            check('기본 배치: 사이드바가 오른쪽, 지도·사이드바가 작업 영역 전체 높이', s0[0] > m0[0] + m0[2] - 2 and abs(m0[3] - (wsr[3] - 8)) < 2 and abs(s0[3] - (wsr[3] - 8)) < 2, (m0, s0, wsr))
             check('편집 전에는 편집 오버레이가 보이지 않음', await pg.js("getComputedStyle(document.querySelector('.edit-overlay')).display") == 'none')
             # ---- 분할선 (편집 모드 없이 경계를 끌어 크기 조절) ----
             side_w = lambda: pg.js("document.getElementById('panelSide').getBoundingClientRect().width")  # noqa: E731
             map_w = lambda: pg.js("document.getElementById('mapCanvas').getBoundingClientRect().width")  # noqa: E731
-            hist_h = lambda: pg.js("document.getElementById('panelHist').getBoundingClientRect().height")  # noqa: E731
-            map_h = lambda: pg.js("document.getElementById('mapCanvas').getBoundingClientRect().height")  # noqa: E731
             center = lambda i: pg.js(f"(() => {{ const r = document.getElementById('{i}').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }})()")  # noqa: E731
-            check('기본 배치에서 분할선 2개가 보임', await pg.js("!document.getElementById('splitV').hidden && !document.getElementById('splitH').hidden"))
-            sw0, mw0, hh0, mh0 = await side_w(), await map_w(), await hist_h(), await map_h()
+            check('기본 배치에서 세로 분할선만 보임 (가로 분할선은 이력 패널과 함께 없어짐)', await pg.js("!document.getElementById('splitV').hidden && !document.getElementById('splitH')"))
+            sw0, mw0 = await side_w(), await map_w()
             vx, vy = await center('splitV')
             await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=vx, y=vy, button='left', clickCount=1)
             for dx in (-40, -90, -140):
@@ -335,21 +333,13 @@ async def run(shot, zone_shot, scan_shot):
             await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=vx + 1500, y=vy, button='left', clickCount=1)
             await asyncio.sleep(0.3)
             check('너무 작게 끌어도 사이드바 최소 너비(4칸)에서 멈춤', 4 * cw - 10 <= await side_w() <= 4 * cw + 1, (await side_w(), cw))
-            hx, hy = await center('splitH')
-            await pg.call('Input.dispatchMouseEvent', type='mousePressed', x=hx, y=hy, button='left', clickCount=1)
-            for dy in (-30, -80, -120):
-                await pg.call('Input.dispatchMouseEvent', type='mouseMoved', x=hx, y=hy + dy, button='left')
-            await pg.call('Input.dispatchMouseEvent', type='mouseReleased', x=hx, y=hy - 120, button='left', clickCount=1)
-            await asyncio.sleep(0.4)
-            hh1, mh1 = await hist_h(), await map_h()
-            check('가로 분할선을 위로 끌면 이력이 높아지고 지도가 낮아짐', abs((hh1 - hh0) - 120) < 6 and mh1 < mh0 - 80, (hh0, hh1, mh0, mh1))
             await pg.call('Page.navigate', url=BASE + '/')
             check('새로고침 뒤 다시 로드', await pg.wait("app.cfg && app.meta && app.wsUp", 15))
             await asyncio.sleep(0.5)
-            check('분할선으로 바꾼 크기가 새로고침 뒤에도 유지', abs(await hist_h() - hh1) < 2 and 4 * cw - 10 <= await side_w() <= 4 * cw + 1)
-            await pg.js("document.getElementById('splitV').dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); document.getElementById('splitH').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
+            check('분할선으로 바꾼 크기가 새로고침 뒤에도 유지', 4 * cw - 10 <= await side_w() <= 4 * cw + 1)
+            await pg.js("document.getElementById('splitV').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
             await asyncio.sleep(0.3)
-            check('더블클릭하면 기본 크기로 돌아감', abs(await side_w() - sw0) < 2 and abs(await hist_h() - hh0) < 2, (await side_w(), sw0, await hist_h(), hh0))
+            check('더블클릭하면 기본 크기로 돌아감', abs(await side_w() - sw0) < 2, (await side_w(), sw0))
             await pg.js("document.getElementById('splitV').focus()")
             await pg.call('Input.dispatchKeyEvent', type='rawKeyDown', key='ArrowLeft', windowsVirtualKeyCode=37)
             await pg.call('Input.dispatchKeyEvent', type='keyUp', key='ArrowLeft', windowsVirtualKeyCode=37)
@@ -358,7 +348,7 @@ async def run(shot, zone_shot, scan_shot):
             await pg.js("document.getElementById('splitV').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
             await asyncio.sleep(0.2)
             await pg.click_sel('#layoutEditBtn')
-            check('편집 모드에서는 분할선이 숨겨짐', await pg.js("document.getElementById('splitV').hidden && document.getElementById('splitH').hidden"))
+            check('편집 모드에서는 분할선이 숨겨짐', await pg.js("document.getElementById('splitV').hidden"))
             await pg.click_sel('#layoutCancel')
             check('편집을 취소하면 분할선이 다시 보임', await pg.js("!document.getElementById('splitV').hidden"))
             await pg.click_sel('#layoutEditBtn')
@@ -385,8 +375,8 @@ async def run(shot, zone_shot, scan_shot):
             check('패널은 작업 영역 밖으로 나가지 않음', m1[1] + m1[3] <= wsr[1] + wsr[3] + 1, (m1, wsr))
             # 너무 작게 줄여도 최소 크기 (겹친 패널이 모서리를 가리지 않게 먼저 초기화)
             await pg.click_sel('#layoutReset')
-            await drag('#panelHist', -1300, -600, grab=lambda r: (r[0] + r[2] - 4, r[1] + r[3] - 4))
-            h1 = await rect('#panelHist')
+            await drag('#panelSide', -1300, -600, grab=lambda r: (r[0] + r[2] - 4, r[1] + r[3] - 4))
+            h1 = await rect('#panelSide')
             check('최소 크기(4x3칸) 아래로는 줄지 않음', abs(h1[2] - (4 * cw - 8)) < 2 and abs(h1[3] - (3 * ch - 8)) < 2, h1)
             # 완료하면 저장되고 새로고침해도 유지
             lay = await pg.js("JSON.stringify(app.layout.rects)")
@@ -408,7 +398,7 @@ async def run(shot, zone_shot, scan_shot):
             await pg.click_sel('#layoutEditBtn')
             await pg.click_sel('#layoutReset')
             await pg.click_sel('#layoutDone')
-            check('초기화하면 기본 배치', await pg.js("JSON.stringify(app.layout.rects)") == json.dumps({"map": {"x": 0, "y": 0, "w": 18, "h": 16}, "side": {"x": 18, "y": 0, "w": 6, "h": 16}, "hist": {"x": 0, "y": 16, "w": 24, "h": 4}}, separators=(',', ':')))
+            check('초기화하면 기본 배치', await pg.js("JSON.stringify(app.layout.rects)") == json.dumps({"map": {"x": 0, "y": 0, "w": 18, "h": 20}, "side": {"x": 18, "y": 0, "w": 6, "h": 20}}, separators=(',', ':')))
             check('편집 모드에서도 상단 비상 정지가 보이고 눌림', await pg.js("document.getElementById('estopAll').getBoundingClientRect().height") > 0)
             await pg.wait("app.zoneCfg && app.plans && app.motion", 8)
 

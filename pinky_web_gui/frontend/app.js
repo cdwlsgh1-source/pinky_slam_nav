@@ -6,7 +6,8 @@ const OFFLINE_COLOR = '#8a8a8a';
 const MARKER_R = 9;          // 마커 반지름 (화면 px, 확대해도 일정)
 const MIN_ZOOM_RATIO = 0.5;  // 맞춤 배율 대비 최소 배율
 const MAX_SCALE = 60;
-const MAX_ALARMS = 4;
+const ALARM_KEEP = 500;      // 알람바가 메모리에 두는 최대 행 수 (서버도 상한을 두고 자른다)
+const ALARM_INFO_KEY = 'pinky.alarminfo.v1';  // info 행 표시 여부 (브라우저별 편의 설정)
 
 const el = (id) => document.getElementById(id);
 document.addEventListener('themechange', () => { if (typeof draw === 'function') draw(); }); // theme.js: 지도 배경/글자색은 CSS 변수라 다시 그린다
@@ -30,14 +31,15 @@ const app = {
   wsUp: false,
   clicks: [],   // {x, y}
   hover: null,
-  alarms: [],
+  alarms: [],         // 알람바 행. 서버가 만든 알람(snapshot.alarms, WS alarm)과 브라우저 전용 알람(local: true)을 함께 둔다
+  showInfo: true,     // 알람바에 info 행(명령 전송 기록 등)을 보일지
   dirtyCards: true,
   fitted: false,
   showGrid: true,
   cfg: null,          // /api/commands/config (로봇별 허용 지점, 홈, 대기, 지점 좌표, 임계 시간)
   routes: {},         // 로봇 id -> 경로 이름 목록 (goto 로 보낼 지점들)
   routeTarget: null,  // 지도에서 포인트를 클릭하면 경로가 추가되는 로봇
-  history: [],        // 명령 이력, 최신이 앞 (서버가 보낸 command 이벤트로 갱신)
+  history: [],        // 명령 이력, 최신이 앞 (서버가 보낸 command 이벤트로 갱신). 알람바로 통합한 뒤에는 화면에 그리지 않고 검증 스크립트가 읽는다
   locks: {},          // 'id:cmd' -> 연타 방지 해제 시각(ms)
   me: null,           // /api/me: {auth, role, procs_allowed, procs_configured}. role 이 manager 일 때만 명령·수동 조작·프로세스 제어 버튼이 켜진다
   procs: null,        // 서버가 보낸 프로세스 상태 {enabled, procs:[...], sequence}
@@ -47,23 +49,67 @@ const POINT_HIT_R = 14;      // 포인트 클릭 판정 반경 (화면 px)
 const BTN_LOCK_MS = 1000;    // FR3-7: 같은 버튼 연타 방지
 
 // ---------- 유틸 ----------
-const hhmmss = () => new Date().toTimeString().slice(0, 8);
 const isManager = () => !!app.me && app.me.role === 'manager';
 function normAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 
-function addAlarm(level, text) {
-  app.alarms.unshift({ level, text, t: hhmmss() });
-  app.alarms.length = Math.min(app.alarms.length, MAX_ALARMS);
-  const ul = el('alarmList');
-  ul.replaceChildren();
-  for (const a of app.alarms) {
-    const li = document.createElement('li');
-    li.className = a.level;
-    const t = document.createElement('time'); t.textContent = a.t;
-    li.append(t, document.createTextNode(a.text));
-    ul.appendChild(li);
+// ---------- 알람바 ----------
+// 서버가 만든 알람과 서버가 알 수 없는 브라우저 전용 알람(연결 끊김, 로드 실패, 화면 안내)을 한 목록으로 보여 준다.
+// 브라우저 전용 알람은 id 가 'local-N' 이고 시각은 이 브라우저의 시계다 (서버 알람은 서버 시각 epoch).
+const clock = (t) => new Date(t * 1000).toTimeString().slice(0, 8);   // 24시간제 HH:MM:SS
+const STATE_LABEL = { active: 'Active', cleared: 'Cleared', acked: 'Acknowledged', event: '-' };
+const LOCAL_LEVEL = { ok: 'info', warn: 'L', bad: 'H' };   // 옛 addAlarm 의 ok/warn/bad 를 알람 레벨로
+let localAlarmSeq = 0;
+
+function loadShowInfo() { try { return localStorage.getItem(ALARM_INFO_KEY) !== '0'; } catch (e) { return true; } }
+function saveShowInfo(v) { try { localStorage.setItem(ALARM_INFO_KEY, v ? '1' : '0'); } catch (e) { /* 저장을 못 해도 이번 화면에서는 바뀐다 */ } }
+app.showInfo = loadShowInfo();
+
+function renderAlarms() {
+  const body = el('alarmBody');
+  body.replaceChildren();
+  const rows = app.alarms.filter((a) => app.showInfo || a.level !== 'info');
+  el('alarmEmpty').hidden = rows.length > 0;
+  for (const a of rows) {
+    const tr = document.createElement('tr');
+    tr.className = 'lvl-' + a.level + ' st-' + a.state;
+    tr.dataset.id = a.id; tr.dataset.code = a.code; tr.dataset.state = a.state;
+    const state = a.level === 'info' ? '-' : STATE_LABEL[a.state] + (a.state === 'cleared' && a.t_cleared ? ' ' + clock(a.t_cleared) : '');
+    const msg = a.text + (a.count > 1 ? ' ×' + a.count : '');
+    for (const [text, cls] of [[clock(a.t_last), 'time'], [a.robot || '-', 'robot'], [msg, 'msg'], [state, 'state']]) {
+      const td = document.createElement('td'); td.textContent = text; td.className = cls; tr.appendChild(td);
+    }
+    body.appendChild(tr);
   }
+  const btn = el('alarmInfoBtn');
+  btn.textContent = app.showInfo ? 'Hide info' : 'Show info';
+  btn.setAttribute('aria-pressed', String(app.showInfo));
 }
+
+function sortAlarms() {
+  app.alarms.sort((a, b) => b.t_last - a.t_last);   // 최근에 일어난 것이 위 (같으면 기존 순서 유지)
+  if (app.alarms.length > ALARM_KEEP) app.alarms.length = ALARM_KEEP;
+}
+
+function upsertAlarm(a) {
+  const i = app.alarms.findIndex((x) => x.id === a.id);
+  if (i >= 0) app.alarms[i] = a; else app.alarms.unshift(a);
+  sortAlarms();
+  renderAlarms();
+}
+
+// 브라우저 전용 알람. level 은 옛 호출처의 ok/warn/bad. extra 로 code/state 를 바꿀 수 있다.
+function addAlarm(level, text, extra) {
+  const t = Date.now() / 1000;
+  upsertAlarm(Object.assign({ id: 'local-' + (++localAlarmSeq), code: 'LOCAL', level: LOCAL_LEVEL[level] || 'L', robot: null, text, detail: '',
+    state: 'event', t_raised: t, t_last: t, t_cleared: null, count: 1, local: true }, extra));
+}
+
+function clearLocalAlarms(code) {
+  const t = Date.now() / 1000;
+  for (const a of app.alarms) if (a.local && a.code === code && a.state === 'active') { a.state = 'cleared'; a.t_cleared = t; }
+}
+
+el('alarmInfoBtn').onclick = () => { app.showInfo = !app.showInfo; saveShowInfo(app.showInfo); renderAlarms(); };
 
 function setChip(id, level, text) {
   const c = el(id); c.dataset.level = level; c.textContent = text;
@@ -524,7 +570,7 @@ async function sendCommand(id, cmd, points) {
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) showLogin('세션이 만료됐습니다. 다시 로그인하세요');
-    else if (!res.ok) addAlarm('bad', id + ' ' + cmd + ' 실패: ' + (data.error || res.status));
+    else if (!res.ok && res.status !== 400 && res.status !== 503) addAlarm('bad', id + ' ' + cmd + ' 실패: ' + (data.error || res.status));  // 400(거절)/503(전송 실패)은 서버가 알람을 만든다
   } catch (err) {
     addAlarm('bad', id + ' ' + cmd + ' 전송 오류: ' + err.message);
   }
@@ -586,31 +632,14 @@ function setupRoutePanel() {
 el('routeRobot').onchange = (e) => selectRouteTarget(e.target.value);
 el('routeClearBtn').onclick = () => { if (app.routeTarget) { app.routes[app.routeTarget] = []; renderRoute(); app.dirtyCards = true; } };
 
-// ---------- 명령 이력 ----------
-const hhmmssOf = (t) => new Date(t * 1000).toTimeString().slice(0, 8);
-
-function renderHistory() {
-  const body = el('historyBody');
-  body.replaceChildren();
-  el('historyEmpty').style.display = app.history.length ? 'none' : 'block';
-  for (const e of app.history) {
-    const tr = document.createElement('tr');
-    const cmdText = e.cmd === 'goto' ? 'goto ' + e.points.join(', ') : e.cmd === 'estop' ? '비상정지 (' + e.sent + ')' : e.cmd;
-    const res = PatrolView.resultLabel(e.result) + (e.detail ? ' · ' + e.detail : '');
-    for (const [text, cls] of [[hhmmssOf(e.time)], [e.robot], [cmdText, 'cmd'], [res, 'res-' + e.result]]) {
-      const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td);
-    }
-    body.appendChild(tr);
-  }
-}
-
-function upsertHistory(entry) {
+// ---------- 명령 이력 (데이터만) ----------
+// 알람바로 통합해서 화면에는 그리지 않는다. 서버의 command 이벤트는 검증 스크립트(verify_step3_ui.py)가 app.history 로 읽는다.
+function trackCommand(entry) {
   const i = app.history.findIndex((e) => e.id === entry.id);
   if (i >= 0) app.history[i] = entry; else app.history.unshift(entry);
   app.history.sort((a, b) => b.id - a.id);
   const max = app.cfg ? app.cfg.history_size : 50;
   if (app.history.length > max) app.history.length = max;
-  renderHistory();
 }
 
 // ---------- WebSocket ----------
@@ -633,7 +662,9 @@ function applySnapshot(msg) {
   setZone(msg.zone, msg.zone_info);
   if (msg.procs) setProcs(msg.procs);
   app.history = (msg.commands || []).slice().reverse();
-  renderHistory();
+  app.alarms = (msg.alarms || []).concat(app.alarms.filter((a) => a.local));   // 서버 알람은 접속할 때마다 통째로 바꾼다 (서버를 다시 켜면 id 가 처음부터 다시 매겨진다)
+  sortAlarms();
+  renderAlarms();
   setupRoutePanel();
   setupScanToggles(); setupDrive();
   app.dirtyCards = true;
@@ -656,7 +687,8 @@ function renderZoneChip() {
 function onMessage(msg) {
   if (msg.type === 'snapshot') { applySnapshot(msg); return; }
   if (msg.type === 'zone') { setZone(msg.status, msg); return; }
-  if (msg.type === 'command') { upsertHistory(msg.entry); return; }
+  if (msg.type === 'command') { trackCommand(msg.entry); return; }
+  if (msg.type === 'alarm') { upsertAlarm(msg.alarm); return; }
   if (msg.type === 'procs') { setProcs(msg); return; }
   if (msg.type === 'scan') {
     const s = app.scan[msg.robot];
@@ -668,8 +700,7 @@ function onMessage(msg) {
   const r = app.robots[msg.robot];
   if (!r) return;
   if (msg.field === 'online') {
-    r.online = !!msg.data;
-    addAlarm(r.online ? 'ok' : 'bad', msg.robot + (r.online ? ' 온라인' : ' 오프라인 (5초 이상 수신 없음)'));
+    r.online = !!msg.data;   // 온라인/오프라인 알람은 서버가 만든다 (WS alarm)
   } else if (msg.field === 'patrol') {
     const prevState = r.patrol && r.patrol.state;
     r.patrol = msg.data;
@@ -677,9 +708,6 @@ function onMessage(msg) {
     if (s !== prevState) r.stateSince = Date.now();
     // "응답 없음" 이 표시된 뒤에 상태가 바뀌면(늦은 응답이거나 다른 작업의 진행) 그 안내는 더 이상 맞지 않는다
     if (r.lastCommand && r.lastCommand.result === 'no_response') r.noRespDismissed = r.lastCommand.id;
-    if (s !== prevState && (s === 'FAILED' || s === 'RETRY' || s === 'STOPPED')) {
-      addAlarm(s === 'STOPPED' ? 'warn' : 'bad', msg.robot + ' ' + s + (msg.data.detail ? ': ' + (PatrolView.failReason(msg.data.detail) || msg.data.detail) : ''));
-    }
   } else if (msg.field === 'last_command') {
     r.lastCommand = msg.data;
   } else if (msg.field === 'last_task') {
@@ -700,7 +728,7 @@ function connect() {
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
   sock = ws;
   ws.onopen = () => {
-    if (attempt > 0) addAlarm('ok', '서버에 다시 연결됨');
+    if (attempt > 0) { clearLocalAlarms('SERVER_DISCONNECTED'); addAlarm('ok', 'Server reconnected', { code: 'SERVER_RECONNECTED' }); }
     attempt = 0; app.wsUp = true; setChip('connChip', 'ok', '연결됨');
     // 서버는 연결이 끊기면 이 화면의 LiDAR 구독을 지운다. 켜 둔 토글은 다시 요청한다
     for (const [rid, s] of Object.entries(app.scan)) if (s.on) sendWs({ type: 'scan', robot: rid, on: true });
@@ -708,7 +736,7 @@ function connect() {
   ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch (err) { console.error('메시지 처리 오류', err); } };
   ws.onclose = () => {
     driveHalt();  // 연결이 끊기면 서버도 0 속도를 보내지만, 화면에서도 즉시 조작을 멈춘다
-    if (app.wsUp || attempt === 0) addAlarm('bad', '서버 연결 끊김');
+    if (app.wsUp || attempt === 0) addAlarm('bad', 'Server disconnected', { code: 'SERVER_DISCONNECTED', state: 'active' });
     app.wsUp = false; setChip('connChip', 'bad', '연결 끊김');
     attempt += 1;
     checkSession();  // 인증이 켜져 있고 세션이 사라졌다면(만료, 서버 재시작) 로그인 화면을 띄운다
@@ -823,11 +851,8 @@ async function estop(id) {
   const who = id || '모두';
   try {
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const data = await res.json().catch(() => ({}));
-    const items = data.results || [data];
-    const errs = items.flatMap((r) => (r.errors || []).map((e) => (r.robot ? r.robot + ': ' : '') + e));
-    if (!res.ok) addAlarm('bad', who + ' 비상정지 실패: ' + (errs.join(' / ') || data.error || res.status));
-    else addAlarm(errs.length ? 'warn' : 'ok', who + ' 비상정지 전송' + (errs.length ? ' (일부 실패: ' + errs.join(' / ') + ')' : ' (stop + 0 속도)'));
+    // 비상정지 결과 알람(E-STOP failed / partially sent)은 서버가 만든다 (WS alarm). 서버가 처리하지 못한 응답(401, 403 …)만 여기서 알린다
+    if (!res.ok && res.status !== 503) addAlarm('bad', who + ' 비상정지 요청이 처리되지 않았습니다 (HTTP ' + res.status + ')');
   } catch (err) {
     addAlarm('bad', who + ' 비상정지 전송 오류: ' + err.message);
   }
@@ -966,7 +991,7 @@ el('driveEnable').onchange = () => { driveHalt(); el('driveMsg').textContent = '
 el('driveRobot').onchange = () => { driveHalt(); el('driveMsg').textContent = ''; renderDrivePanel(); };
 
 // ---------- 패널 크기 조절 ----------
-// 사이드바 너비(SIDE)와 명령 이력 높이(HIST)를 끌어서 바꾼다. 값은 .app 의 CSS 변수(--side-w, --hist-h)이고 브라우저에 저장한다.
+// 지도와 사이드바 사이의 분할선을 끌어서 사이드바 너비를 바꾼다 (아래 '분할선'). 값은 브라우저에 저장한다.
 // 지도 캔버스는 ResizeObserver 로 따라간다. 사이드바의 각 섹션은 제목을 눌러 접고 펼친다.
 // ---------- 로그인 ----------
 function renderAuth() {
@@ -1202,17 +1227,16 @@ function setupTabs() {
 }
 
 // ---------- 레이아웃 편집 ----------
-// 지도, 사이드바, 명령 이력 세 패널을 작업 영역 안의 24x20 격자에 놓는다. 좌표는 격자 칸 수(정수)라서 창 크기가 바뀌어도 비율이 유지된다.
+// 지도와 사이드바 두 패널을 작업 영역 안의 24x20 격자에 놓는다. 좌표는 격자 칸 수(정수)라서 창 크기가 바뀌어도 비율이 유지된다.
 // 알람바(비상 정지)와 메뉴바는 항상 보여야 해서 배치 대상이 아니다.
-const LAYOUT_KEY = 'pinky.layout.v2';
+const LAYOUT_KEY = 'pinky.layout.v3';   // v3: 하단 명령 이력 패널을 없앴다 (v2 저장값은 읽지 않고 기본 배치로 돌아간다)
 const GRID = { cols: 24, rows: 20 };
 const MIN_SIZE = { w: 4, h: 3 };
 const DEFAULT_RECTS = {
-  map: { x: 0, y: 0, w: 18, h: 16 },
-  side: { x: 18, y: 0, w: 6, h: 16 },
-  hist: { x: 0, y: 16, w: 24, h: 4 },
+  map: { x: 0, y: 0, w: 18, h: 20 },
+  side: { x: 18, y: 0, w: 6, h: 20 },
 };
-const PANEL_ELS = { map: 'panelMap', side: 'panelSide', hist: 'panelHist' };
+const PANEL_ELS = { map: 'panelMap', side: 'panelSide' };
 const cloneRects = (r) => JSON.parse(JSON.stringify(r));
 
 function validRect(r) {
@@ -1305,23 +1329,17 @@ setupTabs();
 setupLayoutEdit();
 
 // ---------- 분할선: 편집 모드 없이 경계를 끌어 크기 조절 ----------
-// 지도|사이드바 사이(세로선)와 지도·사이드바|이력 사이(가로선). 두 패널이 맞닿아 있을 때만 보인다 (자유 배치로 떨어뜨렸다면 숨김).
+// 지도|사이드바 사이(세로선). 두 패널이 맞닿아 있을 때만 보인다 (자유 배치로 떨어뜨렸다면 숨김).
 // 더블클릭은 기본 배치, 방향키는 한 칸의 1/2 씩(Shift 는 2칸). 놓을 때 저장한다.
 function splitGeom() {
-  const m = lay.rects.map, sd = lay.rects.side, h = lay.rects.hist, E = 0.01;
+  const m = lay.rects.map, sd = lay.rects.side, E = 0.01;
   const v = Math.abs(m.x + m.w - sd.x) < E && Math.abs(m.y - sd.y) < E && Math.abs(m.h - sd.h) < E;
-  const hz = Math.abs(Math.max(m.y + m.h, sd.y + sd.h) - h.y) < E && Math.abs(m.y + m.h - (sd.y + sd.h)) < E && Math.abs(h.x) < E && Math.abs(h.w - GRID.cols) < E;
-  return { v, h: hz };
+  return { v };
 }
 function moveSplitV(b) {   // b: 새 경계 x (칸)
   const m = lay.rects.map, sd = lay.rects.side, right = sd.x + sd.w;
   b = clamp(b, m.x + MIN_SIZE.w, right - MIN_SIZE.w);
   m.w = b - m.x; sd.x = b; sd.w = right - b;
-}
-function moveSplitH(b) {   // b: 새 경계 y (칸)
-  const m = lay.rects.map, sd = lay.rects.side, h = lay.rects.hist, bottom = h.y + h.h;
-  b = clamp(b, Math.max(m.y, sd.y) + MIN_SIZE.h, bottom - MIN_SIZE.h);
-  m.h = b - m.y; sd.h = b - sd.y; h.y = b; h.h = bottom - b;
 }
 function setupSplits() {
   const ws = el('workspace');
@@ -1329,9 +1347,6 @@ function setupSplits() {
     { id: 'splitV', cls: 'split-v', key: 'v', label: '지도와 사이드바 경계 (끌어서 너비 조절, 더블클릭: 초기화)', axis: 'x',
       get: () => lay.rects.side.x, set: moveSplitV,
       place: (st) => { const sd = lay.rects.side; st.left = `calc(${sd.x / GRID.cols * 100}% - 5px)`; st.top = `${sd.y / GRID.rows * 100}%`; st.height = `${sd.h / GRID.rows * 100}%`; } },
-    { id: 'splitH', cls: 'split-h', key: 'h', label: '지도와 명령 이력 경계 (끌어서 높이 조절, 더블클릭: 초기화)', axis: 'y',
-      get: () => lay.rects.hist.y, set: moveSplitH,
-      place: (st) => { st.top = `calc(${lay.rects.hist.y / GRID.rows * 100}% - 5px)`; st.left = '0'; st.width = '100%'; } },
   ];
   const nodes = defs.map((d) => {
     const n = document.createElement('div');
@@ -1356,14 +1371,14 @@ function setupSplits() {
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) n.addEventListener(ev, finish);
     n.addEventListener('dblclick', () => {
       if (lay.editing) return;
-      d.set(DEFAULT_RECTS[d.key === 'v' ? 'side' : 'hist'][d.key === 'v' ? 'x' : 'y']);
+      d.set(DEFAULT_RECTS.side.x);
       applyLayout(); placeSplits(); saveLayout(lay.rects);
     });
     n.addEventListener('keydown', (e) => {
       const step = e.shiftKey ? 2 : 0.5;
       const dec = d.axis === 'x' ? 'ArrowLeft' : 'ArrowUp', inc = d.axis === 'x' ? 'ArrowRight' : 'ArrowDown';
       if (e.key === dec) d.set(d.get() - step); else if (e.key === inc) d.set(d.get() + step);
-      else if (e.key === 'Home') d.set(DEFAULT_RECTS[d.key === 'v' ? 'side' : 'hist'][d.key === 'v' ? 'x' : 'y']); else return;
+      else if (e.key === 'Home') d.set(DEFAULT_RECTS.side.x); else return;
       e.preventDefault(); applyLayout(); placeSplits(); saveLayout(lay.rects);
     });
     return { d, n };

@@ -262,6 +262,52 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(인증이 켜져 있을 때만 true, `--no-auth` 면 false)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
 
+## 6-7. 웹 GUI 알람 (알람바 Step A1)
+
+알람바(화면 위)에 보이는 사건은 **서버가 만든다** (`backend/alarms.py` 의 `AlarmManager`). 접속한 모든 화면이 같은 알람을 보고, 하단 명령 이력 패널은 알람바에 통합돼 없어졌다. 서버가 알 수 없는 사건(WS 끊김, 지도·설정 불러오기 실패, 화면 안내, 요청이 서버에 닿지 못함)은 브라우저가 같은 목록에 직접 추가한다 (id 가 `local-N`, 시각은 브라우저 시계).
+
+**알람 객체** (WS `alarm` 의 `alarm`, `snapshot.alarms` 의 원소, `GET /api/alarms`):
+
+| 필드 | 뜻 |
+|---|---|
+| `id` | 서버가 매기는 정수 (서버를 다시 켜면 1 부터 다시) |
+| `code` | 알람 종류 (아래 표) |
+| `level` | `HH` > `H` > `L` > `LL` > `info` (높을수록 심각) |
+| `robot` | 로봇 id 또는 `null` |
+| `text` | 알람바에 보이는 문구 (코드별 템플릿, 한영 혼용 가능) |
+| `detail` | `{reason}` 원문 (한국어 오류 원인 그대로) |
+| `state` | `active`(조건 지속) \| `cleared`(조건 사라짐) \| `acked`(확인됨, Step A2 에서 사용). `info` 는 해소 개념이 없어 만들 때부터 `cleared` |
+| `t_raised`, `t_last`, `t_cleared` | 처음 발생, 마지막 발생, 해소 시각 (서버 epoch 초, 해소 전엔 `t_cleared` 가 `null`) |
+| `count` | 같은 `code`+`robot` 의 active 알람이 반복된 횟수. 새 행이 아니라 이 값만 오른다 (`t_last` 와 `text` 도 갱신) |
+
+**메시지와 REST**
+
+| 방향 | 내용 |
+|---|---|
+| 서버 → 브라우저 WS | `{"type":"alarm","alarm":{…}}` 생성과 변경(count 증가, 해소)마다 하나. 같은 `id` 는 교체한다 |
+| 서버 → 브라우저 WS | `snapshot` 의 `alarms`: 현재 보관 중인 알람 전체(최신이 앞). 접속(재접속)할 때마다 받으며, 브라우저는 서버 알람을 이것으로 통째로 바꾼다 |
+| `GET /api/alarms` | operator 이상. `{alarms:[…]}` (snapshot 과 같은 값) |
+| (mock 전용) `POST /api/mock/robot/{id}/silent` `{on}` | 그 로봇이 신호를 끊어 online 타임아웃 뒤 오프라인이 된다 |
+| (mock 전용) `POST /api/mock/no-subscriber` `{on}` | patrol_cmd/cmd_vel 구독자가 없는 것처럼 명령 전송이 실패한다 |
+| (mock 전용) `POST /api/mock/robot/{id}/patrol` `{state, detail}` | 임의 patrol 상태를 주입한다 (GUI 로는 못 만드는 FAILED/RETRY 시험용) |
+
+**알람 코드** (기본값은 `backend/alarms.py` 의 `CATALOG`. 레벨은 잠정이며 PRD 결정 9 가 확정되면 이 표만 바뀐다):
+
+| code | 레벨 | 언제 만들고 언제 해소하나 |
+|---|---|---|
+| `ESTOP_FAILED` | HH | 비상정지의 patrol stop 과 cmd_vel 0 이 **둘 다** 못 나감. 이후 비상정지가 성공하면 해소 |
+| `ESTOP_PARTIAL` | HH | 둘 중 하나만 나감. 이후 비상정지가 성공하면 해소 |
+| `CMD_SEND_FAILED` | H | 명령 발행 실패 (구독자 없음 등, HTTP 503). 같은 로봇에 새 명령이 나가면 해소 |
+| `ROBOT_OFFLINE` | H | 로봇 online 이 꺼짐 (`StateStore` 타임아웃). 신호가 돌아오면 해소. 서버 시작 뒤 한 번도 신호가 없던 로봇은 만들지 않는다 |
+| `PATROL_FAILED` / `PATROL_RETRY` | H | `patrol_status` 의 `FAILED` / `RETRY`. 다른 상태로 바뀌면 해소 (한 로봇에 순찰 알람은 하나만 active) |
+| `CMD_REJECTED` | L | 백엔드 검증이 명령을 거절 (HTTP 400). 로봇 응답이 오거나 새 명령이 나가면 해소 |
+| `CMD_NO_RESPONSE` | L | 명령 뒤 `no_response_sec` 안에 `patrol_status` 가 안 바뀜. 응답이 오거나 새 명령이 나가면 해소. 비상정지는 무응답이어도 만들지 않는다 |
+| `PATROL_STOPPED` | LL | `patrol_status` 가 `STOPPED`. 다른 상태로 바뀌면 해소 |
+| `CMD_SENT`, `ROBOT_ONLINE` | info | 기록용 행 (명령 전송 성공 · 비상정지 성공은 `cmd` 가 `estop` · 로봇이 온라인이 됨). 소리·확인 대상이 아니고 알람바 `Hide info` 로 숨길 수 있다 |
+| `SERVER_DISCONNECTED`, `LOAD_FAILED` | H, LL | **브라우저 전용** (서버는 만들지 않는다). 연결 끊김은 재접속하면 해소하고 `Server reconnected`(info) 를 남긴다 |
+
+**`command` 이벤트** (기존, 이력 패널이 없어진 뒤에도 서버는 계속 보낸다): WS `{"type":"command","entry":{id, time, robot, cmd, points, sent, result, detail}}`, `snapshot.commands`(오래된 것이 앞). `result` 는 `sent` \| `acknowledged` \| `no_response` \| `rejected` \| `failed`. 화면은 그리지 않고 브라우저의 `app.history` 와 카드의 진행 문구(`last_command`/`last_task`)가 쓴다.
+
 ## 7. 확인 필요 목록
 
 - (프로세스 제어) pinky1/pinky2 의 bringup/map/순찰 노드 명령, source 경로, SSH 주소(`192.168.45.20`/`.22`)는 `config/processes.yaml` 에 채워져 있지만 **로봇에서 실제로 실행해 확인하지 않았다** (`docs/step6_process_control_real_checklist.md`)

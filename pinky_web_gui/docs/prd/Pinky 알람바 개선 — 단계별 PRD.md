@@ -95,6 +95,19 @@
 - [ ] 알람 메시지 문구를 검사하는 기존 테스트(`test_commands.py` 등)가 새 알람 구조에서도 통과
 - [ ] 실제 로봇 확인은 사용자가 수행
 
+### Claude Code 프롬프트
+
+```text
+CLAUDE.md, docs/interfaces.md, docs/reference/known-pitfalls.md 를 먼저 읽고, backend/commands.py(CommandTracker), main.py(do_estop, full_snapshot), hub.py, frontend/app.js(addAlarm, renderHistory, upsertHistory)를 읽어줘. 기존 ROS 패키지는 수정하지 마.
+이 PRD 의 "Step A1" 기능 요구사항 표(FRA1-1~10)와 완료 기준, 0-6 아키텍처, 0-7 공통 원칙, 8절 문구를 그대로 따라 구현해줘. ACK/SIL, 소리, 카탈로그 편집은 만들지 마.
+1. backend/alarms.py(AlarmManager): 데이터 구조는 PRD 의 안을 따르고 시계는 주입 가능하게. 8-2절 코드/레벨/메시지 템플릿을 코드 기본값으로. 같은 code+robot 은 count 증가, 조건 해소 시 cleared, 비상정지 계열은 비활성 불가.
+2. 이벤트 원천 연결: CommandTracker 결과, do_estop 실패/부분 실패, 로봇 online 변화, patrol FAILED/RETRY/STOPPED. 서버 시각(epoch)만 사용.
+3. WS alarm 이벤트와 snapshot.alarms. 새 탭도 같은 알람을 본다.
+4. 프론트엔드: 알람바(Time/Robot/Message/State, 스크롤, info 행 필터), 하단 panelHist·renderHistory·upsertHistory·historyBody 제거, 레이아웃 키를 pinky.layout.v3 로 이전(구버전 무시). "Server disconnected" 는 브라우저 전용 알람으로 유지.
+5. docs/interfaces.md 에 알람 WS/REST 와 command 이벤트 구조 기록.
+6. 테스트: AlarmManager 단위 테스트, 기존 test_commands.py 통과, verify_step4_ui.py 의 #historyBody 검사를 알람바 기준으로 수정. ROS 검증은 ROS_DOMAIN_ID=77, ROS_LOCALHOST_ONLY=1 로만. mock 으로 구독자 없음·오프라인·FAILED 를 일으켜 새 탭 동일 표시 확인, headless Chrome 스크린샷. 완료 기준을 하나씩 실행한 결과 표를 보여줘. 실제 로봇 확인은 내가 한다.
+```
+
 ## Step A2. ACK / SIL
 ### 기능 요구사항
 | ID | 요구사항 |
@@ -110,6 +123,18 @@
 - [ ] 해소 알람 ACK → 두 브라우저 모두에서 사라짐, 활성 알람은 유지
 - [ ] SIL 후 새 알람이 오면 다시 소리가 남(수동 확인)
 - [ ] 권한 테스트(로그인 안 함 401)
+
+### Claude Code 프롬프트
+
+```text
+CLAUDE.md, docs/interfaces.md, 그리고 이 PRD 의 Step A1 구현물(backend/alarms.py, frontend/app.js 의 알람바)을 먼저 읽어줘. 기존 ROS 패키지는 수정하지 마.
+이 PRD 의 "Step A2" 기능 요구사항 표(FRA2-1~6)와 완료 기준, 0-7 공통 원칙 4번(권한), 7번(표시 언어)을 그대로 따라 구현해줘.
+1. backend/alarms.py: ack(id|전체, 계정, 시각) 추가. 해소된 알람만 숨김 처리하고 활성 알람은 acked_by/acked_at 만 기록. ACK 이력은 메모리 보관.
+2. POST /api/alarms/ack (operator 이상, 로그인 안 하면 401). 결과를 WS alarm 이벤트로 모든 화면에 브로드캐스트.
+3. 프론트엔드: 알람바에 ACK / SIL 버튼(툴팁은 8-1절 문구, 대상이 없으면 비활성). SIL 은 이 브라우저의 소리만 끄고 서버 상태는 바꾸지 않는다(결정 3). 새 알람이 오면 SIL 해제.
+4. docs/interfaces.md 에 ack API 와 WS 구조 추가.
+5. 단위 테스트(활성/해소 ACK, 권한 401)와 mock 으로 브라우저 2개 확인 절차. 완료 기준을 하나씩 실행해 결과 표로 보여줘. 실제 로봇 확인은 내가 한다.
+```
 
 ## Step A3. 알람 소리와 소리 설정
 ### 기능 요구사항
@@ -132,6 +157,18 @@
 - [ ] 파일을 지운 상태에서 합성음으로 대체되는지 확인
 - [ ] 자동재생 차단 안내 문구 확인
 
+### Claude Code 프롬프트
+
+```text
+CLAUDE.md 와 이 PRD 의 Step A2 구현물(알람바, ACK/SIL)을 먼저 읽어줘.
+이 PRD 의 "Step A3" 기능 요구사항 표(FRA3-1~10)와 완료 기준, 결정 9·10·11 을 따라 구현해줘. 결정 10 은 1차안(config/sounds/ 에 파일을 직접 두고 서버가 서빙)으로 하고 GUI 업로드는 만들지 마.
+1. frontend/alarmsound.js: 반복·중단·SIL·파일 실패 시 합성음 대체 로직은 DOM 과 Audio 에 의존하지 않는 순수 함수로 분리하고, Web Audio 합성 비프음(레벨별 다른 음)과 파일 재생(mp3/wav/ogg)은 얇은 어댑터로 둔다.
+2. GET /api/alarms/sounds(파일 목록)과 /sounds/<파일> 정적 서빙. 경로 탈출과 허용 확장자·크기 검증.
+3. 소리 설정 화면(문구는 8-4절 영문): 전체 on/off, 음량, 레벨별 on/off, 사운드 파일 선택, 반복 주기, 레벨별 Test/Stop. 시험 재생은 알람을 만들지 않는다. localStorage 키 pinky.alarmsound.v1, try/catch.
+4. 자동재생 차단 시 알람바에 "Click to enable alarm sound" 표시.
+5. 순수 함수 단위 테스트(node 또는 pytest). 완료 기준을 하나씩 확인한 표를 보여줘. 실제 소리 확인은 내가 한다.
+```
+
 ## Step A4. 알람 카탈로그 목록(읽기 전용)
 ### 기능 요구사항
 | ID | 요구사항 |
@@ -150,6 +187,17 @@
 - [ ] 누락 검사 테스트 통과, 화면 스크린샷
 - [ ] `docs/interfaces.md` 갱신
 
+### Claude Code 프롬프트
+
+```text
+CLAUDE.md 와 docs/interfaces.md, 이 PRD 의 Step A1~A3 구현물(backend/alarms.py)을 먼저 읽어줘.
+이 PRD 의 "Step A4" 기능 요구사항 표(FRA4-1~6)와 완료 기준, 결정 7(왼쪽 메뉴 새 항목)을 따라 구현해줘. 이 단계에서는 수정 기능을 만들지 마(읽기 전용).
+1. config/alarms.yaml 과 backend/config.py 의 기존 _load_xxx 패턴으로 카탈로그 로더. 8-2절 템플릿을 기본값으로 하되, 현재 코드(commands.py, main.py, ros_bridge.py, 프론트엔드 addAlarm)가 실제로 내는 알람을 grep 으로 전수 조사해서 빠진 것은 추가하고 근거 파일을 보고해줘.
+2. GET /api/alarms/catalog, GET /api/alarms/history (operator 이상).
+3. 프론트엔드: 왼쪽 메뉴 'Alarms' 항목, 카탈로그 표(ID, Name, Condition, Message, Level, Sound, Enabled, Last raised, Count)와 Alarm history 보기. 로그 화면과 같은 방식으로 전환.
+4. 누락 검사 테스트(코드가 내는 모든 code 가 카탈로그에 있는지), docs/interfaces.md 갱신, headless Chrome 스크린샷.
+```
+
 ## Step A5. 카탈로그 수정·Enable/Disable (mngr)
 ### 기능 요구사항
 | ID | 요구사항 |
@@ -166,6 +214,18 @@
 - [ ] 권한·검증·되돌리기 테스트, 서버 재시작 후 유지
 - [ ] operator 로 수정 시도 시 403
 - [ ] 끈 알람이 mock 에서 발생해도 표시되지 않음
+
+### Claude Code 프롬프트
+
+```text
+CLAUDE.md, backend/auth.py, backend/alarms.py, backend/logstore 계열(로그 저장소)과 이 PRD 의 Step A4 구현물을 먼저 읽어줘.
+이 PRD 의 "Step A5" 기능 요구사항 표(FRA5-1~7)와 완료 기준, 0-7 공통 원칙 3·4번을 따라 구현해줘.
+1. 수정 내용은 config/alarms.local.yaml(override)에만 저장하고 config/alarms.yaml 은 건드리지 않는다. Reset to default 제공. 서버 재시작 후 유지.
+2. PUT /api/alarms/catalog/{code}, POST .../reset: manager(mngr)만, operator 는 403. 문구 길이(글자 수), 허용 레벨, 허용 자리표시자({robot},{cmd},{reason} 등)만 통과. HH 비상정지 계열은 끄기·레벨 변경을 서버가 거부.
+3. 비활성·수정 내역을 누가 언제 바꿨는지 로그 화면 저장소에 남긴다.
+4. 프론트엔드: manager 에게만 편집 UI(Enable 토글, 메시지, 레벨, 소리, 반복 주기, Save/Cancel/Reset), 오류 문구는 영문(FRA5-7). 알람별 사운드 지정(결정 11)도 이 단계에서 추가.
+5. 끈 알람이 mock 에서 발생해도 표시·재생되지 않는 테스트, 권한·검증·되돌리기 테스트. 완료 기준 결과를 표로 보여줘.
+```
 
 ## Step A6. GUI 전체 영문화
 ### 범위
@@ -189,6 +249,19 @@
 - [ ] 모든 화면에서 문구 잘림·줄바꿈 깨짐이 없음(스크린샷, 폭 860px 이하 포함)
 - [ ] 갱신한 기존 테스트 전부 통과
 - [ ] 실제 로봇 확인은 사용자가 수행
+
+### Claude Code 프롬프트
+
+```text
+CLAUDE.md 와 docs/interfaces.md 를 먼저 읽고, frontend/ 의 app.js, index.html, patrolview.js, procview.js, addrobot.js, zoneview.js, logview.js 와 backend 의 main.py, commands.py, auth.py, procs.py 를 읽어줘. 기존 ROS 패키지는 수정하지 마.
+이 PRD 의 "Step A6" 범위·기능 요구사항 표(FRA6-1~8)와 완료 기준, 0-7 공통 원칙 7번, 결정 12~14 를 따라 GUI 전체를 영문으로 바꿔줘. 코드 주석·docstring 은 한국어 유지, 알람 메시지 문구와 {reason} 은 한영 혼용 허용.
+1. 먼저 한글이 남은 사용자 대면 문구 전수 목록과 영문 대응표를 docs/ 에 만들어 보여줘(구현 전에 내가 검토한다).
+2. 승인 후 frontend/strings.js 에 문구를 모으고 화면 코드는 키로 참조. 서버가 돌려주는 detail/error 도 영문으로.
+3. <html lang="en">, 시각은 24시간제. 한글 폰트 스택은 유지(알람 메시지용).
+4. 영문으로 길어진 문구가 왼쪽 메뉴·로봇 카드 버튼·시스템 패널에서 잘리거나 줄바꿈이 깨지지 않게 조정.
+5. 한국어를 검사하는 기존 테스트·verify_*_ui.py 를 영문 기준으로 갱신하고 전부 통과시킨다. README.md 와 docs/interfaces.md 의 화면 이름 설명도 갱신(본문은 한국어).
+6. 화면별 headless Chrome 스크린샷(폭 860px 이하 포함)으로 한글 잔존·잘림 확인. 완료 기준 결과를 표로 보여줘.
+```
 
 ## 4. 요구사항 요약
 G1→A1, G2→A2, G3→A3, G4→A4·A5, G5→A1, G6→A6(알람 화면은 각 Step 의 FR 포함).
@@ -246,6 +319,7 @@ A1 → A6(영문화, 결정 14) → A2 → A3 → A4 → A5. A1 은 데이터 �
 | CMD_SEND_FAILED | H | Command `{cmd}` could not be sent to {robot}: {reason} |
 | ROBOT_OFFLINE | H | {robot} is offline |
 | PATROL_FAILED | H | Patrol failed on {robot}: {reason} |
+| PATROL_RETRY | H | Patrol retrying on {robot}: {reason} (A1 구현 때 추가) |
 | SERVER_DISCONNECTED | H | Server disconnected |
 | CMD_REJECTED | L | Command `{cmd}` rejected for {robot}: {reason} |
 | CMD_NO_RESPONSE | L | No response from {robot} to `{cmd}` |

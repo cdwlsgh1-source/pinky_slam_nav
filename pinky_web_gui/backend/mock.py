@@ -20,6 +20,7 @@ import math
 import time
 from collections import deque
 
+from .commands import CommandUnavailable
 from .map_loader import load_grid
 from .scan import compact, rot_z
 
@@ -63,6 +64,8 @@ class MockFleet:
         self.cmd_vel_log = deque(maxlen=1000)                    # (시각, rid, 선속도, 각속도). 테스트가 읽는다
         self.cmd_log = deque(maxlen=200)                         # (시각, rid, patrol_cmd 문자열)
         self._scan_on = set()
+        self._silent = set()           # 알람 검증용: 여기 든 로봇은 pose/battery 를 내지 않아 online 타임아웃으로 오프라인이 된다
+        self._no_subscriber = False    # 알람 검증용: True 면 patrol_cmd/cmd_vel 을 받는 구독자가 없는 것처럼 동작한다
         self._grid = None
         if cfg.map_yaml:
             try:
@@ -75,6 +78,8 @@ class MockFleet:
         """`_cmd_cb` 와 같은 규칙으로 처리한다. 반드시 이벤트 루프 스레드에서 호출한다."""
         if rid not in self._running:
             raise KeyError(rid)
+        if self._no_subscriber:
+            raise CommandUnavailable(f'/{rid}/patrol_cmd 를 받는 구독자가 없습니다 (mock)')
         self.cmd_log.append((time.time(), rid, data))
         raw = data.strip()
         cmd = raw.lower()
@@ -113,9 +118,26 @@ class MockFleet:
     def publish_twist(self, rid, linear, angular):
         if rid not in self._vel:
             raise KeyError(rid)
+        if self._no_subscriber:
+            return False
         self.cmd_vel_log.append((time.time(), rid, float(linear), float(angular)))
         self._vel[rid] = (float(linear), float(angular))
         return True
+
+    # ---- 알람 검증용 훅 (main.py 의 /api/mock/* 가 부른다) ----
+    def set_silent(self, rid, on):
+        if rid not in self._vel:
+            raise KeyError(rid)
+        (self._silent.add if on else self._silent.discard)(rid)
+
+    def set_no_subscriber(self, on):
+        self._no_subscriber = bool(on)
+
+    def inject_patrol(self, rid, state, detail=''):
+        """임의 patrol 상태를 그대로 흘려 보낸다 (백엔드 검증 때문에 GUI 로는 만들 수 없는 FAILED/RETRY 를 시험하기 위해)."""
+        if rid not in self._vel:
+            raise KeyError(rid)
+        self._status(rid, state, -1, detail)
 
     def scan_enable(self, rid, on):
         if rid not in self._vel:
@@ -356,11 +378,15 @@ class MockFleet:
                 if tick % scan_every == 0 and self._scan_on:
                     self._emit_scans()
                 for rid in self._robots:
+                    if rid in self._silent:
+                        continue
                     x, y, yaw = self._pose[rid]
                     self._queue.put_nowait(('pose', rid, x, y, yaw))
                 if tick % POSE_HZ == 0:  # 1초마다 배터리
                     t = time.monotonic() - t0
                     for k, rid in enumerate(self._robots):
+                        if rid in self._silent:
+                            continue
                         pct = max(5.0, 82.0 - 0.05 * t - 3.0 * k)
                         self._queue.put_nowait(('battery', rid, pct, 6.0 + 2.0 * pct / 100))
                 tick += 1

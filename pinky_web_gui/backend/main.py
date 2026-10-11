@@ -13,8 +13,9 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from .alarms import AlarmManager
 from .auth import COOKIE, MANAGER, SESSION_SEC, OPERATOR, Auth
-from .commands import CommandRejected, CommandTracker, CommandUnavailable, FAILED, validate
+from .commands import CommandRejected, CommandTracker, CommandUnavailable, FAILED, NO_RESPONSE, validate
 from .config import Config, load_config
 from .hub import Hub
 from .logstore import GUI, LogStore, StoreHandler
@@ -57,6 +58,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
     auth = auth if auth is not None else Auth()   # 고정 계정 (backend/auth.py). 끄려면 Auth.disabled() 또는 --no-auth
     store = StateStore(cfg.robots, cfg.zone_status_topic, cfg.online_timeout_sec, cfg.pose_max_hz)
     tracker = CommandTracker(cfg.robots, cfg.command_history_size, cfg.no_response_sec)
+    alarms = AlarmManager()   # 알람바에 보이는 모든 사건. 서버가 만들어 모든 화면에 같은 알람을 보낸다
     hub = Hub()
     bg = {}  # lifespan 에서 만든 리소스 (commander: publish_cmd(rid, data) 를 가진 RosBridge 또는 MockFleet)
     client_ids = itertools.count(1)
@@ -107,6 +109,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             r['last_command'] = tracker.last_command(rid)
             r['last_task'] = tracker.last_task(rid)
         snap['commands'] = tracker.history()
+        snap['alarms'] = alarms.snapshot()
         snap['procs'] = procs_message()
         return snap
 
@@ -159,8 +162,14 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
                 # 로봇이 명령에 맞는 상태(start/goto -> STARTING, stop -> STOPPED)를 내면 응답한 것이다
                 for m in msgs:
                     if m['type'] == 'robot_update' and m['field'] == 'patrol':
-                        hub.broadcast(tracker.on_patrol(m['robot'], (m['data'] or {}).get('state')))
+                        data = m['data'] or {}
+                        acked = tracker.on_patrol(m['robot'], data.get('state'))
+                        hub.broadcast(acked)
+                        if acked:
+                            hub.broadcast(alarms.command_acknowledged(m['robot']))
+                        hub.broadcast(alarms.patrol(m['robot'], data.get('state'), data.get('detail') or ''))
                     if m['type'] == 'robot_update' and m['field'] == 'online':
+                        hub.broadcast(alarms.robot_online(m['robot'], bool(m['data'])))
                         bg['procs_dirty'] = True  # 시스템 패널의 '토픽 없음' 배지는 로봇 online 에서 계산한다 (바뀌면 다시 보낸다)
             except Exception:
                 log.exception('이벤트 처리 실패(무시하고 계속): %r', event)
@@ -171,9 +180,16 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             try:
                 ticks = store.tick()
                 hub.broadcast(ticks)
-                if any(m.get('type') == 'robot_update' and m.get('field') == 'online' for m in ticks):
-                    bg['procs_dirty'] = True  # 타임아웃으로 offline 이 된 경우도 시스템 패널 배지를 갱신
-                hub.broadcast(tracker.tick())
+                for m in ticks:
+                    if m.get('type') == 'robot_update' and m.get('field') == 'online':
+                        bg['procs_dirty'] = True  # 타임아웃으로 offline 이 된 경우도 시스템 패널 배지를 갱신
+                        hub.broadcast(alarms.robot_online(m['robot'], bool(m['data'])))
+                timeouts = tracker.tick()
+                hub.broadcast(timeouts)
+                for m in timeouts:  # estop 은 무응답이어도 result 가 바뀌지 않으므로 여기에 걸리지 않는다
+                    e = m.get('entry') if m.get('type') == 'command' else None
+                    if e and e['result'] == NO_RESPONSE:
+                        hub.broadcast(alarms.command_no_response(e['robot'], e['cmd'], e['points']))
                 if bg['procs_dirty']:
                     bg['procs_dirty'] = False
                     hub.broadcast([procs_message()])
@@ -370,6 +386,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         sent = f'stop + cmd_vel 0 ({cfg.motion.estop_burst_sec:g}초)'
         _, msgs = tracker.estop(rid, sent, patrol_ok, vel_ok, ' · '.join(errors))
         hub.broadcast(msgs)
+        hub.broadcast(alarms.estop(rid, patrol_ok, vel_ok, ' · '.join(errors)))
         (log.warning if errors else log.info)('%s 비상정지: patrol_stop=%s cmd_vel=%s %s', rid, patrol_ok, vel_ok, errors)
         return {'robot': rid, 'patrol_stop': patrol_ok, 'cmd_vel': vel_ok, 'errors': errors}
 
@@ -416,6 +433,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         except CommandRejected as e:
             _, msgs = tracker.rejected(robot_id, cmd_raw, pts_raw, str(e))
             hub.broadcast(msgs)
+            hub.broadcast(alarms.command_rejected(robot_id, cmd_raw, pts_raw if isinstance(pts_raw, list) else None, str(e)))
             log.warning('%s 명령 거절: %s (cmd=%r points=%r)', robot_id, e, cmd_raw, pts_raw)
             return JSONResponse({'accepted': False, 'error': str(e)}, status_code=400)
         commander = bg.get('commander')
@@ -426,11 +444,13 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         except CommandUnavailable as e:
             entry, msgs = tracker.rejected(robot_id, cmd, points, str(e), result=FAILED)
             hub.broadcast(msgs)
+            hub.broadcast(alarms.command_send_failed(robot_id, cmd, points, str(e)))
             log.error('%s 명령 발행 실패: %s', robot_id, e)
             return JSONResponse({'accepted': False, 'error': str(e)}, status_code=503)
         # 발행과 기록 사이에 await 가 없으므로, 로봇의 응답 이벤트는 이 기록 뒤에 처리된다
         entry, msgs = tracker.sent(robot_id, cmd, points, sent)
         hub.broadcast(msgs)
+        hub.broadcast(alarms.command_sent(robot_id, cmd, points))
         log.info('%s 명령 발행: %s', robot_id, sent)
         return {'accepted': True, 'sent': sent, 'id': entry['id']}
 
@@ -560,7 +580,56 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             return JSONResponse({'error': 'map not available'}, status_code=503)
         return Response(map_png, media_type='image/png')
 
+    @app.get('/api/alarms')
+    async def api_alarms():
+        """현재 알람 목록 (최신이 앞). 접속한 화면은 WS snapshot.alarms 로 같은 값을 받는다."""
+        return {'alarms': alarms.snapshot()}
+
     if mock:
+        def mock_body_error(body, *need):
+            return None if isinstance(body, dict) and all(k in body for k in need) else JSONResponse(
+                {'accepted': False, 'error': f'JSON 본문에 {list(need)} 가 필요합니다'}, status_code=400)
+
+        @app.post('/api/mock/robot/{robot_id}/silent')
+        async def mock_silent(robot_id: str, request: Request):
+            """(mock 전용, 알람 검증) {on: bool}. on 이면 이 로봇이 신호를 내지 않아 online 타임아웃 뒤 오프라인이 된다."""
+            denied = guard_post(request)
+            if denied:
+                return denied
+            body = await request.json()
+            if (err := mock_body_error(body, 'on')):
+                return err
+            if robot_id not in cfg.robot_settings:
+                return JSONResponse({'accepted': False, 'error': f'알 수 없는 로봇입니다: {robot_id}'}, status_code=404)
+            bg['commander'].set_silent(robot_id, bool(body['on']))
+            return {'accepted': True}
+
+        @app.post('/api/mock/no-subscriber')
+        async def mock_no_subscriber(request: Request):
+            """(mock 전용, 알람 검증) {on: bool}. on 이면 patrol_cmd/cmd_vel 구독자가 없는 것처럼 명령 전송이 실패한다."""
+            denied = guard_post(request)
+            if denied:
+                return denied
+            body = await request.json()
+            if (err := mock_body_error(body, 'on')):
+                return err
+            bg['commander'].set_no_subscriber(bool(body['on']))
+            return {'accepted': True}
+
+        @app.post('/api/mock/robot/{robot_id}/patrol')
+        async def mock_patrol(robot_id: str, request: Request):
+            """(mock 전용, 알람 검증) {state, detail}. 임의 patrol 상태(FAILED/RETRY/STOPPED …)를 로봇이 낸 것처럼 흘려 보낸다."""
+            denied = guard_post(request)
+            if denied:
+                return denied
+            body = await request.json()
+            if (err := mock_body_error(body, 'state')):
+                return err
+            if robot_id not in cfg.robot_settings:
+                return JSONResponse({'accepted': False, 'error': f'알 수 없는 로봇입니다: {robot_id}'}, status_code=404)
+            bg['commander'].inject_patrol(robot_id, str(body['state']), str(body.get('detail', '')))
+            return {'accepted': True}
+
         @app.get('/api/mock/cmd_vel')
         async def mock_cmd_vel():
             """(mock 전용) 로봇이 받은 cmd_vel 과 patrol_cmd 기록. 실제 로봇에서는 ros2 topic echo 로 본다."""
