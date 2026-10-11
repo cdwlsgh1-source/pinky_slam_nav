@@ -2,5 +2,8 @@
 __pycache__/
 *.pyc
 
+# 알람 이력 (실행 중 생기는 기록. mock 은 data/alarms-mock)
+data/
+
 # 세션 요약 등 작업 메모 (문서가 아님)
 docs/notes/*.txt

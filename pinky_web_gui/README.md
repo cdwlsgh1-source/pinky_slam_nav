@@ -246,7 +246,7 @@ frontend/addrobot.js   [로봇 추가] 안내 팝업
 frontend/zoneview.js   구역 배지 문구, 구역 진입 대기 문구, 경로 오버레이 계산 (순수 함수)
 frontend/patrolview.js 배지 색, 버튼 활성 조건, 진행 문구 등 명령 패널 화면 로직 (순수 함수)
 frontend/mapmath.js    월드<->픽셀 변환과 occupancy 판정 (변환식이 있는 유일한 곳)
-tests/                 단위 테스트, verify_transform.py (변환식 대조), verify_step{3,4}_mock.py (API/WS), verify_step{3,4}_ui.py, verify_alarm_ui.py (headless Chrome 화면), test_alarms.py (알람 규칙), verify_step4_ros.py (격리 도메인), test_auth/procs/logstore.py 와 verify_proc_{mock,ui}.py (인증, 프로세스 제어)
+tests/                 단위 테스트, verify_transform.py (변환식 대조), verify_step{3,4}_mock.py (API/WS), verify_step{3,4}_ui.py, verify_alarm_ui.py (headless Chrome 화면), test_alarms.py (알람 규칙), test_alarmlog.py (이력 파일 100건 분할), verify_step4_ros.py (격리 도메인), test_auth/procs/logstore.py 와 verify_proc_{mock,ui}.py (인증, 프로세스 제어)
 ```
 
 스레드 모델: rclpy 콜백(별도 스레드)은 값을 뽑아 `loop.call_soon_threadsafe` 로 `asyncio.Queue` 에 넣는다. 큐를 소비하는 단일 태스크만 `StateStore` 를 바꾸고 브로드캐스트하므로 락이 없다. mock 도 같은 큐로 같은 이벤트를 넣는다.
@@ -285,7 +285,7 @@ Step 3 에서 카드에 `순찰 시작`/`정지`/`경로 이동` 버튼과 상�
 
 스크린샷: `docs/step4_screenshot.png`(구역 점유와 진입 대기), `docs/step4_lidar.png`(LiDAR 점이 벽 위에 겹침), 구역 영역 초안 확인용 `docs/step4_zone_draft.png`.
 
-- **알람바** (Step A1): 화면 위 칩·비상 정지 아래의 표 `Time / Robot / Message / State`. 알람은 서버가 만들어 모든 접속 화면이 같은 것을 본다 (명령 거절·전송 실패·무응답, 비상정지 실패, 로봇 오프라인, 순찰 FAILED/RETRY/STOPPED). 같은 알람이 반복되면 `×N`, 조건이 사라지면 `Cleared HH:MM:SS` 로 바뀌며 새로 열린 화면에도 보인다. 명령 전송 성공 같은 기록 행(info)은 `Hide info` 로 숨기고(브라우저에 저장), 목록은 영역 안에서 스크롤한다. 코드·레벨·해소 조건은 `docs/interfaces.md` 6-7절. 하단 명령 이력 패널은 없어졌고 레이아웃 저장 키는 `pinky.layout.v3` 로 올랐다 (이전 배치는 무시하고 기본 배치로 돌아간다).
+- **알람바** (Step A1): 화면 위 칩·비상 정지 아래의 표 `Time / Robot / Message / State`. 알람은 서버가 만들어 모든 접속 화면이 같은 것을 본다 (명령 거절·전송 실패·무응답, 비상정지 실패, 로봇 오프라인, 순찰 FAILED/RETRY/STOPPED). 같은 알람이 반복되면 `×N`, 조건이 사라지면 `Cleared HH:MM:SS` 로 바뀌며 새로 열린 화면에도 보인다. 명령 전송 성공 같은 기록 행(info)은 `Hide info` 로 숨기고(브라우저에 저장), 목록은 영역 안에서 스크롤한다. 코드·레벨·해소 조건은 `docs/interfaces.md` 6-7절. 하단 명령 이력 패널은 없어졌고 레이아웃 저장 키는 `pinky.layout.v3` 로 올랐다 (이전 배치는 무시하고 기본 배치로 돌아간다). 목록 아래 손잡이로 높이를 끌어 조절하고(더블클릭: 기본), 화면에는 최근 100건만 두지만 **모든 알람 이벤트는 `data/alarms/alarms_<저장날짜>_<번호>.jsonl` 에 100건씩 나눠 저장**된다 (규칙은 `docs/interfaces.md` 6-7절 "알람 이력 파일"). 서버를 재시작하면 화면의 알람은 비지만 이력 파일은 남는다.
 - **상단**: 구역 배지("구역: 비어 있음" / "구역: pinky1 점유 중 (42초)" / "구역: 상태 수신 전")와 **항상 보이는 `비상 정지`**(모든 로봇). 로봇별 `비상 정지`는 사이드바 **로봇** 탭의 카드 안에 있다(카드의 `순찰 정지`는 순찰 stop 명령이고 비상 정지와 다르다). 확인 팝업도 연타 잠금도 없고 오프라인 로봇과 operator 도 누를 수 있다. 좁은 화면에서는 상단이 고정된다.
 - **지도**: 구역 사각형(점유 중이면 빨갛게, 초안이면 점선과 모서리 좌표), 진입·이탈 문(로봇 색 마름모), 작업 중인 로봇의 경로 선(**기본 꺼짐**, 지도 오른쪽 위의 `경로` 버튼으로 켠다. 지난 구간은 연하게, 현재 목표로 가는 구간은 굵게, 남은 구간은 점선, 현재 목표는 고리). `goto` 는 `lastTask.points` + `patrol_status` 의 `waypoint`/`detail` 로, `start` 는 `start_route` + `waypoint` 번호로 그린다. 지점 사이의 선은 직선이 아니라 **지도의 벽을 피하는 최단 경로 추정**이다 (`backend/planner.py`, `GET /api/plans`, 벽에서 `planner_inflation_m` 0.08 m 이상 떨어진 칸만 지난다). 이것은 지도 점유 격자 위의 A* 계산이며 **Nav2 의 실제 경로가 아니다** (`/plan` 토픽은 브리지에 없다). 실제 경로는 코스트맵 팽창과 평활화 때문에 조금 다를 수 있다. mock 로봇도 같은 경로를 따라 움직이고 수동 조작으로 벽 안에 들어가지 않는다. `waypoint` 가 -1 이면 강조하지 않는다 (예외: `RETURNING` 은 `detail` 이 홈 이름이라 홈을 강조). 경로 선은 이 서버가 기억하는 명령(`last_task`)만 그린다 (서버를 껐다 켠 뒤 CLI 로 시작한 작업은 그리지 않는다).
 - **사이드바 탭**: 사이드바는 `로봇` | `시스템` | `경로` | `조작`(LiDAR 오버레이와 수동 조작) | `좌표` 탭으로 나뉜다. 선택한 탭은 브라우저(`localStorage`)에 저장되고 방향키로도 옮길 수 있다.

@@ -6,8 +6,12 @@ const OFFLINE_COLOR = '#8a8a8a';
 const MARKER_R = 9;          // 마커 반지름 (화면 px, 확대해도 일정)
 const MIN_ZOOM_RATIO = 0.5;  // 맞춤 배율 대비 최소 배율
 const MAX_SCALE = 60;
-const ALARM_KEEP = 500;      // 알람바가 메모리에 두는 최대 행 수 (서버도 상한을 두고 자른다)
+const ALARM_KEEP = 100;      // 알람바(모니터링 화면)에 두는 최대 행 수. 서버도 같은 100건으로 자르며, 잘린 알람은 서버의 이력 파일에 남아 있다
 const ALARM_INFO_KEY = 'pinky.alarminfo.v1';  // info 행 표시 여부 (브라우저별 편의 설정)
+const ALARM_LOCAL_KEY = 'pinky.alarmlocal.v1';  // 브라우저 전용 알람 (서버가 모르는 것이라 새로고침해도 남기려고 저장한다)
+const ALARM_LOCAL_KEEP = 100;
+const ALARM_H_KEY = 'pinky.alarmheight.v1';     // 알람 목록 높이(px)
+const ALARM_H = { def: 132, min: 56 };          // 기본/최소 높이. 최대는 화면 높이의 60%
 
 const el = (id) => document.getElementById(id);
 document.addEventListener('themechange', () => { if (typeof draw === 'function') draw(); }); // theme.js: 지도 배경/글자색은 CSS 변수라 다시 그린다
@@ -60,9 +64,22 @@ const STATE_LABEL = { active: 'Active', cleared: 'Cleared', acked: 'Acknowledged
 const LOCAL_LEVEL = { ok: 'info', warn: 'L', bad: 'H' };   // 옛 addAlarm 의 ok/warn/bad 를 알람 레벨로
 let localAlarmSeq = 0;
 
+function loadLocalAlarms() {
+  try {
+    const v = JSON.parse(localStorage.getItem(ALARM_LOCAL_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((a) => a && typeof a.id === 'string' && a.id.startsWith('local-') && typeof a.text === 'string' && Number.isFinite(a.t_last)) : [];
+  } catch (e) { return []; }
+}
+function saveLocalAlarms() {
+  try { localStorage.setItem(ALARM_LOCAL_KEY, JSON.stringify(app.alarms.filter((a) => a.local).slice(0, ALARM_LOCAL_KEEP))); } catch (e) { /* 저장을 못 해도 이번 화면에서는 보인다 */ }
+}
+
 function loadShowInfo() { try { return localStorage.getItem(ALARM_INFO_KEY) !== '0'; } catch (e) { return true; } }
 function saveShowInfo(v) { try { localStorage.setItem(ALARM_INFO_KEY, v ? '1' : '0'); } catch (e) { /* 저장을 못 해도 이번 화면에서는 바뀐다 */ } }
 app.showInfo = loadShowInfo();
+// 새로고침 전에 있던 브라우저 전용 알람을 되살린다. 끊김(active)은 이 화면이 다시 열렸다는 것 자체가 재연결이므로 해소로 바꾼다
+app.alarms = loadLocalAlarms().map((a) => (a.state === 'active' ? Object.assign(a, { state: 'cleared', t_cleared: a.t_cleared || Date.now() / 1000 }) : a));
+localAlarmSeq = app.alarms.reduce((m, a) => Math.max(m, parseInt(a.id.slice(6), 10) || 0), 0);
 
 function renderAlarms() {
   const body = el('alarmBody');
@@ -95,6 +112,7 @@ function upsertAlarm(a) {
   if (i >= 0) app.alarms[i] = a; else app.alarms.unshift(a);
   sortAlarms();
   renderAlarms();
+  if (a.local) saveLocalAlarms();
 }
 
 // 브라우저 전용 알람. level 은 옛 호출처의 ok/warn/bad. extra 로 code/state 를 바꿀 수 있다.
@@ -107,7 +125,44 @@ function addAlarm(level, text, extra) {
 function clearLocalAlarms(code) {
   const t = Date.now() / 1000;
   for (const a of app.alarms) if (a.local && a.code === code && a.state === 'active') { a.state = 'cleared'; a.t_cleared = t; }
+  renderAlarms(); saveLocalAlarms();
 }
+
+// 알람 목록 높이: 아래 손잡이를 끌어 늘리고 줄인다 (더블클릭: 기본, 방향키: 조금씩). 놓으면 저장하고, 내용이 넘치면 안에서 스크롤한다
+const alarmMaxH = () => Math.max(ALARM_H.min, Math.round(window.innerHeight * 0.6));
+function loadAlarmH() { try { const v = Number(localStorage.getItem(ALARM_H_KEY)); return Number.isFinite(v) && v >= ALARM_H.min ? v : ALARM_H.def; } catch (e) { return ALARM_H.def; } }
+function setAlarmH(px, save) {
+  const h = Math.max(ALARM_H.min, Math.min(alarmMaxH(), Math.round(px)));
+  el('alarmScroll').style.maxHeight = h + 'px';
+  el('alarmGrip').setAttribute('aria-valuenow', String(h));
+  app.alarmH = h;
+  if (save) { try { localStorage.setItem(ALARM_H_KEY, String(h)); } catch (e) { /* 무시 */ } }
+}
+(function setupAlarmGrip() {
+  const grip = el('alarmGrip');
+  let drag = null;
+  const done = () => { if (!drag) return; drag = null; grip.classList.remove('active'); document.body.classList.remove('resizing', 'row'); setAlarmH(app.alarmH, true); };
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    e.preventDefault(); grip.setPointerCapture(e.pointerId);
+    drag = { y: e.clientY, h: app.alarmH };
+    grip.classList.add('active'); document.body.classList.add('resizing', 'row');
+  });
+  grip.addEventListener('pointermove', (e) => { if (drag) setAlarmH(drag.h + (e.clientY - drag.y), false); });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) grip.addEventListener(ev, done);
+  grip.addEventListener('dblclick', () => setAlarmH(ALARM_H.def, true));
+  grip.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 80 : 24;
+    if (e.key === 'ArrowDown') setAlarmH(app.alarmH + step, true);
+    else if (e.key === 'ArrowUp') setAlarmH(app.alarmH - step, true);
+    else if (e.key === 'Home') setAlarmH(ALARM_H.def, true);
+    else return;
+    e.preventDefault();
+  });
+  window.addEventListener('resize', () => setAlarmH(app.alarmH, false));   // 창이 작아지면 최대(화면의 60%)에 맞춰 줄인다
+  setAlarmH(loadAlarmH(), false);
+})();
+renderAlarms();   // 새로고침 전의 브라우저 전용 알람을 서버 스냅샷이 오기 전에도 보여 준다
 
 el('alarmInfoBtn').onclick = () => { app.showInfo = !app.showInfo; saveShowInfo(app.showInfo); renderAlarms(); };
 

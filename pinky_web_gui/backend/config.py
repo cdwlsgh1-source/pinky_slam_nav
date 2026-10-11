@@ -25,6 +25,8 @@ class Config:
     zone: 'ZoneConfig' = None          # 위험 구역 영역 (zone_yaml 이 없으면 None)
     motion: 'MotionConfig' = None      # 비상정지/수동 조작/LiDAR 설정
     processes: tuple = ()              # ProcSpec 목록 (processes_yaml 이 없으면 비어 있다). 목록 순서가 '전체 시작' 순서다
+    alarm_history_dir: str = None      # 알람 이력 파일 폴더 (robots.yaml 위치 기준 상대 경로를 절대 경로로 바꿔 둔다). None 이면 저장하지 않는다
+    alarm_history_chunk: int = 100     # 이력 파일 하나에 담는 알람 이벤트 수
 
 
 # 수동 조작 하드 상한. 설정 파일이 실수로 큰 값을 적어도 이 이상은 나가지 않는다.
@@ -403,7 +405,13 @@ def load_config(path=None) -> Config:
             raise ValueError(f'{path}: {key} 는 0보다 커야 한다')
         return v
 
+    alarm_dir = raw.get('alarm_history_dir')
+    if alarm_dir is not None:
+        if not isinstance(alarm_dir, str) or not alarm_dir:
+            raise ValueError(f'{path}: alarm_history_dir 은 문자열 경로여야 한다')
+        alarm_dir = str((path.resolve().parent / alarm_dir).resolve())
+
     return Config(tuple(robots), zone_topic, timeout, hz, map_yaml, points, robot_settings,
                   positive('max_goto_points', 10, int), positive('no_response_sec', 5.0, float),
                   positive('starting_notice_sec', 5.0, float), positive('command_history_size', 50, int),
-                  inflation, zone, motion, processes)
+                  inflation, zone, motion, processes, alarm_dir, positive('alarm_history_chunk', 100, int))

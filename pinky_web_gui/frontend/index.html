@@ -45,12 +45,16 @@
     <!-- 알람 목록: 서버가 만든 알람과 브라우저 전용 알람을 한 표로 (app.js renderAlarms). 비상정지 명령 이력도 여기 통합됐다 -->
     <div class="alarm-list" id="alarmList">
       <div class="alarm-tools"><button type="button" id="alarmInfoBtn" aria-pressed="true" title="Show or hide info rows (sent commands, robot online)">Hide info</button></div>
-      <div class="alarm-scroll">
-        <table>
-          <thead><tr><th>Time</th><th>Robot</th><th>Message</th><th>State</th></tr></thead>
-          <tbody id="alarmBody"></tbody>
-        </table>
-        <p class="hint" id="alarmEmpty">No alarms</p>
+      <div class="alarm-main">
+        <div class="alarm-scroll" id="alarmScroll" tabindex="0" aria-label="Alarm list">
+          <table>
+            <thead><tr><th>Time</th><th>Robot</th><th>Message</th><th>State</th></tr></thead>
+            <tbody id="alarmBody"></tbody>
+          </table>
+          <p class="hint" id="alarmEmpty">No alarms</p>
+        </div>
+        <div class="alarm-grip" id="alarmGrip" tabindex="0" role="separator" aria-orientation="horizontal" aria-valuemin="56"
+             title="Drag to resize the alarm list (double-click: reset, Up/Down keys: adjust)"></div>
       </div>
     </div>
   </header>

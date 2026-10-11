@@ -28,6 +28,13 @@ no_response_sec: 5.0       # 명령 후 patrol_status 변화가 없으면 "응�
 starting_notice_sec: 5.0   # STARTING 이 이 시간을 넘기면 "시작 준비 중" 안내 (첫 작업의 초기 위치 보정)
 command_history_size: 50   # 명령 이력 보관 개수
 
+# 알람 이력 (알람바 Step A1+). 알람바에는 최근 100건만 보이지만 일어난 알람 이벤트(생김, 반복, 해소)는 모두 이 폴더에 파일로 남긴다.
+#   파일 이름에 저장 날짜가 들어간다: alarms_2026-10-11_001.jsonl. 한 파일에 alarm_history_chunk 건씩 담고, 차거나 날짜가 바뀌면 새 파일.
+#   robots.yaml 이 있는 폴더 기준 상대 경로. --mock 으로 띄우면 같은 이름 뒤에 -mock 을 붙인 폴더에 써서 실제 이력과 섞이지 않는다.
+#   파일은 자동으로 지우지 않는다 (용량이 커지면 오래된 것을 직접 지운다). 이 줄을 지우면 저장하지 않는다.
+alarm_history_dir: ../data/alarms
+alarm_history_chunk: 100
+
 # 로봇별 설정. 키는 robots 와 같아야 한다.
 #   goto_allowed : 백엔드가 허용하는 goto 지점. RED* (구역 문)는 넣을 수 없다 (노드가 문 경유와 락을 처리한다).
 #   home         : goto 완료 후 복귀하는 지점 (노드의 HOME_NAME)

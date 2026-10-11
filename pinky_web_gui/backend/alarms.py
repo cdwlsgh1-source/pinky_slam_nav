@@ -9,8 +9,10 @@ rclpy 와 무관한 순수 클래스이며 시계는 주입한다 (CommandTracke
 """
 import time
 
+MONITOR_SIZE = 100   # 알람바(모니터링 화면)에 두는 최대 알람 수. 잘려 나간 것도 이력 파일(alarmlog.py)에는 남아 있다
+
 HH, H, L, LL, INFO = 'HH', 'H', 'L', 'LL', 'info'
-LEVELS = (HH, H, L, LL, INFO)   # 심각도 순서 (높을수록 앞). PRD 결정 9 가 확정되면 이 표의 레벨만 바꾼다
+LEVELS = (HH, H, L, LL, INFO)   # 심각도 순서 (높을수록 앞). PRD 결정 9 로 확정
 
 ACTIVE, CLEARED, ACKED = 'active', 'cleared', 'acked'
 
@@ -60,8 +62,10 @@ def command_text(cmd, points=None):
 
 
 class AlarmManager:
-    def __init__(self, now=time.time, max_alarms=200):
+    def __init__(self, now=time.time, max_alarms=MONITOR_SIZE, sink=None):
+        """sink(event, alarm): 알람 이벤트(raised | repeated | cleared)마다 부른다 (이력 파일 저장용). 예외는 알람 동작에 영향을 주지 않는다."""
         self._now = now
+        self._sink = sink
         self._max = max(1, int(max_alarms))
         self._alarms = []     # 오래된 것이 앞. 새 알람은 뒤에 붙는다
         self._next_id = 1
@@ -83,12 +87,14 @@ class AlarmManager:
                     a['count'] += 1
                     a['t_last'] = t
                     a['text'], a['detail'] = text, reason
+                    self._emit('repeated', a)
                     return [self._msg(a)]
         a = {'id': self._next_id, 'code': code, 'level': level, 'robot': robot, 'text': text, 'detail': reason,
              'state': CLEARED if level == INFO else ACTIVE,   # info 는 해소 개념이 없는 기록 행이다
              't_raised': t, 't_last': t, 't_cleared': t if level == INFO else None, 'count': 1}
         self._next_id += 1
         self._alarms.append(a)
+        self._emit('raised', a)
         self._trim()
         return [self._msg(a)]
 
@@ -99,6 +105,7 @@ class AlarmManager:
         for a in self._alarms:
             if a['code'] == code and a['robot'] == robot and a['state'] == ACTIVE:
                 a['state'], a['t_cleared'] = CLEARED, t
+                self._emit('cleared', a)
                 msgs.append(self._msg(a))
         return msgs
 
@@ -111,6 +118,14 @@ class AlarmManager:
     def snapshot(self):
         """새 화면에 보낼 전체 알람 (최신이 앞)."""
         return [dict(a) for a in reversed(self._alarms)]
+
+    def _emit(self, event, a):
+        if self._sink is None:
+            return
+        try:
+            self._sink(event, dict(a))
+        except Exception:   # 이력 저장이 알람 표시를 막으면 안 된다
+            pass
 
     def _msg(self, a):
         return {'type': 'alarm', 'alarm': dict(a)}

@@ -10,6 +10,7 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
 
 | 알고 싶은 것 | 문서 |
 |---|---|
+| 알람바 (서버 알람 코드, 이력 파일 `data/alarms/`) | `docs/interfaces.md` 6-7절, 이력 한 줄의 필드·타입은 `docs/reference/alarm-history-format.md` |
 | 설치, 실행, 옵션, 화면 사용법, 인증·프로세스 제어 | `README.md` |
 | 토픽, 명령, 상태 JSON, API (사실의 단일 출처) | `docs/interfaces.md` |
 | 알려진 함정 (goto 검증, 무응답, pinky2 인덱스 불일치, 하드코딩 경로 …) | `docs/reference/known-pitfalls.md` |
