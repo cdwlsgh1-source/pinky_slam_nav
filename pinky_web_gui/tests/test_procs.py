@@ -432,7 +432,7 @@ def test_default_config_processes():
     assert ids == ['bridge', 'bringup_pinky1', 'bringup_pinky2', 'map_pinky1', 'map_pinky2', 'zone_manager', 'patrol_pinky1', 'patrol_pinky2']   # 사용자가 정한 전체 시작 순서
     assert {p.id for p in cfg.processes if p.restart_if_stalled} == {'bridge'}
     by = {p.id: p for p in cfg.processes}
-    assert by['bridge'].command == 'ros2 launch launch/bridges.launch.xml'   # pinky1, pinky2 브릿지를 launch 하나로
+    assert by['bridge'].command == 'ros2 launch domain_bridge bridges.launch.xml'   # pinky1, pinky2 브릿지를 launch 하나로
     assert by['bridge'].cwd.startswith('/') and not by['bridge'].cwd.startswith('/home/pinky') and '{repo}' not in by['bridge'].cwd   # PC 의 저장소 경로
     b1, m1 = by['bringup_pinky1'], by['map_pinky1']
     assert b1.command == 'ros2 launch pinky_bringup bringup_robot.launch.xml' and b1.confirm_stop and b1.stop_on_exit   # 서버 종료 시 로봇 쪽도 정지

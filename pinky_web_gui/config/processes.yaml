@@ -1,3 +1,4 @@
+# ================================================================================================================================
 # GUI 의 "시스템" 패널에서 켜고 끄는 프로세스 목록. 이 목록에 있는 것만 실행할 수 있다.
 # 목록 순서가 [전체 시작] 순서이고, [전체 정지] 는 반대 순서다 (도메인 브릿지 -> bringup -> map -> zone_manager -> 순찰 노드).
 #
@@ -12,6 +13,8 @@
 
 # 새 로봇(pinky3 등) 추가: GUI 왼쪽 메뉴바의 [로봇 추가] 팝업에서 이름, 도메인 ID, IP 를 넣으면 이 파일에 붙여 넣을 내용과 GUI 밖에서 할 일(브릿지, zone_manager, 순찰 노드, SSH 키)이 나온다.
 # 이 파일에는 실제로 쓰지 않는다: 로봇이 아직 없거나 지점(RED*)이 없으면 서버가 시작하지 못하고, [전체 시작] 이 그 로봇에서 멈추기 때문이다.
+# ================================================================================================================================
+
 defaults:
   local_source:
     - /opt/ros/jazzy/setup.bash
@@ -30,22 +33,27 @@ defaults:
     ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
 
 processes:
+
+  # ================================================================================================================================
   # ---- 1. 도메인 브릿지 (관제 PC) ----
-  # pinky1(20<->50) 과 pinky2(22<->50) 브릿지를 launch/bridges.launch.xml 하나로 같이 띄운다 (터미널의 ros2 launch 와 같다).
+  # pinky1(20<->50) 과 pinky2(22<->50) 브릿지를 domain_bridge 패키지의 bridges.launch.xml 하나로 같이 띄운다 (터미널의 ros2 launch 와 같다).
   # cwd 는 이 PC 의 저장소 경로다 (/home/pinky/... 는 로봇 경로라 PC 에 없다).
   # 브릿지를 먼저 켜면 로봇 토픽이 없을 때 구독이 기본 QoS(reliable)로 만들어져 best_effort 센서 토픽(/odom, /scan)이 안 넘어올 수 있다.
   # 그래서 [전체 시작] 은 bringup 이 켜진 뒤 로봇 토픽이 오는지 확인하고, 안 오면 restart_if_stalled 인 이 프로세스를 한 번 재시작한다.
+  # ================================================================================================================================
+
   - id: bridge
     group: "도메인 브릿지"
     label: 도메인 브릿지 (pinky1, pinky2)
     kind: local
     domain: 50
     cwd: "{repo}"
-    command: "ros2 launch launch/bridges.launch.xml"
+    command: "ros2 launch domain_bridge bridges.launch.xml"
     detect: "domain_bridge .*pinky_bridge_pinky"
     restart_if_stalled: true   # bringup 뒤에도 로봇 토픽이 안 오면 [전체 시작] 이 이 프로세스를 한 번 재시작한다
 
-  # ---- 2, 3. 로봇 bringup, map (SSH, 키 로그인) ----
+  # ================================================================================================================================
+  # ---- 2. 로봇 bringup (SSH, 키 로그인) ----
   # 사전 준비 (한 번만, 터미널에서 직접):
   #   ssh-copy-id <user>@<host>          # 이때 비밀번호를 터미널에 입력한다. 이후 서버는 키로만 접속한다.
   #   ssh <user>@<host> true             # 처음 접속 확인(known_hosts 등록)
@@ -56,6 +64,7 @@ processes:
   # cwd    : 로봇에서 cd 할 절대 경로 (~ 불가). source 의 ./install/setup.bash 와 command 의 상대 경로 인자(map:=...)의 기준이다.
   # source : 로봇의 경로. SSH 는 ~/.bashrc 를 읽지 않으므로 ROS 배포판 setup.bash 도 여기에 적는다.
   # env    : 실행 전에 export 할 환경 변수. SSH 는 ~/.bashrc 를 안 읽어 RMW_IMPLEMENTATION, CYCLONEDDS_URI 도 빠지므로 여기서 준다.
+  # ================================================================================================================================
   - id: bringup_pinky1
     group: bringup
     label: pinky1 bringup
@@ -84,6 +93,10 @@ processes:
     command: "ros2 launch pinky_bringup bringup_robot.launch.xml"
     detect: "ros2 launch pinky_bringup"
 
+  # ================================================================================================================================
+  # ---- 3. 로봇 map (Nav2, SSH, 키 로그인) ----
+  # 사전 준비(SSH 키 등록)와 cwd / source / env 설명은 위 2번 bringup 항목과 같다.
+  # ================================================================================================================================
   - id: map_pinky1
     group: map
     label: pinky1 map (Nav2)
@@ -110,7 +123,9 @@ processes:
     command: "ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml"
     detect: "ros2 launch pinky_navigation"
 
+  # ================================================================================================================================
   # ---- 4. zone_manager (관제 PC, 도메인 50) ----
+  # ================================================================================================================================
   - id: zone_manager
     group: "zone_manager"
     label: zone_manager
@@ -119,9 +134,11 @@ processes:
     command: "ros2 launch zone_traffic_control zone_manager.launch.xml"
     detect: "zone_manager_node"
 
+  # ================================================================================================================================
   # ---- 5. 순찰 노드 ----
   # 순찰 노드: map(Nav2)이 올라온 뒤에 켠다 (노드가 Nav2 를 쓴다). 목록 순서 = 전체 시작 순서.
   # cwd 가 pinky_slam_nav 라서 ./install/setup.bash 를 상대 경로로 source 한다 (robot_id 는 노드 기본값 pinky1).
+  # ================================================================================================================================
   - id: patrol_pinky1
     group: "순찰 노드"
     label: pinky1 순찰 노드
