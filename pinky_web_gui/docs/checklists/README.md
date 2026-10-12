@@ -11,6 +11,7 @@
 | `alarm_a2_real_robot_checklist.md` | 알람바 PRD Step A2, ACK / SIL | 활성·해소 알람 ACK 가 두 브라우저에 반영, `oper`/`mngr` 계정 기록, 로그인 없이 401, SIL 해제, 이력 파일 `acked` 줄 |
 | `alarm_a3_real_robot_checklist.md` | 알람바 PRD Step A3, 알람 소리와 소리 설정 | 레벨별 실제 소리와 반복, SIL/ACK 로 멈춤, `config/sounds/` 파일 재생, 파일 삭제 시 합성음, 첫 클릭 전 안내 문구, 설정 저장 |
 | `alarm_a4_real_robot_checklist.md` | 알람바 PRD Step A4, 알람 카탈로그(읽기 전용) | Alarm 메뉴와 Catalog 탭, 실제 알람 발생 뒤 횟수·시각, 권한, `alarms.yaml` 덮어쓰기 |
+| `alarm_a5_real_robot_checklist.md` | 알람바 PRD Step A5, 알람 카탈로그 수정·Enable/Disable (manager) | 계정별 권한, 실제 알람을 끄고 켜기, 알람별 소리 파일·반복, 비상정지 알람 보호, 재시작 후 유지, 로그 화면 기록 |
 | `step6_process_control_real_checklist.md` | PRD Step 6, 인증과 프로세스 제어 (시스템 패널) | 버튼으로 브릿지, zone_manager, 로봇 bringup/map/순찰 노드를 켜고 끄기, SSH, 서버 종료 시 정리 |
 
 ## 이름 규칙

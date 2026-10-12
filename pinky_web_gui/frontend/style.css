@@ -41,8 +41,12 @@ h2 small { font-weight: 400; }
 .alarmview .dim.bad { color: var(--bad); }
 .av-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
 .av-table { border-collapse: collapse; width: 100%; font-size: 14px; }
-.av-table th { text-align: left; color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); white-space: nowrap; }
+.av-table th { text-align: left; color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .av-table td, .av-table th { padding: 4px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.av-table.fixed { table-layout: fixed; width: auto; }
+.av-table.fixed td { overflow-wrap: anywhere; }
+.av-table th .av-rz { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; touch-action: none; z-index: 2; }
+.av-table th .av-rz:hover, .av-table th .av-rz.drag { background: var(--accent); opacity: .5; }
 .av-table td.code { font-weight: 700; white-space: nowrap; }
 .av-table td.msg { color: var(--dim); word-break: break-word; }
 .av-table td.last, .av-table td.cnt { white-space: nowrap; }
@@ -52,6 +56,17 @@ h2 small { font-weight: 400; }
 .av-table tr.lvl-LL td.lvl { color: var(--caution); font-weight: 700; }
 .av-table tr.lvl-info td.lvl { color: var(--dim); }
 .av-table tr.off { opacity: .55; }
+.av-table tr.modified td.code::after { content: ' \2022'; color: var(--warn); }   /* GUI 에서 바꾼 적 있는 알람 */
+.av-table td.edit { white-space: nowrap; }
+.av-table td.edit button { padding: 2px 10px; font-size: 13px; }
+#avEditDlg { width: min(640px, calc(100vw - 32px)); }
+.av-ed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; align-items: end; }
+.av-ed-grid .av-ed-wide { grid-column: 1 / -1; }
+.av-ed-grid .field { display: flex; flex-direction: column; align-items: stretch; gap: 3px; font-size: 13px; font-weight: 600; }
+.av-ed-grid input[type="text"], .av-ed-grid input[type="number"], .av-ed-grid select { font: inherit; font-weight: 400; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.av-ed-grid input:disabled, .av-ed-grid select:disabled { opacity: .55; }
+.av-ed-grid .dim { margin: 0; }
+@media (max-width: 520px) { .av-ed-grid { grid-template-columns: 1fr; } }
 @media (max-width: 860px) { .av-table td.cond { min-width: 160px; } .av-table td.msg { min-width: 180px; } }
 .workspace { grid-area: work; position: relative; min-height: 0; min-width: 0; }
 .panel { position: absolute; margin: 0; z-index: 1;

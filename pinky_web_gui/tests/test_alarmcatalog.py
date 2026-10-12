@@ -81,10 +81,10 @@ def test_defaults_are_well_formed():
 
 
 def test_prd_8_2_templates_are_kept():
-    """PRD 8-2절의 코드·레벨·문구가 기본값 그대로다."""
-    want = {'ESTOP_FAILED': ('HH', 'E-STOP failed on {robot}: {reason}'), 'CMD_SEND_FAILED': ('H', 'Command `{cmd}` could not be sent to {robot}: {reason}'),
-            'ROBOT_OFFLINE': ('H', '{robot} is offline'), 'CMD_REJECTED': ('L', 'Command `{cmd}` rejected for {robot}: {reason}'),
-            'PATROL_STOPPED': ('LL', 'Patrol stopped on {robot}'), 'CMD_SENT': ('info', 'Command `{cmd}` sent to {robot}'), 'LOAD_FAILED': ('LL', 'Failed to load {resource}')}
+    """PRD 8-2절(한국어)의 코드·레벨·문구가 기본값 그대로다."""
+    want = {'ESTOP_FAILED': ('HH', '{robot} 비상정지 실패: {reason}'), 'CMD_SEND_FAILED': ('H', '{robot} 에 명령 `{cmd}` 를 보내지 못함: {reason}'),
+            'ROBOT_OFFLINE': ('H', '{robot} 오프라인'), 'CMD_REJECTED': ('L', '{robot} 에 대한 명령 `{cmd}` 거절: {reason}'),
+            'PATROL_STOPPED': ('LL', '{robot} 순찰 정지됨'), 'CMD_SENT': ('info', '{robot} 에 명령 `{cmd}` 전송'), 'LOAD_FAILED': ('LL', '{resource} 을(를) 불러오지 못함')}
     for code, (lv, msg) in want.items():
         assert (ac.DEFAULTS[code]['level'], ac.DEFAULTS[code]['message']) == (lv, msg), code
 
@@ -105,18 +105,23 @@ def test_override_applies():
 @pytest.mark.parametrize('bad', [
     {'NOPE': {'level': 'H'}},                       # 모르는 코드
     {'ROBOT_OFFLINE': {'level': 'X'}},              # 모르는 레벨
-    {'ROBOT_OFFLINE': {'sound': True}},             # 소리는 A5
+    {'ROBOT_OFFLINE': {'sound': 'yes'}},            # bool 아님
     {'ROBOT_OFFLINE': {'enabled': 'no'}},           # bool 아님
     {'ROBOT_OFFLINE': {'name': ''}},                # 빈 문자열
     {'ROBOT_OFFLINE': 5},                           # 항목이 매핑 아님
     {'ESTOP_FAILED': {'enabled': False}},           # 비상정지는 끌 수 없다
-    {'SERVER_DISCONNECTED': {'level': 'L'}},        # 브라우저 전용은 레벨을 못 바꾼다
-    {'SERVER_DISCONNECTED': {'enabled': False}},
+    {'SERVER_DISCONNECTED': {'message': 'x'}},      # 브라우저 알람의 문구는 못 바꾼다
+    {'ESTOP_REQUEST_FAILED': {'enabled': False}},   # 브라우저의 비상정지 알람도 보호
     [1],
 ])
 def test_bad_overrides_rejected(bad):
     with pytest.raises(ValueError):
         ac.effective(bad)
+
+
+def test_browser_alarm_level_and_enabled_can_change():
+    cat = ac.effective({'SERVER_DISCONNECTED': {'level': 'L', 'enabled': False}})
+    assert cat['SERVER_DISCONNECTED']['level'] == 'L' and cat['SERVER_DISCONNECTED']['enabled'] is False
 
 
 def test_browser_alarm_name_and_condition_can_change():
@@ -134,7 +139,7 @@ def test_config_loads_override_file(tmp_path):
     (tmp_path / 'robots.yaml').write_text(yaml.safe_dump(raw, allow_unicode=True), encoding='utf-8')
     assert load_config(tmp_path / 'robots.yaml').alarm_catalog['ROBOT_OFFLINE']['level'] == 'L'
     (tmp_path / 'alarms.yaml').write_text('alarms:\n  ESTOP_FAILED:\n    enabled: false\n', encoding='utf-8')
-    with pytest.raises(ValueError, match='끌 수 없다'):
+    with pytest.raises(ValueError, match='이 알람은 끌 수 없습니다'):
         load_config(tmp_path / 'robots.yaml')
     (tmp_path / 'alarms.yaml').unlink()   # 파일이 없으면 기본값
     assert load_config(tmp_path / 'robots.yaml').alarm_catalog['ROBOT_OFFLINE']['level'] == 'H'

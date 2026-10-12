@@ -26,6 +26,7 @@ import websockets
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verify_step3_ui as v3  # noqa: E402  (Page 헬퍼 재사용)
+from uitext import english_left  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT, CDP = 8019, 9237
@@ -115,6 +116,7 @@ async def run(shot, hint_shot):
             check('페이지 로드와 스냅샷', await pg.wait("app.cfg && app.order.length === 2 && app.wsUp"))
 
             async def open_dialog():
+                await pg.click_sel('#alarmMenu')   # 알람소리 버튼은 알람 화면의 탭 줄에 있다
                 await pg.click_sel('#alarmSoundBtn')
                 return await pg.wait("document.getElementById('soundDlg').open", 3)
 
@@ -126,8 +128,8 @@ async def run(shot, hint_shot):
                 await pg.js(f"(() => {{ const e = document.querySelector({json.dumps(sel)}); e.value = {json.dumps(value)}; e.dispatchEvent(new Event('change')); }})()")
 
             # ---- 자동재생 차단 안내 (FRA3-8) ----
-            check('첫 클릭 전에는 소리가 막혀 "Click to enable alarm sound" 가 보임',
-                  await pg.wait("!document.getElementById('soundHint').hidden && document.getElementById('soundHint').textContent === 'Click to enable alarm sound'", 4))
+            check('첫 클릭 전에는 소리가 막혀 "클릭하면 알람 소리가 켜집니다" 가 보임',
+                  await pg.wait("!document.getElementById('soundHint').hidden && document.getElementById('soundHint').textContent === '클릭하면 알람 소리가 켜집니다'", 4))
             if hint_shot:
                 await screenshot(pg, hint_shot)
             await pg.mouse(40, 30)
@@ -136,14 +138,14 @@ async def run(shot, hint_shot):
             # ---- 소리 설정 화면의 고정 문구 (FRA3-10) ----
             check('소리 설정 열기', await open_dialog())
             txt = await pg.js("(() => { const d = document.getElementById('soundDlg'); return d.textContent + ' ' + [...d.querySelectorAll('[aria-label],[title]')].map(e => (e.getAttribute('aria-label') || '') + ' ' + (e.title || '')).join(' ') + ' ' + [...d.querySelectorAll('option')].map(o => o.textContent).join(' '); })()")
-            check('소리 설정 화면에 한글이 없음', not HANGUL.search(txt), txt)
-            for word in ('Alarm sound', 'Volume', 'Repeat interval (s)', 'Sound file', 'Fallback beep', 'Test', 'Stop'):
+            check('소리 설정 화면에 영문 문장이 없음 (한국어)', not english_left(txt), english_left(txt))
+            for word in ('알람 소리', '음량', '반복 주기(초)', '사운드 파일', '합성 비프음', '시험', '정지'):
                 check(f'소리 설정 문구: {word}', word in txt)
             check('레벨 4개 행 (info 없음)', await pg.js("[...document.querySelectorAll('#sndRows tr td:first-child')].map(e => e.textContent).join()") == 'HH,H,L,LL')
             check('사운드 폴더의 허용 파일만 목록에 나옴 (txt 제외)',
                   await pg.js("[...document.querySelectorAll('#sndRows select')][0].options.length") == 4
-                  and await pg.js("[...document.querySelectorAll('#sndRows select')][0].textContent") == 'Fallback beepbad.wavding.wavsiren.wav')
-            check('파일 안내 문구', 'found' in await pg.js("document.getElementById('sndFilesNote').textContent") and 'config/sounds/' in await pg.js("document.getElementById('sndFilesNote').textContent"))
+                  and await pg.js("[...document.querySelectorAll('#sndRows select')][0].textContent") == '합성 비프음bad.wavding.wavsiren.wav')
+            check('파일 안내 문구', '찾았습니다' in await pg.js("document.getElementById('sndFilesNote').textContent") and 'config/sounds/' in await pg.js("document.getElementById('sndFilesNote').textContent"))
             if shot:
                 await screenshot(pg, shot)
             await set_value('#sndInterval', '1')
@@ -216,17 +218,17 @@ async def run(shot, hint_shot):
             base_osc = await pg.js(OSC)
             await close_dialog()
             check('파일을 고르면 그 파일을 음량과 함께 재생 (합성음 대신)', await pg.wait(f"{FILES}.includes('/sounds/siren.wav@0.70')", 3) and await pg.js(OSC) == base_osc, await pg.js(FILES))
-            check('상태줄 대신 컨트롤러 상태가 파일 재생', await pg.js("sound.info().status") == 'HH: playing siren.wav')
+            check('상태줄 대신 컨트롤러 상태가 파일 재생', await pg.js("sound.info().status") == 'HH: siren.wav 재생 중')
 
             # ---- 파일이 지워지면 합성음 ----
             (sound_dir / 'siren.wav').unlink()
             await open_dialog()
-            check('지운 파일은 목록에서 빠지고 선택에는 (missing) 으로 남음',
-                  await pg.wait("[...document.querySelectorAll('#sndRows select')][0].selectedOptions[0].textContent === 'siren.wav (missing)'", 3))
+            check('지운 파일은 목록에서 빠지고 선택에는 (파일 없음) 으로 남음',
+                  await pg.wait("[...document.querySelectorAll('#sndRows select')][0].selectedOptions[0].textContent === 'siren.wav (파일 없음)'", 3))
             await close_dialog()
             files_before = await pg.js(FILES)
             osc_before = await pg.js(OSC)
-            check('파일이 없으면 소리 없이 넘어가지 않고 합성음으로 대체', await pg.wait(f"{OSC} > {osc_before} && sound.info().status === 'HH: fallback beep (file missing: siren.wav)'", 4)
+            check('파일이 없으면 소리 없이 넘어가지 않고 합성음으로 대체', await pg.wait(f"{OSC} > {osc_before} && sound.info().status === 'HH: 합성 비프음 (파일 없음: siren.wav)'", 4)
                   and await pg.js(FILES) == files_before)
 
             # ---- 재생에 실패하는 파일 ----
@@ -234,7 +236,7 @@ async def run(shot, hint_shot):
             await set_value('#sndRows tr:nth-child(1) select', 'bad.wav')
             await close_dialog()
             osc_before = await pg.js(OSC)
-            check('재생에 실패한 파일도 합성음으로 대체', await pg.wait(f"{OSC} > {osc_before} && sound.info().status === 'HH: fallback beep (file failed: bad.wav)'", 5), await pg.js("sound.info().status"))
+            check('재생에 실패한 파일도 합성음으로 대체', await pg.wait(f"{OSC} > {osc_before} && sound.info().status === 'HH: 합성 비프음 (재생 실패: bad.wav)'", 5), await pg.js("sound.info().status"))
             await pg.click_sel('#alarmAckBtn')
             api('POST', '/api/mock/no-subscriber', {'on': False})
 

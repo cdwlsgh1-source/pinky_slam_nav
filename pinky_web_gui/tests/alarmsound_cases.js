@@ -50,9 +50,9 @@ async function runCases(AS, check) {
   check('고른 파일이 목록에 있으면 파일', eq(AS.chooseSource('HH', sf, ['siren.wav'], new Set()), { kind: 'file', name: 'siren.wav' }));
   check('파일이 지워졌으면 합성음 (missing)', (() => { const r = AS.chooseSource('HH', sf, ['other.wav'], new Set()); return r.kind === 'beep' && r.why === 'file missing' && r.file === 'siren.wav'; })());
   check('재생에 실패한 파일은 합성음 (failed)', (() => { const r = AS.chooseSource('HH', sf, ['siren.wav'], new Set(['siren.wav'])); return r.kind === 'beep' && r.why === 'file failed'; })());
-  check('상태줄 문구(영문)', AS.describeSource('HH', { kind: 'file', name: 'siren.wav' }) === 'HH: playing siren.wav'
-    && AS.describeSource('H', { kind: 'beep', why: 'no file selected' }) === 'H: fallback beep'
-    && AS.describeSource('HH', { kind: 'beep', why: 'file missing', file: 'a.wav' }) === 'HH: fallback beep (file missing: a.wav)');
+  check('상태줄 문구(한국어)', AS.describeSource('HH', { kind: 'file', name: 'siren.wav' }) === 'HH: siren.wav 재생 중'
+    && AS.describeSource('H', { kind: 'beep', why: 'no file selected' }) === 'H: 합성 비프음'
+    && AS.describeSource('HH', { kind: 'beep', why: 'file missing', file: 'a.wav' }) === 'HH: 합성 비프음 (파일 없음: a.wav)');
 
   // ---- 합성음은 레벨마다 다르다 ----
   const sig = (l) => JSON.stringify(AS.beepPattern(l));
@@ -124,12 +124,12 @@ async function runCases(AS, check) {
   g.env.settings.levels.HH.file = 'siren.wav'; g.c.setFiles(['siren.wav']);
   g.env.targets = ['HH']; g.c.refresh(); await flush();
   check('컨트롤러: 파일을 고르면 파일 URL 과 음량으로 재생', eq(g.calls.find((x) => x[0] === 'file'), ['file', '/sounds/siren.wav', 0.7]) && !g.kinds().includes('beep'));
-  check('컨트롤러: 상태줄에 파일 이름', g.c.info().status === 'HH: playing siren.wav');
+  check('컨트롤러: 상태줄에 파일 이름', g.c.info().status === 'HH: siren.wav 재생 중');
 
   g = rig({ fileResult: 'failed' });
   g.env.settings.levels.HH.file = 'siren.wav'; g.c.setFiles(['siren.wav']);
   g.env.targets = ['HH']; g.c.refresh(); await flush();
-  check('컨트롤러: 파일 재생이 실패하면 같은 발생에서 합성음으로 대체', g.kinds().join() === 'file,beep' && g.c.info().status === 'HH: fallback beep (file failed: siren.wav)');
+  check('컨트롤러: 파일 재생이 실패하면 같은 발생에서 합성음으로 대체', g.kinds().join() === 'file,beep' && g.c.info().status === 'HH: 합성 비프음 (재생 실패: siren.wav)');
   g.env.now = 5000; g.c.refresh(); await flush();
   check('컨트롤러: 실패한 파일은 다음 반복부터 다시 시도하지 않는다', g.kinds().join() === 'file,beep,beep');
   g.c.setFiles(['siren.wav']); g.env.now = 10000; g.c.refresh(); await flush();
@@ -138,7 +138,7 @@ async function runCases(AS, check) {
   g = rig();
   g.env.settings.levels.HH.file = 'gone.wav'; g.c.setFiles(['other.wav']);
   g.env.targets = ['HH']; g.c.refresh(); await flush();
-  check('컨트롤러: 파일이 지워졌으면 파일을 시도하지 않고 합성음', g.kinds().join() === 'beep' && g.c.info().status === 'HH: fallback beep (file missing: gone.wav)');
+  check('컨트롤러: 파일이 지워졌으면 파일을 시도하지 않고 합성음', g.kinds().join() === 'beep' && g.c.info().status === 'HH: 합성 비프음 (파일 없음: gone.wav)');
 
   g = rig({ fileResult: 'blocked' });
   g.env.settings.levels.H.file = 'a.wav'; g.c.setFiles(['a.wav']);
@@ -146,6 +146,36 @@ async function runCases(AS, check) {
   check('컨트롤러: 파일이 자동재생 차단되면 합성음으로 넘기지 않고 사용자 클릭을 기다린다', !g.kinds().includes('beep') && g.c.info().playing === null);
   g.o.fileResult = 'ok'; g.c.unlock(); await flush();
   check('컨트롤러: 클릭(unlock) 뒤 바로 다시 재생', g.kinds().filter((k) => k === 'file').length === 2 && g.kinds().includes('unlock'));
+
+  // ---- Step A5: 알람별 사운드 파일과 반복 주기 ----
+  const tg = (level, file, interval) => ({ level, file: file || '', interval: interval || null });
+  check('pickTarget: 가장 심각한 알람, 같으면 앞선 것', (() => { const t = AS.pickTarget([tg('L', 'a.wav'), tg('H', 'b.wav'), tg('H', 'c.wav')], S()); return t.level === 'H' && t.file === 'b.wav'; })());
+  check('pickTarget: 문자열 대상도 받는다', (() => { const t = AS.pickTarget(['LL', 'H'], S()); return t.level === 'H' && t.file === '' && t.interval === null; })());
+  check('pickTarget: 꺼진 레벨은 건너뛴다', (() => { const s = S(); s.levels.HH.on = false; return AS.pickTarget([tg('HH', 'x.wav'), tg('L')], s).level === 'L'; })());
+  check('pickLevel 은 객체 대상에서도 레벨을 돌려준다', AS.pickLevel([tg('LL'), tg('H')], S()) === 'H' && AS.pickLevel([], S()) === null);
+  check('step: 이기는 알람의 파일을 돌려준다 (문자열 대상은 빈 파일)', (() => { const a = mk()(0, { targets: [tg('H', 'b.wav')] }); const b = mk()(0, { targets: ['H'] }); return a.file === 'b.wav' && b.file === ''; })());
+  check('step: 알람별 반복 주기 (설정 5초보다 짧은 2초)', (() => { const u = mk(); const t = [tg('H', '', 2)]; u(0, { targets: t }); return u(1500, { targets: t }).action === 'none' && u(2000, { targets: t }).action === 'play'; })());
+  check('step: 알람별 주기가 없으면 설정 주기', (() => { const u = mk(); const t = [tg('H')]; u(0, { targets: t }); return u(4000, { targets: t }).action === 'none' && u(5000, { targets: t }).action === 'play'; })());
+  check('step: 알람별 주기가 설정보다 길어도 따른다', (() => { const u = mk(); const t = [tg('H', '', 20)]; u(0, { targets: t }); return u(19000, { targets: t }).action === 'none' && u(20000, { targets: t }).action === 'play'; })());
+  const files2 = ['lvl.wav', 'alarm.wav'];
+  const sLvl = (() => { const s = S(); s.levels.H.file = 'lvl.wav'; return s; })();
+  check('chooseSource: 알람 파일이 레벨 파일보다 먼저', AS.chooseSource('H', sLvl, files2, new Set(), 'alarm.wav').name === 'alarm.wav');
+  check('chooseSource: 알람 파일이 없으면 레벨 파일', AS.chooseSource('H', sLvl, files2, new Set(), '').name === 'lvl.wav');
+  check('chooseSource: 알람 파일이 목록에 없으면 레벨 파일로 내려간다', AS.chooseSource('H', sLvl, files2, new Set(), 'gone.wav').name === 'lvl.wav');
+  check('chooseSource: 알람 파일이 실패했으면 레벨 파일', AS.chooseSource('H', sLvl, files2, new Set(['alarm.wav']), 'alarm.wav').name === 'lvl.wav');
+  check('chooseSource: 둘 다 못 쓰면 합성음 (첫 사유 보고)', (() => { const r = AS.chooseSource('H', sLvl, [], new Set(), 'alarm.wav'); return r.kind === 'beep' && r.why === 'file missing' && r.file === 'alarm.wav'; })());
+  check('chooseSource: 레벨 파일이 없고 알람 파일만 있어도 재생', AS.chooseSource('LL', S(), files2, new Set(), 'alarm.wav').name === 'alarm.wav');
+  check('chooseSource: 알람 파일 인자가 없는 기존 호출과 같다', AS.chooseSource('H', sLvl, files2, new Set()).name === 'lvl.wav' && AS.chooseSource('H', S(), files2, new Set()).kind === 'beep');
+  g = rig();
+  g.c.setFiles(['alarm.wav', 'lvl.wav']); g.env.settings.levels.H.file = 'lvl.wav';
+  g.env.targets = [tg('H', 'alarm.wav')]; g.c.refresh(); await flush();
+  check('컨트롤러: 알람별 파일이 레벨 파일보다 먼저 재생된다', eq(g.calls.find((x) => x[0] === 'file'), ['file', '/sounds/alarm.wav', 0.7]) && !g.kinds().includes('beep'));
+  g = rig({ fileResult: 'failed' });
+  g.c.setFiles(['alarm.wav']); g.env.targets = [tg('H', 'alarm.wav')]; g.c.refresh(); await flush();
+  check('컨트롤러: 알람 파일이 실패하면 같은 발생에서 합성음', g.kinds().join() === 'file,beep' && g.c.info().status === 'H: 합성 비프음 (재생 실패: alarm.wav)');
+  g = rig();
+  g.env.targets = [tg('H', '', 2)]; g.c.refresh(); g.env.now = 1900; g.c.refresh(); g.env.now = 2000; g.c.refresh();
+  check('컨트롤러: 알람별 주기(2초)로 반복', g.kinds().filter((k) => k === 'beep').length === 2);
 
   g = rig({ blocked: true });
   g.env.targets = ['HH']; g.c.refresh();

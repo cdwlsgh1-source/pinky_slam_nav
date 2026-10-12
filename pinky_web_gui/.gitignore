@@ -7,3 +7,6 @@ data/
 
 # 세션 요약 등 작업 메모 (문서가 아님)
 docs/notes/*.txt
+
+# GUI 가 저장하는 알람 카탈로그 변경분 (실행 상태. mock 은 alarms.local-mock.yaml)
+config/alarms.local*.yaml

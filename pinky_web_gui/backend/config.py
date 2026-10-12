@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from .alarmcatalog import effective
+from .alarmcatalog import CatalogStore, effective
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / 'config' / 'robots.yaml'
 
@@ -31,7 +31,9 @@ class Config:
     alarm_history_dir: str = None      # 알람 이력 파일 폴더 (robots.yaml 위치 기준 상대 경로를 절대 경로로 바꿔 둔다). None 이면 저장하지 않는다
     alarm_history_chunk: int = 1000    # 이력 파일 하나에 담는 알람 이벤트 수
     alarm_sound_dir: str = None        # 알람 사운드 파일 폴더 (기본 config/sounds, robots.yaml 위치 기준 상대 경로를 절대 경로로 바꿔 둔다)
-    alarm_catalog: dict = None         # 알람 카탈로그 {코드: 항목} (코드 기본값 + alarms_yaml 덮어쓰기). alarmcatalog.effective() 결과
+    alarm_catalog: dict = None         # 알람 카탈로그 {코드: 항목} (코드 기본값 + alarms_yaml + alarms.local.yaml). alarmcatalog.effective() 결과
+    alarm_overrides: dict = None       # alarms_yaml 의 원본 {코드: {항목: 값}} (서버가 CatalogStore 를 만들 때 쓴다)
+    alarms_local_path: str = None      # GUI 가 쓰는 변경분 파일(alarms.local.yaml)의 절대 경로. 파일은 없을 수 있다
 
 
 # 수동 조작 하드 상한. 설정 파일이 실수로 큰 값을 적어도 이 이상은 나가지 않는다.
@@ -249,7 +251,7 @@ def _expand(text, path, what):
 
 
 def _load_alarm_catalog(path):
-    """config/alarms.yaml(선택)을 읽어 카탈로그를 만든다. 파일이 없으면 코드 기본값만 쓴다. 형식은 alarmcatalog.effective 참고."""
+    """config/alarms.yaml(선택)의 덮어쓰기 {코드: {항목: 값}} 를 읽어 검증해 돌려준다. 파일이 없으면 빈 dict(코드 기본값만). 형식은 alarmcatalog.effective 참고."""
     overrides = {}
     if path is not None:
         if not Path(path).exists():   # 선택 파일이다: 없으면 코드 기본값으로 시작한다
@@ -261,9 +263,10 @@ def _load_alarm_catalog(path):
                 raise ValueError(f'{path}: 최상위는 매핑이어야 한다')
             overrides = raw.get('alarms') or {}
     try:
-        return effective(overrides)
+        effective(overrides)   # 검증만 한다
     except ValueError as e:
         raise ValueError(f'{path}: {e}')
+    return overrides
 
 
 def _load_processes(path, robots):
@@ -442,9 +445,14 @@ def load_config(path=None) -> Config:
     alarms_yaml = raw.get('alarms_yaml')
     if alarms_yaml is not None and (not isinstance(alarms_yaml, str) or not alarms_yaml):
         raise ValueError(f'{path}: alarms_yaml 은 문자열 경로여야 한다')
-    alarm_catalog = _load_alarm_catalog((path.resolve().parent / alarms_yaml).resolve() if alarms_yaml else None)
+    alarm_overrides = _load_alarm_catalog((path.resolve().parent / alarms_yaml).resolve() if alarms_yaml else None)
+    local_yaml = raw.get('alarms_local_yaml', 'alarms.local.yaml')
+    if not isinstance(local_yaml, str) or not local_yaml:
+        raise ValueError(f'{path}: alarms_local_yaml 은 문자열 경로여야 한다')
+    alarms_local_path = str((path.resolve().parent / local_yaml).resolve())
+    alarm_catalog = CatalogStore(alarm_overrides, alarms_local_path).current
 
     return Config(tuple(robots), zone_topic, timeout, hz, map_yaml, points, robot_settings,
                   positive('max_goto_points', 10, int), positive('no_response_sec', 5.0, float),
                   positive('starting_notice_sec', 5.0, float), positive('command_history_size', 50, int),
-                  inflation, zone, motion, processes, alarm_dir, positive('alarm_history_chunk', 1000, int), sound_dir, alarm_catalog)
+                  inflation, zone, motion, processes, alarm_dir, positive('alarm_history_chunk', 1000, int), sound_dir, alarm_catalog, alarm_overrides, alarms_local_path)

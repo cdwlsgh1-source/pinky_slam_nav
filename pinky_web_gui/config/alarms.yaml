@@ -1,9 +1,15 @@
-# 알람 카탈로그 덮어쓰기 (알람바 Step A4). 알람 정의의 기본값은 backend/alarmcatalog.py 에 있고, 여기에는 바꾸고 싶은 항목만 적는다.
-# 파일을 바꾼 뒤에는 GUI 서버를 다시 켠다. GUI 에서 고치는 기능은 아직 없다 (Step A5 에서 manager 에게 열린다).
-#   바꿀 수 있는 항목: name, condition (표시용 문구), message / level / enabled (서버가 만드는 알람만)
-#   level: HH > H > L > LL > info.  enabled: false 이면 그 알람을 만들지 않는다 (비상정지 알람 ESTOP_FAILED, ESTOP_PARTIAL 은 끌 수 없다)
-#   message 에는 {robot} {cmd} {reason} {resource} 를 쓸 수 있다.
-#   소리 여부는 레벨에서 정해진다 (info 만 소리 없음). 알람별 소리 지정은 Step A5.
+# 알람 카탈로그 덮어쓰기 (알람바 Step A4, A5). 알람 정의의 기본값은 backend/alarmcatalog.py 에 있고, 여기에는 바꾸고 싶은 항목만 적는다.
+# 이 파일은 사람이 편집기로 고치는 파일이다. GUI(Alarm 화면 Catalog 탭, manager 만)는 이 파일을 쓰지 않고 config/alarms.local.yaml 에 변경분을 따로 저장한다:
+#   기본값(코드) <- 이 파일 <- alarms.local.yaml. GUI 의 Reset to default 는 alarms.local.yaml 의 항목만 지우므로 여기에 적은 값으로 돌아간다.
+# 이 파일을 바꾼 뒤에는 GUI 서버를 다시 켠다.
+#   바꿀 수 있는 항목: name, condition (표시용 문구), message, level, enabled, sound, sound_file, repeat
+#     level      HH > H > L > LL > info
+#     enabled    false 이면 그 알람을 만들지 않는다 (서버 알람은 서버가, 브라우저 알람은 화면이 건너뜀)
+#     message    서버 알람만. {robot} {cmd} {reason} {resource} 중 그 알람의 기본 문구가 쓰는 것과 {robot} 만 쓸 수 있다. 1~120 글자
+#     sound      소리 낼지 (기본: info 만 false). info 에는 true 를 못 쓴다
+#     sound_file config/sounds/ 의 파일 이름 (비우면 소리 설정 화면에서 고른 레벨 파일). 알람 파일 > 레벨 파일 > 합성 비프
+#     repeat     반복 주기(초, 1~60). 비우면 소리 설정의 반복 주기
+#   비상정지 알람(ESTOP_FAILED, ESTOP_PARTIAL, ESTOP_REQUEST_FAILED)은 끄거나 레벨을 바꾸거나 소리를 끌 수 없다 (서버 시작 때 오류).
 # 예) 로봇 오프라인을 H 대신 L 로 낮추려면:
 #   alarms:
 #     ROBOT_OFFLINE:

@@ -174,6 +174,10 @@ class ProcessManager:
         except Exception:
             log.exception('상태 변경 알림 실패(무시)')
 
+    def states(self):
+        """{id: (label, state, message)}. status() 보다 가벼워 상태 변화 감시용으로 쓴다."""
+        return {pid: (e.spec.label, e.state, e.message) for pid, e in self._e.items()}
+
     def spec(self, pid):
         if pid not in self._specs:
             raise ProcError(f'알 수 없는 프로세스입니다: {pid}', 'unknown')

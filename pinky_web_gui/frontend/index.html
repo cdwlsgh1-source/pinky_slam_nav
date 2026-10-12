@@ -15,8 +15,7 @@
     <div class="brand">Pinky</div>
     <button class="menu-item active" data-view="main">메인</button>
     <button class="menu-item" data-view="log" id="logMenu" title="GUI 가 켠 프로세스의 출력과 GUI 서버 로그">로그</button>
-    <button class="menu-item" data-view="alarm" id="alarmMenu" title="Alarm catalog: every alarm the system can raise">Alarm</button>
-    <button type="button" class="menu-item" id="alarmSoundBtn" title="Alarm sound settings (volume, sound files, repeat interval, test)">Sound</button>
+    <button class="menu-item" data-view="alarm" id="alarmMenu" title="알람 카탈로그: 시스템이 낼 수 있는 모든 알람">알람</button>
     <button class="menu-item" disabled title="준비 중">포인트</button>
     <div class="layout-tools" id="layoutTools" data-only-view="main">
       <button type="button" class="menu-item" id="layoutEditBtn" aria-pressed="false" title="지도와 사이드바 패널을 끌어서 옮기고 크기를 조절합니다">레이아웃 편집</button>
@@ -37,17 +36,17 @@
   </nav>
 
   <!-- 위: 시스템 알람 -->
-  <header class="alarmbar" aria-label="System alarms">
+  <header class="alarmbar" aria-label="시스템 알람">
     <span class="chip" id="connChip" data-level="warn">연결 중...</span>
     <span class="chip" id="zoneChip" data-level="dim">구역: -</span>
     <!-- ACK / SIL / info 표시: 비상 정지와 같은 크기·서식의 버튼을 칩 줄에 나열한다 (알람 표가 그만큼 넓어진다) -->
-    <div class="alarm-tools" role="group" aria-label="Alarm actions">
-      <button type="button" id="alarmAckBtn" title="Acknowledge cleared alarms" disabled>ACK</button>
-      <button type="button" id="alarmSilBtn" aria-pressed="false" title="Silence current alarm sound" disabled>SIL</button>
-      <button type="button" id="alarmInfoBtn" aria-pressed="true" title="Show or hide info rows (sent commands, robot online)">Hide info</button>
+    <div class="alarm-tools" role="group" aria-label="알람 조작">
+      <button type="button" id="alarmAckBtn" title="알람을 확인(ACK)합니다: 해소된 알람은 목록에서 숨기고 활성 알람은 확인됨으로 표시" disabled>ACK</button>
+      <button type="button" id="alarmSilBtn" aria-pressed="false" title="지금 울리는 알람 소리를 끕니다 (이 브라우저만)" disabled>SIL</button>
+      <button type="button" id="alarmInfoBtn" aria-pressed="true" title="안내 행(명령 전송 기록, 로봇 온라인)을 보이거나 숨깁니다">기록 숨김</button>
     </div>
     <!-- 브라우저가 첫 클릭 전에는 소리를 막는다. 막힌 동안만 보이고, 화면 아무 곳이나 누르면 사라진다 (FRA3-8). 칩 줄에 둬서 알람 표가 밀리지 않는다 -->
-    <button type="button" class="sound-hint" id="soundHint" hidden>Click to enable alarm sound</button>
+    <button type="button" class="sound-hint" id="soundHint" hidden>클릭하면 알람 소리가 켜집니다</button>
     <!-- 비상정지: 항상 보이고, 확인 팝업 없이 한 번 누르면 동작한다 (FR4-7). 로봇별 비상 정지는 로봇 카드 안에 있다 -->
     <div class="estop" id="estopBar" role="group" aria-label="비상정지">
       <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">비상 정지</button>
@@ -55,15 +54,15 @@
     <!-- 알람 목록: 서버가 만든 알람과 브라우저 전용 알람을 한 표로 (app.js renderAlarms). 비상정지 명령 이력도 여기 통합됐다 -->
     <div class="alarm-list" id="alarmList">
       <div class="alarm-main">
-        <div class="alarm-scroll" id="alarmScroll" tabindex="0" aria-label="Alarm list">
+        <div class="alarm-scroll" id="alarmScroll" tabindex="0" aria-label="알람 목록">
           <table>
-            <thead><tr><th>Time</th><th>Robot</th><th>Message</th><th>State</th></tr></thead>
+            <thead><tr><th>시각</th><th>로봇</th><th>메시지</th><th>상태</th></tr></thead>
             <tbody id="alarmBody"></tbody>
           </table>
-          <p class="hint" id="alarmEmpty">No alarms</p>
+          <p class="hint" id="alarmEmpty">알람 없음</p>
         </div>
         <div class="alarm-grip" id="alarmGrip" tabindex="0" role="separator" aria-orientation="horizontal" aria-valuemin="56"
-             title="Drag to resize the alarm list (double-click: reset, Up/Down keys: adjust)"></div>
+             title="끌어서 알람 목록 높이를 조절합니다 (더블클릭: 기본 높이, 위/아래 방향키: 조금씩)"></div>
       </div>
     </div>
   </header>
@@ -150,32 +149,57 @@
   </div><!-- /workspace -->
 
   <!-- Alarm 화면 (Step A4: Catalog 탭. History 탭은 Step A7 이 채운다) -->
-  <section class="alarmview" id="alarmView" hidden aria-label="Alarm">
-    <div class="log-tabs" role="tablist" aria-label="Alarm views">
-      <button type="button" class="tab" role="tab" id="avTabHistory" aria-selected="false" disabled title="Available in a later step">History</button>
-      <button type="button" class="tab" role="tab" id="avTabCatalog" aria-selected="true">Catalog</button>
+  <section class="alarmview" id="alarmView" hidden aria-label="알람">
+    <div class="log-tabs" role="tablist" aria-label="알람 화면 종류">
+      <button type="button" class="tab" role="tab" id="avTabHistory" aria-selected="false" disabled title="다음 단계에서 제공됩니다">이력</button>
+      <button type="button" class="tab" role="tab" id="avTabCatalog" aria-selected="true">카탈로그</button>
+      <button type="button" class="tab" id="alarmSoundBtn" title="알람 소리 설정 (음량, 사운드 파일, 반복 주기, 시험 재생)">알람소리</button>
     </div>
     <div class="log-tools">
-      <label class="field">Level
-        <select id="avLevel"><option value="all">All</option></select>
+      <label class="field">레벨
+        <select id="avLevel"><option value="all">전체</option></select>
       </label>
-      <label class="field">Origin
-        <select id="avOrigin"><option value="all">All</option><option value="server">Server</option><option value="browser">Browser only</option></select>
+      <label class="field">출처
+        <select id="avOrigin"><option value="all">전체</option><option value="server">서버</option><option value="browser">브라우저 전용</option></select>
       </label>
-      <input type="search" id="avSearch" placeholder="Search" aria-label="Search catalog">
-      <button type="button" id="avRefresh">Refresh</button>
-      <button type="button" id="avReset">Reset</button>
+      <input type="search" id="avSearch" placeholder="검색" aria-label="카탈로그 검색">
+      <button type="button" id="avRefresh">새로고침</button>
+      <button type="button" id="avReset">초기화</button>
       <span class="dim" id="avNote"></span>
     </div>
     <div class="av-scroll">
       <table class="av-table" id="avTable">
-        <thead><tr><th>ID</th><th>Name</th><th>Condition</th><th>Message</th><th>Level</th><th>Sound</th><th>Enabled</th><th>Last raised</th><th>Count</th></tr></thead>
+        <thead><tr><th>ID</th><th>이름</th><th>발생 조건</th><th>메시지</th><th>레벨</th><th>소리</th><th>사용</th><th>최근 발생</th><th>횟수</th><th id="avEditTh" hidden>편집</th></tr></thead>
         <tbody id="avBody"></tbody>
       </table>
-      <p class="dim" id="avEmpty" hidden>No alarms found</p>
+      <p class="dim" id="avEmpty" hidden>알람이 없습니다</p>
     </div>
-    <p class="dim" id="avFoot">Read-only.</p>
+    <p class="notice-bad" id="avLocalErr" hidden></p>
+    <p class="dim" id="avFoot"></p>
   </section>
+
+  <!-- 알람 카탈로그 편집 (Step A5, manager 만): 서버가 최종 검증한다 -->
+  <dialog id="avEditDlg" class="wide" aria-labelledby="avEdTitle">
+    <form method="dialog" id="avEdForm" autocomplete="off">
+      <p><b id="avEdTitle"></b> <span class="dim" id="avEdCond"></span></p>
+      <div class="av-ed-grid">
+        <label class="check"><input type="checkbox" id="avEdEnabled"> 사용</label>
+        <label class="field">레벨 <select id="avEdLevel"></select></label>
+        <label class="field av-ed-wide">메시지 <input type="text" id="avEdMsg" spellcheck="false"></label>
+        <p class="dim av-ed-wide" id="avEdPh"></p>
+        <label class="check"><input type="checkbox" id="avEdSound"> 소리</label>
+        <label class="field">사운드 파일 <select id="avEdFile"></select></label>
+        <label class="field">반복 주기(초) <input type="number" id="avEdRepeat" min="1" max="60" step="1" inputmode="numeric"></label>
+      </div>
+      <p class="dim" id="avEdNote"></p>
+      <p class="notice-bad" id="avEdErr" role="alert"></p>
+      <div class="row-actions">
+        <button type="button" class="primary" id="avEdSave">저장</button>
+        <button type="button" id="avEdCancel">취소</button>
+        <button type="button" id="avEdReset" title="이 알람의 저장된 변경을 지우고 기본값으로 되돌립니다">기본값으로 되돌리기</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- 로그 화면: GUI 가 켠 프로세스의 터미널 출력과 GUI 서버 로그를 소스별로 본다 -->
   <section class="logview" id="logView" hidden aria-label="로그">
@@ -225,21 +249,21 @@
   <div class="row-actions"><button type="button" id="arClose" class="primary">닫기</button></div>
 </dialog>
 
-<dialog id="soundDlg" class="wide" aria-label="Alarm sound">
-  <p><b>Alarm sound</b></p>
-  <p class="hint">Saved in this browser only. Test plays the sound with the repeat interval and does not create an alarm. Level <b>info</b> is always silent.</p>
+<dialog id="soundDlg" class="wide" aria-label="알람 소리">
+  <p><b>알람 소리</b></p>
+  <p class="hint">이 브라우저에만 저장됩니다. 시험 재생은 반복 주기대로 소리를 내며 알람을 만들지 않습니다. 레벨 <b>info</b> 는 항상 무음입니다.</p>
   <div class="sound-top">
-    <label class="field"><input type="checkbox" id="sndEnabled"> Alarm sound on</label>
-    <label class="field">Volume <input type="range" id="sndVolume" min="0" max="100" step="5"> <span id="sndVolumeText" class="dim"></span></label>
-    <label class="field">Repeat interval (s) <input type="number" id="sndInterval" min="1" max="60" step="1"></label>
+    <label class="field"><input type="checkbox" id="sndEnabled"> 알람 소리 켜기</label>
+    <label class="field">음량 <input type="range" id="sndVolume" min="0" max="100" step="5"> <span id="sndVolumeText" class="dim"></span></label>
+    <label class="field">반복 주기(초) <input type="number" id="sndInterval" min="1" max="60" step="1"></label>
   </div>
   <table class="sound-table">
-    <thead><tr><th>Level</th><th>On</th><th>Sound file</th><th>Test</th></tr></thead>
+    <thead><tr><th>레벨</th><th>켜짐</th><th>사운드 파일</th><th>시험</th></tr></thead>
     <tbody id="sndRows"></tbody>
   </table>
   <p class="hint" id="sndFilesNote"></p>
   <p class="hint" id="sndStatus" aria-live="polite"></p>
-  <div class="row-actions"><button type="button" id="sndClose" class="primary">Close</button></div>
+  <div class="row-actions"><button type="button" id="sndClose" class="primary">닫기</button></div>
 </dialog>
 
 <dialog id="confirmDlg">

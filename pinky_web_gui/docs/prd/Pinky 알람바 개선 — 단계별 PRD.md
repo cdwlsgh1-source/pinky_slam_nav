@@ -1,5 +1,5 @@
 # Pinky 알람바 개선 — 단계별 PRD
-2026-10-12 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1, A2, A3, A4 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`, `alarm_a2_...`, `alarm_a3_...`, `alarm_a4_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
+2026-10-12 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1~A5 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`, `alarm_a2_...`, `alarm_a3_...`, `alarm_a4_...`, `alarm_a5_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
 
 ## 0. 공통 개요
 ### 0-1 배경과 문제
@@ -17,7 +17,7 @@
 | G4 | 알람 전체 목록(카탈로그) 화면. 이후 mngr 가 내용 수정·저장·Enable/Disable |
 | G5 | 알람을 서버가 만들어 GUI 와 연동 (모든 접속 화면이 같은 알람을 봄) |
 | G7 | 왼쪽 메뉴에 `Alarm` 버튼을 두고, 알람바의 100건 제한과 무관하게 저장된 **전체 알람 목록**(이력 파일)을 조회·검색·내려받는 화면을 만든다 (Step A7). 카탈로그(A4)는 같은 화면의 탭으로 둔다 |
-| G6 | GUI 전체의 표시 언어를 영문(EN)으로 바꾼다. 단, 알람 메시지 문구는 한글·영문 혼용을 허용한다 (문구 목록은 8절, 전체 전환은 Step A6) |
+| G6 | (철회) GUI 전체 영문화는 하지 않는다. 화면 문구는 기존 화면과 같은 한국어를 기본으로 하고, 새로 만드는 알람바·소리·카탈로그·Alarm 화면도 한국어로 쓴다 (사용자 결정 2026-10-12, 문구 목록은 8절) |
 
 ### 0-3 비목표
 - 이메일·푸시 등 외부 알림, 로봇 쪽 코드 변경(기존 ROS 코드 수정 금지).
@@ -55,7 +55,7 @@
 4. 권한: 보기·ACK·SIL·소리 설정은 operator 이상, 카탈로그 수정·Enable/Disable 은 manager(`mngr`)만. 서버에서 검증.
 5. 각 Step 은 `--mock` 으로 확인한다. 실제 로봇 확인은 사용자가 한다.
 6. 편집 툴 PRD 의 "알람 바는 편집 대상 제외" 원칙을 유지한다.
-7. **표시 언어 규칙**: GUI 의 고정 문구(메뉴, 버튼, 열 제목, 상태, 안내, 팝업, 오류 응답)는 영문(EN)으로 쓴다. **알람 메시지 문구(알람바에 찍히는 사건 설명)만 한글·영문 혼용을 허용**한다. 이 PRD 문서와 코드 주석은 한국어를 유지한다. 문구 목록은 8절.
+7. **표시 언어 규칙**: GUI 의 문구(메뉴, 버튼, 열 제목, 상태, 안내, 팝업, 오류 응답)는 기존 화면과 같은 **한국어**로 쓴다 (영문화는 철회, 결정 12~14). ACK, SIL, HH/H/L/LL/info, ID, LiDAR 같은 약어·식별자는 그대로 쓴다. 알람 메시지는 카탈로그 템플릿으로 만든 한국어 문장이고 `{reason}` 에는 기존 한국어 원인 문구가 그대로 들어간다. 이 PRD 문서와 코드 주석도 한국어다. 문구 목록은 8절.
 
 ### 0-8 로드맵
 - Step A1. 서버 알람 모델과 통합(이력 패널 삭제)
@@ -63,7 +63,7 @@
 - Step A3. 알람 소리와 소리 설정
 - Step A4. 알람 카탈로그 목록(읽기 전용)
 - Step A5. 카탈로그 수정·Enable/Disable (mngr)
-- Step A6. GUI 전체 영문화 (A1~A5 와 독립, 병행 가능)
+- Step A6. (취소) GUI 전체 영문화: 사용자 결정으로 하지 않는다 (아래 Step A6 참고)
 - Step A7. Alarm 화면: 왼쪽 메뉴 `Alarm` 버튼과 전체 알람 목록 (A1 의 이력 파일을 읽으므로 A1 직후 가능, A4 의 카탈로그는 이 화면의 탭)
 
 ## Step A1. 서버 알람 모델과 통합
@@ -85,10 +85,10 @@
 | FRA1-6 | 하단 명령 이력 패널과 `renderHistory`/`upsertHistory`/`historyBody` 를 제거하고 레이아웃 저장 키를 `pinky.layout.v3` 로 올린다(구버전 값은 무시) |
 | FRA1-7 | 서버 시각(epoch)만 쓴다(브라우저 시각 혼용 제거) |
 | FRA1-8 | `docs/interfaces.md` 에 알람 WS/REST 와 `command` 이벤트 구조를 기록한다 |
-| FRA1-9 | 알람바의 고정 문구(열 제목 Time / Robot / Message / State, 상태 Active / Cleared / Acknowledged, 버튼, 안내)는 영문이다. 시각은 24시간제 `HH:MM:SS` 로 쓴다 |
+| FRA1-9 | 알람바의 고정 문구(열 제목 시각 / 로봇 / 메시지 / 상태, 상태 활성 / 해소 / 확인됨, 버튼, 안내)는 한국어다 (8-1절). 시각은 24시간제 `HH:MM:SS` 로 쓴다 |
 | FRA1-11 | (추가, 구현됨) 알람바(모니터링)는 최근 100건만 보이고, 일어난 모든 알람 이벤트는 `alarm_history_dir`(기본 `data/alarms/`)에 1000건씩 파일로 나눠 저장한다(처음 100건에서 A2 때 1000건으로 변경). 파일 이름(`alarms_YYYY-MM-DD_HHMMSS.jsonl`)에는 파일을 만든 날짜와 시각이, 각 레코드(`saved_at`)에는 저장 시각이 들어가고, 가득 차면 그 시각의 이름으로 새 파일을 만든다. 조회는 `GET /api/alarms/history[/files]`. 보관 기간 정리와 재시작 때 이력에서 복원은 미정 (`docs/interfaces.md` 6-7절) |
 | FRA1-12 | (추가, 구현됨) 알람 목록은 안에서 스크롤되고, 아래 손잡이로 높이를 늘리고 줄인다(56px ~ 화면의 60%, 브라우저에 저장). 서버가 모르는 브라우저 전용 알람(서버 끊김, 로드 실패 등)은 `localStorage` 에 저장해 새로고침해도 남긴다 |
-| FRA1-10 | 알람 메시지(`Message` 열)는 카탈로그 템플릿으로 만들며 한글·영문 혼용을 허용한다. 기존 한국어 오류 원인 문구(`commands.py`, `main.py:do_estop`, `PatrolView.failReason`)는 번역 없이 `{reason}` 에 그대로 실어도 된다. 영문 대응(8절)은 있으면 쓰는 선택 사항이다 |
+| FRA1-10 | 알람 메시지(`메시지` 열)는 카탈로그 템플릿으로 만든 한국어 문장이다 (8-2절). 기존 한국어 오류 원인 문구(`commands.py`, `main.py:do_estop`, `PatrolView.failReason`)는 번역 없이 `{reason}` 에 그대로 싣는다 |
 
 ### 완료 기준
 - [x] `AlarmManager` 단위 테스트(생성, 묶기(ACK 전까지, A2 에서 정의 확정), 해소, 비상정지 비활성 불가)
@@ -156,7 +156,7 @@ CLAUDE.md, docs/interfaces.md, 그리고 이 PRD 의 Step A1 구현물(backend/a
 | FRA3-7 | 설정은 이 브라우저의 localStorage(`pinky.alarmsound.v1`)에 저장하고 저장소를 못 써도 동작한다 |
 | FRA3-8 | 브라우저 자동재생 제한 때문에 첫 클릭 전에는 소리가 막힌다. 막힌 동안 알람바에 "Click to enable alarm sound" 안내를 표시한다 |
 | FRA3-9 | 비상정지 실패(`HH`)는 전체 음소거 상태에서도 시각 경고가 유지된다(소리는 설정을 따름) |
-| FRA3-10 | 소리 설정 화면의 모든 문구는 영문이다(Alarm sound, Volume, Test, Stop, Repeat interval, Sound file, Fallback beep 등) |
+| FRA3-10 | 소리 설정 화면의 모든 문구는 한국어다 (알람 소리, 음량, 시험, 정지, 반복 주기, 사운드 파일, 합성 비프음 등, 8-4절) |
 
 ### 완료 기준
 - [x] 소리 로직(반복·중단·SIL·파일 실패 시 합성음 대체)을 순수 함수로 분리해 테스트 (`frontend/alarmsound.js`, `tests/test_alarmsound_js.py`)
@@ -173,7 +173,7 @@ CLAUDE.md 와 이 PRD 의 Step A2 구현물(알람바, ACK/SIL)을 먼저 읽어
 이 PRD 의 "Step A3" 기능 요구사항 표(FRA3-1~10)와 완료 기준, 결정 9·10·11 을 따라 구현해줘. 결정 10 은 1차안(config/sounds/ 에 파일을 직접 두고 서버가 서빙)으로 하고 GUI 업로드는 만들지 마.
 1. frontend/alarmsound.js: 반복·중단·SIL·파일 실패 시 합성음 대체 로직은 DOM 과 Audio 에 의존하지 않는 순수 함수로 분리하고, Web Audio 합성 비프음(레벨별 다른 음)과 파일 재생(mp3/wav/ogg)은 얇은 어댑터로 둔다.
 2. GET /api/alarms/sounds(파일 목록)과 /sounds/<파일> 정적 서빙. 경로 탈출과 허용 확장자·크기 검증.
-3. 소리 설정 화면(문구는 8-4절 영문): 전체 on/off, 음량, 레벨별 on/off, 사운드 파일 선택, 반복 주기, 레벨별 Test/Stop. 시험 재생은 알람을 만들지 않는다. localStorage 키 pinky.alarmsound.v1, try/catch.
+3. 소리 설정 화면(문구는 8-4절 한국어): 전체 on/off, 음량, 레벨별 on/off, 사운드 파일 선택, 반복 주기, 레벨별 시험/정지. 시험 재생은 알람을 만들지 않는다. localStorage 키 pinky.alarmsound.v1, try/catch.
 4. 자동재생 차단 시 알람바에 "Click to enable alarm sound" 표시.
 5. 순수 함수 단위 테스트(node 또는 pytest). 완료 기준을 하나씩 확인한 표를 보여줘. 실제 소리 확인은 내가 한다.
 ```
@@ -187,10 +187,10 @@ CLAUDE.md 와 이 PRD 의 Step A2 구현물(알람바, ACK/SIL)을 먼저 읽어
 | FRA4-3 | (Step A7 로 이관) ACK 되어 알람바에서 숨겨진 알람까지의 조회는 Alarm 화면의 History 탭이 맡는다 |
 | FRA4-4 | 카탈로그에는 현재 코드가 내는 모든 알람이 빠짐없이 있어야 한다(누락 검사 테스트) |
 | FRA4-5 | 이 단계에서는 수정 불가. operator 는 조회만 |
-| FRA4-6 | 카탈로그 화면의 고정 문구(열 제목, 필터, 버튼)는 영문이다(Name / Condition / Message / Level / Sound / Enabled / Last raised / Count). 알람 이름·조건·메시지 문구는 한영 혼용 가능 |
+| FRA4-6 | 카탈로그 화면의 고정 문구(열 제목, 필터, 버튼)는 한국어다 (ID / 이름 / 발생 조건 / 메시지 / 레벨 / 소리 / 사용 / 최근 발생 / 횟수, 8-4절) |
 
 ### 초기 카탈로그(조사 기준, 구현 시 재확인)
-레벨은 결정 9(확정)를 따른다. 영문 이름과 메시지는 8절: E-STOP failed / partially failed(HH), Command send failed(H), Robot offline(H), Patrol failed·retrying(H), Server disconnected(H, 브라우저 전용), Command rejected(L), No response to command(L), Patrol stopped(LL), Map / API load failed(LL), 구역 관련·프로세스 제어 오류(구현 때 확인 필요).
+레벨은 결정 9(확정)를 따른다. 이름과 메시지는 8절(한국어): 비상정지 실패·일부 전송(HH), 명령 전송 실패(H), 로봇 오프라인(H), 순찰 실패·재시도(H), 서버 연결 끊김(H, 브라우저 전용), 명령 거절(L), 명령 무응답(L), 순찰 정지(LL), 지도·API 불러오기 실패(LL), 구역 관련·프로세스 제어 오류(구현 때 확인 필요).
 
 ### 완료 기준
 - [x] 누락 검사 테스트 통과, 화면 스크린샷 (`tests/test_alarmcatalog.py`, `docs/alarm_a4.png`, `docs/alarm_a4_narrow.png`)
@@ -219,12 +219,14 @@ CLAUDE.md 와 docs/interfaces.md, 이 PRD 의 Step A1~A3 구현물(backend/alarm
 | FRA5-4 | `HH`(비상정지 계열)은 끌 수 없고 서버가 거부한다 |
 | FRA5-5 | 비활성·수정 내역은 로그 화면(`LogStore`)에 누가 언제 바꿨는지 남긴다 |
 | FRA5-6 | 입력 검증: 문구 길이 제한, 허용 레벨만, 문구 안의 치환 자리표시자만 허용 |
-| FRA5-7 | 편집 화면의 입력 안내·검증 오류와 서버 오류 응답은 영문이다(예: "Message must be 1–120 characters"). 알람 메시지 입력란은 한글·영문 모두 허용하고 길이는 글자 수로 센다 |
+| FRA5-7 | 편집 화면의 입력 안내·검증 오류와 서버 오류 응답은 한국어다(예: "메시지는 줄바꿈 없이 1~120글자여야 합니다"). 알람 메시지 입력란은 한글·영문 모두 허용하고 길이는 글자 수로 센다 |
 
 ### 완료 기준
-- [ ] 권한·검증·되돌리기 테스트, 서버 재시작 후 유지
-- [ ] operator 로 수정 시도 시 403
-- [ ] 끈 알람이 mock 에서 발생해도 표시되지 않음
+- [x] 권한·검증·되돌리기 테스트, 서버 재시작 후 유지 (`tests/test_alarmcatalog_edit.py`)
+- [x] operator 로 수정 시도 시 403 (`test_operator_gets_403_in_english_and_nothing_changes`, `verify_alarm_edit_ui.py`)
+- [x] 끈 알람이 mock 에서 발생해도 표시되지 않음 (`test_disabled_alarm_is_not_raised_shown_or_recorded`, 화면·소리는 `verify_alarm_edit_ui.py`)
+
+**구현 메모 (A5)**: 파일은 3겹이다(코드 기본값 ← `alarms.yaml` ← `alarms.local.yaml`), GUI 는 마지막 파일만 쓰고 기본과 다른 항목만 저장한다. 사용자 결정: **브라우저 전용 알람도 Enable·레벨까지 편집**(문구는 호출부의 동적 문장이라 제외). 설계 결정 — (1) 비상정지 계열은 `ESTOP_REQUEST_FAILED`(브라우저의 비상정지 요청 실패)까지 보호하고 기본 레벨을 H 에서 HH 로 올렸으며, 끄기·레벨 변경에 더해 **소리 끄기도 거부**한다. (2) 끄는 순간 이미 떠 있는 같은 알람은 해소해 소리를 멈춘다. 레벨·문구 변경은 이후 알람부터. (3) 브라우저 알람 대부분은 `state=event`(한 번 알리고 끝, ACK 불가)라 소리 대상이 아니다(A3 규칙). 소리를 낼 수 있는 것은 서버 알람과 `SERVER_DISCONNECTED` 뿐이고 나머지는 카탈로그에서 소리 칸이 잠긴다(`soundable`). (4) 알람별 사운드 파일(결정 11 확장)은 알람 파일 > 레벨 파일 > 합성 비프, 반복 주기는 이기는 알람의 값. (5) 정책은 `snapshot.alarm_policy`·WS `alarm_policy` 로 모든 화면에 방송. (6) local 파일이 깨지면 서버는 기본값으로 시작하고 화면에 알린다. (7) 새 엔드포인트의 오류 응답은 한국어다(FRA5-7). 로그인 전 401 은 전역 인증 게이트가 먼저 막는다. (처음 구현은 영문이었으나 영문화 철회로 한국어로 되돌렸다.) **A5 이후 추가 변경**: (8) 소리 설정 버튼을 왼쪽 메뉴 `소리` 에서 `알람` 화면 탭 줄의 `알람소리`(카탈로그 탭 옆)로 옮겼다. (9) 카탈로그 표 머리글 경계를 끌어 열 너비를 조절한다(더블클릭: 자동, 브라우저 localStorage `pinky.avColWidths`). (10) 서버 알람 `PROC_FAILED`(H) 추가: 시스템 패널 프로세스가 `failed` 가 되면(시작·SSH 실패, 시작 직후/예기치 않은 종료, 정지 실패) 알람, 다시 시작하거나 정지·종료되면 해소. 이 실패에는 응답 `alarmed` 로 화면의 `PROC_REQUEST_FAILED` 중복을 막는다. 알람 종류는 22개(서버 12 + 브라우저 10).
 
 ### Claude Code 프롬프트
 
@@ -234,45 +236,12 @@ CLAUDE.md, backend/auth.py, backend/alarms.py, backend/logstore 계열(로그 �
 1. 수정 내용은 config/alarms.local.yaml(override)에만 저장하고 config/alarms.yaml 은 건드리지 않는다. Reset to default 제공. 서버 재시작 후 유지.
 2. PUT /api/alarms/catalog/{code}, POST .../reset: manager(mngr)만, operator 는 403. 문구 길이(글자 수), 허용 레벨, 허용 자리표시자({robot},{cmd},{reason} 등)만 통과. HH 비상정지 계열은 끄기·레벨 변경을 서버가 거부.
 3. 비활성·수정 내역을 누가 언제 바꿨는지 로그 화면 저장소에 남긴다.
-4. 프론트엔드: manager 에게만 편집 UI(Enable 토글, 메시지, 레벨, 소리, 반복 주기, Save/Cancel/Reset), 오류 문구는 영문(FRA5-7). 알람별 사운드 지정(결정 11)도 이 단계에서 추가.
+4. 프론트엔드: manager 에게만 편집 UI(사용 토글, 메시지, 레벨, 소리, 반복 주기, 저장/취소/기본값으로 되돌리기), 오류 문구는 한국어(FRA5-7). 알람별 사운드 지정(결정 11)도 이 단계에서 추가.
 5. 끈 알람이 mock 에서 발생해도 표시·재생되지 않는 테스트, 권한·검증·되돌리기 테스트. 완료 기준 결과를 표로 보여줘.
 ```
 
-## Step A6. GUI 전체 영문화
-### 범위
-**포함**: `frontend/` 의 모든 화면(메인, 로그, 레이아웃 편집, 포인트 등 메뉴, 로봇 추가 팝업, 로그인, 시스템·프로세스 패널, 구역·순찰 표시, 명령 버튼, 지도 정보줄)과 서버가 브라우저에 돌려주는 사용자 대면 오류 문구(`main.py`, `commands.py`, `auth.py`, `procs.py` 등의 HTTP/WS 응답).
-**제외**: 코드 주석·docstring(한국어 유지, 코딩 규칙), 서버 로그 파일 내용, 알람 메시지 문구(한영 혼용 허용), 로봇·ROS 쪽 문자열.
-
-### 기능 요구사항
-| ID | 요구사항 |
-|---|---|
-| FRA6-1 | 사용자에게 보이는 고정 문구를 전부 영문으로 바꾼다. 조사 기준: `frontend/` 의 한글 문자열(`app.js`, `index.html`, `patrolview.js`, `procview.js`, `addrobot.js`, `zoneview.js`, `logview.js`) |
-| FRA6-2 | 문구를 `frontend/strings.js` 한 곳에 모으고 화면 코드는 키로 참조한다(후속 언어 추가 대비, 결정 13) |
-| FRA6-3 | 서버가 브라우저에 돌려주는 오류·상태 문구(`detail`, `error`)를 영문으로 바꾼다. 알람 메시지로 쓰이는 `{reason}` 은 FRA1-10 에 따라 한국어 유지 가능 |
-| FRA6-4 | `<html lang>` 을 `en` 으로 하고 날짜·시각 표기를 24시간제로 통일한다 |
-| FRA6-5 | 영문으로 길어진 문구가 메뉴·버튼·표에서 줄바꿈·잘림 없이 보인다(왼쪽 메뉴 폭, 로봇 카드 버튼, 시스템 패널 버튼) |
-| FRA6-6 | 한글 폰트가 필요 없는 화면에서도 알람 메시지의 한글이 깨지지 않도록 폰트 스택에 한글 폰트를 유지한다 |
-| FRA6-7 | 한국어 문구를 검사하는 기존 테스트·검증 스크립트(`tests/verify_*_ui.py`, `test_commands.py`, `test_auth.py` 등)를 영문 기준으로 갱신한다 |
-| FRA6-8 | `README.md`, `docs/interfaces.md` 의 화면 이름 설명을 새 영문 이름에 맞춘다(문서 본문은 한국어 유지) |
-
-### 완료 기준
-- [ ] 한글이 남은 사용자 대면 문구 전수 목록과 영문 대응표를 `docs/` 에 남기고, 화면별 headless Chrome 스크린샷으로 한글 잔존 확인(알람 메시지 제외)
-- [ ] 모든 화면에서 문구 잘림·줄바꿈 깨짐이 없음(스크린샷, 폭 860px 이하 포함)
-- [ ] 갱신한 기존 테스트 전부 통과
-- [ ] 실제 로봇 확인은 사용자가 수행
-
-### Claude Code 프롬프트
-
-```text
-CLAUDE.md 와 docs/interfaces.md 를 먼저 읽고, frontend/ 의 app.js, index.html, patrolview.js, procview.js, addrobot.js, zoneview.js, logview.js 와 backend 의 main.py, commands.py, auth.py, procs.py 를 읽어줘. 기존 ROS 패키지는 수정하지 마.
-이 PRD 의 "Step A6" 범위·기능 요구사항 표(FRA6-1~8)와 완료 기준, 0-7 공통 원칙 7번, 결정 12~14 를 따라 GUI 전체를 영문으로 바꿔줘. 코드 주석·docstring 은 한국어 유지, 알람 메시지 문구와 {reason} 은 한영 혼용 허용.
-1. 먼저 한글이 남은 사용자 대면 문구 전수 목록과 영문 대응표를 docs/ 에 만들어 보여줘(구현 전에 내가 검토한다).
-2. 승인 후 frontend/strings.js 에 문구를 모으고 화면 코드는 키로 참조. 서버가 돌려주는 detail/error 도 영문으로.
-3. <html lang="en">, 시각은 24시간제. 한글 폰트 스택은 유지(알람 메시지용).
-4. 영문으로 길어진 문구가 왼쪽 메뉴·로봇 카드 버튼·시스템 패널에서 잘리거나 줄바꿈이 깨지지 않게 조정.
-5. 한국어를 검사하는 기존 테스트·verify_*_ui.py 를 영문 기준으로 갱신하고 전부 통과시킨다. README.md 와 docs/interfaces.md 의 화면 이름 설명도 갱신(본문은 한국어).
-6. 화면별 headless Chrome 스크린샷(폭 860px 이하 포함)으로 한글 잔존·잘림 확인. 완료 기준 결과를 표로 보여줘.
-```
+## Step A6. (취소) GUI 전체 영문화
+사용자 결정(2026-10-12)으로 **하지 않는다.** 처음에는 GUI 의 모든 문구를 영문으로 바꾸는 단계(FRA6-1~8)였으나, 화면은 기존과 같은 한국어를 기본으로 하기로 했다. 이미 영문으로 만든 알람바·소리 설정·카탈로그 화면의 문구와 알람 메시지·서버 오류 문구도 한국어로 되돌렸다 (8절이 현재 문구 목록이다).
 
 ## Step A7. Alarm 화면 (전체 알람 목록)
 ### 배경
@@ -298,7 +267,7 @@ CLAUDE.md 와 docs/interfaces.md 를 먼저 읽고, frontend/ 의 app.js, index.
 | FRA7-11 | 서버가 저장 이력을 쓰지 못하는 설정(`alarm_history_dir` 없음)이면 이 화면은 "History is disabled" 안내만 보인다. 파일이 깨져 있어도(쓰다 끊긴 줄) 화면은 뜨고 그 줄만 건너뛴다 |
 | FRA7-12 | **서버가 꺼져 해소되지 못한 알람은 해소되지 않은 상태 그대로 기록하고 그렇게 보여 준다** (결정 15). 이력 파일에 종료 이벤트나 가짜 `cleared` 를 쓰지 않고, 서버 실행 구분자(`run`)도 추가하지 않는다. History 탭은 마지막 이벤트가 `cleared` 가 아닌 알람을 State `Uncleared` 로 보이되, **지금 서버 메모리에 active 로 살아 있는 알람(FRA7-7)만 `Active`** 라고 한다. 둘을 가르는 것은 서버 메모리의 `(id, t_raised)` 일치 여부뿐이며 추정하지 않는다. 서버를 재시작하면 `id` 가 1부터 다시 시작하므로 알람을 묶고 알아볼 때 `id` 단독이 아니라 `(id, t_raised)` 쌍을 쓴다 |
 | FRA7-13 | 서버 API: `GET /api/alarms/history?view=alarms&from=&to=&robot=&level=&state=&code=&q=&limit=&before=` (한 건당 한 행으로 묶은 결과와 다음 페이지 표지), `GET /api/alarms/history/{id}/events` 또는 같은 효과의 상세 조회, 내려받기용 `.../export`. 모두 operator 이상 (보기 전용), 입력 검증(날짜 형식, limit 상한, 알 수 없는 level 은 400). 기존 `GET /api/alarms/history` 의 이벤트 단위 응답은 그대로 유지한다 |
-| FRA7-14 | 이 화면의 고정 문구는 영문이다 (8-5절). Message 열의 알람 문구와 detail 은 한영 혼용 가능 |
+| FRA7-14 | 이 화면의 고정 문구는 한국어다 (8-5절). 알람 메시지와 detail 은 카탈로그가 만든 한국어 문장이다 |
 | FRA7-15 | `docs/interfaces.md` 6-7절에 새 API 를 기록하고, `README.md` 의 화면 구성에 Alarm 화면을 추가한다 |
 
 ### 완료 기준
@@ -308,7 +277,7 @@ CLAUDE.md 와 docs/interfaces.md 를 먼저 읽고, frontend/ 의 app.js, index.
 - [ ] active 알람이 맨 위에 고정되고 실시간으로 Cleared 로 바뀜. 메뉴 배지가 active 수를 따라감
 - [ ] 상세에서 이벤트 타임라인이 이력 파일과 같음, CSV 가 스프레드시트로 열림(한글 깨짐 없음)
 - [ ] 메인 화면의 알람바와 비상 정지가 이 화면에서도 보이고 눌림, 좁은 화면(860px 이하)에서 가로 스크롤 없음 (headless Chrome 스크린샷)
-- [ ] 화면 고정 문구에 한글 없음 (알람 문구 제외)
+- [ ] 화면 고정 문구가 8-5절의 한국어 문구와 같음 (영문 잔존 없음)
 - [ ] 실제 로봇 확인은 사용자가 수행 (체크리스트에 항목 추가)
 
 ### Claude Code 프롬프트
@@ -334,7 +303,7 @@ G1→A1, G2→A2, G3→A3, G4→A4·A5, G5→A1, G6→A6, G7→A7(알람 화면�
 | 이력 통합으로 일반 명령 행이 알람을 묻어 버림 | info 행은 접어서 표시, 필터 제공(결정 1) |
 | 소리가 자동재생 정책에 막힘 | 안내 문구와 시험 재생 |
 | 네트워크 진단 PRD N5 와 중복 | N5 의 알람 칩/목록은 이 PRD 의 `AlarmManager` 에 규칙으로 얹는다(결정 6) |
-| GUI 전체 영문화 중 번역 누락·문구 길이로 레이아웃 깨짐 | 문구 표(`strings.js`)로 일원화하고 A6 완료 기준에 한글 잔존·잘림 스크린샷 검증 포함 |
+| (철회) GUI 전체 영문화 | 영문화는 하지 않는다 (결정 12~14 철회). 약어·식별자(ACK, SIL, HH, ID 등)는 그대로 둔다 |
 | Alarm 화면이 큰 이력 파일을 읽느라 서버가 느려짐 | 파일을 최신부터 필요한 만큼만 읽고(최대 200행/요청), 필터·기간 상한을 서버가 적용 (Step A7) |
 | 서버가 꺼져 `cleared` 가 없는 알람이 이력에 해소되지 않은 채 남음 | 의도된 동작(결정 15): History 탭에서 `Uncleared` 로 구분해 보이고, 지금 살아 있는 알람만 `Active`. 사실을 추정하지 않는다 |
 | 레이아웃 키 변경으로 사용자 배치 초기화 | 알림 없이 기본 배치로 복귀, 문서에 명시 |
@@ -353,9 +322,9 @@ G1→A1, G2→A2, G3→A3, G4→A4·A5, G5→A1, G6→A6, G7→A7(알람 화면�
 10. 사운드 파일 업로드 방식은? → **확정(사용자 결정): 1차: 파일을 `pinky_web_gui/config/sounds/` 에 직접 두고 서버가 서빙, 2차: manager 가 GUI 에서 업로드**(형식 mp3/wav/ogg, 파일당 1MB 이하 권장). GUI 업로드는 저장·검증 코드가 늘어나므로 단계 분리.
 11. 사운드 파일 지정은 레벨별 하나인가, 알람(카탈로그 항목)별로도 지정하나? → **확정(사용자 결정): 1차 레벨별, A5 에서 알람별 지정 확장**
 
-12. GUI 영문화의 범위 → **확정: GUI 전체를 영문으로 전환(Step A6). 알람 메시지 문구만 한영 혼용 허용**
-13. 영문 문구는 코드에 고정하나, 언어 전환(KO/EN)을 둘 것인가? → **EN 고정. 문구는 한 곳에 모아(`frontend/strings.js` 성격의 문구 표) 나중에 언어를 추가할 수 있게 한다.** 서버가 내는 사용자 대면 오류 문구도 같은 원칙
-14. A6 를 언제 하나? → **A1 직후 권장**: A1 이 알람바·이력 화면을 새로 쓰므로 그 뒤에 하면 번역 대상이 줄고, A2~A5 는 처음부터 영문 문구 표를 쓴다
+12. GUI 영문화의 범위 → **철회(사용자 결정 2026-10-12): 영문화하지 않는다. 기존 화면과 같은 한국어를 기본으로 한다.** (처음에는 GUI 전체 영문 전환이었다)
+13. 영문 문구를 코드에 고정하나, 언어 전환(KO/EN)을 둘 것인가? → **철회: 영문화를 하지 않으므로 해당 없음.** 문구는 화면 코드(`alarmview.js` 의 `TEXT` 등) 한 곳에 모아 두어 나중에 언어를 추가할 수 있게 한 구조는 그대로 둔다
+14. A6 를 언제 하나? → **철회: A6(GUI 전체 영문화)는 하지 않는다.**
 15. 서버가 꺼져 `cleared` 가 기록되지 못한 알람은 이력에서 어떻게 보이나? → **확정(사용자 결정): 해소되지 않은 상태 그대로 기록한다.** 서버 종료 때 종료 이벤트·가짜 `cleared` 를 쓰지 않고 이력 줄에 `run` 필드도 넣지 않는다(A1 의 파일 형식은 그대로). History 탭은 `Uncleared`(이력에 해소 기록이 없음)와 `Active`(지금 서버가 들고 있는 알람)를 구분해 보여 준다
 16. Alarm 화면이 읽는 데이터는? → **저장된 이력 파일(서버가 묶어서 제공)**. 화면은 파일을 직접 읽지 않고 API 로만 받는다. 알람바의 100건 목록과 별개로 항상 전체를 볼 수 있다
 17. A7 을 언제 하나? → **A1 직후, A2 앞** 권장: 이력 파일이 이미 쌓이고 있어 화면만 있으면 되고, ACK(A2)·카탈로그(A4)가 같은 화면을 쓴다
@@ -365,58 +334,56 @@ G1→A1, G2→A2, G3→A3, G4→A4·A5, G5→A1, G6→A6, G7→A7(알람 화면�
 21. 이력 파일 크기와 이름 → **확정(사용자 결정, A2 후속)**: 알람바는 100건 유지, 이력 파일은 **파일당 1000줄**, 가득 차면 **그 시점의 시각**으로 새 파일(`alarms_YYYY-MM-DD_HHMMSS.jsonl`). 기록은 이벤트마다 즉시 추가(넘칠 때 몰아 저장하지 않음). 예전 번호 이름 파일도 읽는다
 
 ## 7. 권장 진행 순서
-A1 → A6(영문화, 결정 14) → A7(Alarm 화면, 결정 17) → A2 → A3 → A4 → A5. A1 은 데이터 구조가 이후 모두의 기반이므로 먼저 검토·확정.
+A1 → A7(Alarm 화면, 결정 17) → A2 → A3 → A4 → A5. (A6 영문화는 철회.) A1 은 데이터 구조가 이후 모두의 기반이므로 먼저 검토·확정.
 
-## 8. GUI 표시 문구 (EN)
+## 8. GUI 표시 문구 (한국어)
+영문화는 철회했다(결정 12~14). ACK, SIL, HH/H/L/LL/info, ID, LiDAR 같은 약어·식별자는 그대로 쓴다.
+
 ### 8-1 알람바
 | 요소 | 문구 |
 |---|---|
-| 열 제목 | Time / Robot / Message / State |
-| 상태 | Active / Cleared / Acknowledged |
-| 버튼 | ACK / SIL (툴팁: "Acknowledge cleared alarms" / "Silence current alarm sound") |
-| 빈 목록 | No alarms |
+| 열 제목 | 시각 / 로봇 / 메시지 / 상태 |
+| 상태 | 활성 / 해소 / 확인됨 |
+| 버튼 | ACK / SIL (툴팁: "해소된 알람을 확인(ACK)해 목록에서 숨깁니다" / "지금 울리는 알람 소리를 끕니다") |
+| 빈 목록 | 알람 없음 |
 | 반복 횟수 | `×3` |
-| 소리 차단 안내 | Click to enable alarm sound |
-| 필터 | Show info / Hide info |
-| 연결 끊김(브라우저 전용) | Server disconnected / Server reconnected |
+| 소리 차단 안내 | 클릭하면 알람 소리가 켜집니다 |
+| 필터 | 기록 표시 / 기록 숨김 |
+| 연결 끊김(브라우저 전용) | 서버 연결 끊김 / 서버에 다시 연결됨 |
 
 ### 8-2 알람 메시지 템플릿 (레벨은 결정 9 확정)
 | 코드 | 레벨 | 메시지 |
 |---|---|---|
-| ESTOP_FAILED | HH | E-STOP failed on {robot}: {reason} |
-| ESTOP_PARTIAL | HH | E-STOP partially sent on {robot}: {reason} |
-| CMD_SEND_FAILED | H | Command `{cmd}` could not be sent to {robot}: {reason} |
-| ROBOT_OFFLINE | H | {robot} is offline |
-| PATROL_FAILED | H | Patrol failed on {robot}: {reason} |
-| PATROL_RETRY | H | Patrol retrying on {robot}: {reason} (A1 구현 때 추가) |
-| SERVER_DISCONNECTED | H | Server disconnected |
-| CMD_REJECTED | L | Command `{cmd}` rejected for {robot}: {reason} |
-| CMD_NO_RESPONSE | L | No response from {robot} to `{cmd}` |
-| PATROL_STOPPED | LL | Patrol stopped on {robot} |
-| LOAD_FAILED | LL | Failed to load {resource} |
-| CMD_SENT | info | Command `{cmd}` sent to {robot} |
-| ROBOT_ONLINE | info | {robot} is online |
+| ESTOP_FAILED | HH | {robot} 비상정지 실패: {reason} |
+| ESTOP_PARTIAL | HH | {robot} 비상정지가 일부만 전송됨: {reason} |
+| CMD_SEND_FAILED | H | {robot} 에 명령 `{cmd}` 를 보내지 못함: {reason} |
+| ROBOT_OFFLINE | H | {robot} 오프라인 |
+| PATROL_FAILED | H | {robot} 순찰 실패: {reason} |
+| PATROL_RETRY | H | {robot} 순찰 재시도 중: {reason} (A1 구현 때 추가) |
+| SERVER_DISCONNECTED | H | 서버 연결 끊김 |
+| CMD_REJECTED | L | {robot} 에 대한 명령 `{cmd}` 거절: {reason} |
+| CMD_NO_RESPONSE | L | {robot} 이(가) `{cmd}` 에 응답 없음 |
+| PATROL_STOPPED | LL | {robot} 순찰 정지됨 |
+| LOAD_FAILED | LL | {resource} 을(를) 불러오지 못함 |
+| CMD_SENT | info | {robot} 에 명령 `{cmd}` 전송 |
+| ROBOT_ONLINE | info | {robot} 온라인 |
 
-### 8-3 오류 원인 문구 (`{reason}`) 영문 대응 (선택 사항)
-| 기존 한국어 원인 | 영문 |
-|---|---|
-| cmd_vel 0 속도를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다) | No subscriber for cmd_vel zero-velocity (domain_bridge may be down) |
-| patrol_cmd stop 전송 실패 | Failed to send patrol_cmd stop |
-| 로봇이 이미 멈춰 있었거나 stop 이 반영되지 않았을 수 있음 | Robot may already be stopped or stop may not have taken effect (zero velocity was sent) |
+`{reason}` 에는 기존 한국어 원인 문구(`commands.py`, `main.py:do_estop`, `PatrolView.failReason`, 명령 거절 사유 등)가 그대로 들어간다.
 
-알람 메시지는 한영 혼용을 허용하므로(공통 원칙 7) 이 대응은 필수가 아니다. 대응이 없는 원인은 한국어 원문을 그대로 보인다. 나머지 원인 문구(`PatrolView.failReason`, 명령 거절 사유 등)는 필요할 때 구현 중 추가한다.
+### 8-3 (삭제)
+영문 대응표는 영문화 철회로 필요 없어 삭제했다.
 
 ### 8-4 소리·카탈로그 화면
-Alarm sound / Master on-off / Volume / Repeat interval (s) / Level / Sound file / Upload / Test / Stop / Fallback beep / Alarm catalog / Alarm history / Name / Condition / Message / Enabled / Last raised / Count / Reset to default / Save / Cancel
+알람 소리 / 알람 소리 켜기 / 음량 / 반복 주기(초) / 레벨 / 켜짐 / 사운드 파일 / 시험 / 정지 / 합성 비프음 / 닫기 — 알람 카탈로그 / 이름 / 발생 조건 / 메시지 / 레벨 / 소리 / 사용 / 최근 발생 / 횟수 / 편집 / 사용 / 사운드 파일 / 반복 주기(초) / 저장 / 취소 / 기본값으로 되돌리기
 
 ### 8-5 Alarm 화면 (Step A7)
 | 요소 | 문구 |
 |---|---|
-| 메뉴 버튼 | Alarm |
-| 탭 | History / Catalog |
-| 열 제목 | Raised / Robot / Level / Message / State / Count / Cleared / Duration |
-| 상태 | Active / Cleared / Acknowledged / Uncleared (no clear recorded) |
-| 필터 | From / To / Robot / Level / State / Code / Search / Apply / Reset |
-| 버튼 | Load more / Export CSV / Show files / Hide files |
-| 상세 | Timeline / Raised / Repeated / Cleared / Detail / File |
-| 안내 | No alarms found / History is disabled / Showing the latest N of M alarms / Export is limited to N rows |
+| 메뉴 버튼 | 알람 |
+| 탭 | 이력 / 카탈로그 |
+| 열 제목 | 발생 / 로봇 / 레벨 / 메시지 / 상태 / 횟수 / 해소 / 지속 시간 |
+| 상태 | 활성 / 해소 / 확인됨 / 해소 기록 없음 |
+| 필터 | 시작 / 끝 / 로봇 / 레벨 / 상태 / 코드 / 검색 / 적용 / 초기화 |
+| 버튼 | 더 보기 / CSV 내보내기 / 파일 보기 / 파일 숨기기 |
+| 상세 | 타임라인 / 발생 / 반복 / 해소 / 상세 / 파일 |
+| 안내 | 알람이 없습니다 / 이력 저장이 꺼져 있습니다 / 최신 N건 (전체 M건) / 내보내기는 N행까지입니다 |

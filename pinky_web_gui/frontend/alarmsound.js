@@ -2,7 +2,7 @@
 // 알람 소리. 위쪽(순수 함수)은 DOM 과 Audio 에 의존하지 않아서 브라우저와 node/headless Chrome 양쪽에서 같은 코드를 시험한다 (mapmath.js 와 같은 방식).
 //   설정 정규화, 어떤 레벨 소리를 낼지, 언제 반복할지(step), 파일 대신 합성음을 쓸지(chooseSource) 가 순수 함수다.
 // 아래쪽(createAdapter)은 Web Audio 합성 비프음과 파일 재생만 하는 얇은 어댑터이고, createController 가 둘을 이어 준다.
-// PRD: 알람바 개선 Step A3 (FRA3-1~10), 결정 9(레벨 순서), 10(파일은 config/sounds/), 11(레벨별 파일).
+// PRD: 알람바 개선 Step A3 (FRA3-1~10), 결정 9(레벨 순서), 10(파일은 config/sounds/), 11(레벨별 파일, Step A5 에서 알람별 파일·반복 주기로 확장).
 (function (root) {
   const SOUND_LEVELS = ['HH', 'H', 'L', 'LL'];            // info 는 무음이라 없다 (FRA3-1). 심각도 순서 (결정 9)
   const RANK = { HH: 4, H: 3, L: 2, LL: 1 };
@@ -59,49 +59,67 @@
   }
 
   // ---------- 무엇을 울릴까 ----------
-  // 소리 낼 알람 레벨 목록(levels)에서 가장 심각하고 레벨 설정이 켜진 것. 없으면 null. info 와 모르는 레벨은 무시한다.
-  function pickLevel(levels, settings) {
+  // 소리를 낼 알람(target)은 레벨 문자열(A3) 또는 {level, file, interval}(A5: 알람별 사운드 파일과 반복 주기, 서버 카탈로그 정책)이다
+  const normTarget = (t) => (typeof t === 'string' ? { level: t, file: '', interval: null } : { level: t && t.level, file: (t && t.file) || '', interval: (t && t.interval) || null });
+
+  // 가장 심각하고 레벨 설정이 켜진 알람. 같은 레벨이면 앞선 것(알람바에서 가장 최근 것). 없으면 null
+  function pickTarget(targets, settings) {
     let best = null;
-    for (const lv of levels || []) {
-      const cfg = settings.levels[lv];
-      if (RANK[lv] && cfg && cfg.on && (best === null || RANK[lv] > RANK[best])) best = lv;
+    for (const raw of targets || []) {
+      const t = normTarget(raw), cfg = settings.levels[t.level];
+      if (RANK[t.level] && cfg && cfg.on && (best === null || RANK[t.level] > RANK[best.level])) best = t;
     }
     return best;
   }
 
-  // 레벨의 소리 원천: 고른 파일이 목록에 있고 재생에 실패한 적 없으면 파일, 아니면 합성음 (FRA3-2: 소리 없이 넘어가지 않는다)
-  function chooseSource(level, settings, files, failed) {
-    const cfg = settings.levels[level];
-    const name = cfg ? cfg.file : '';
-    if (!name) return { kind: 'beep', why: 'no file selected' };
-    if (!(files || []).includes(name)) return { kind: 'beep', why: 'file missing', file: name };
-    if (failed && failed.has(name)) return { kind: 'beep', why: 'file failed', file: name };
-    return { kind: 'file', name };
+  // 소리 낼 알람 레벨 목록(levels)에서 가장 심각하고 레벨 설정이 켜진 것. 없으면 null. info 와 모르는 레벨은 무시한다.
+  function pickLevel(levels, settings) {
+    const t = pickTarget(levels, settings);
+    return t ? t.level : null;
   }
 
-  // 한 번 재생을 영문 한 줄로 (소리 설정 화면 상태줄)
+  // 소리 원천 (FRA3-2: 소리 없이 넘어가지 않는다). 알람 파일(file) > 레벨 파일 > 합성음. 고른 파일이 목록에 있고 재생에 실패한 적 없으면 파일.
+  // 알람 파일을 못 쓰면 레벨 파일로, 그것도 못 쓰면 합성음으로 내려간다.
+  function chooseSource(level, settings, files, failed, file) {
+    const cfg = settings.levels[level];
+    const names = [file || '', cfg ? cfg.file : ''].filter((n, i, a) => n && a.indexOf(n) === i);
+    if (!names.length) return { kind: 'beep', why: 'no file selected' };
+    let first = null;
+    for (const name of names) {
+      if (!(files || []).includes(name)) { first = first || { kind: 'beep', why: 'file missing', file: name }; continue; }
+      if (failed && failed.has(name)) { first = first || { kind: 'beep', why: 'file failed', file: name }; continue; }
+      return { kind: 'file', name };
+    }
+    return first;
+  }
+
+  // 한 번 재생을 한국어 한 줄로 (소리 설정 화면 상태줄). why 는 chooseSource 의 내부 식별자
+  const WHY_TEXT = { 'file missing': '파일 없음', 'file failed': '재생 실패' };
   function describeSource(level, src) {
-    if (src.kind === 'file') return level + ': playing ' + src.name;
-    return level + ': fallback beep' + (src.why === 'no file selected' ? '' : ' (' + src.why + (src.file ? ': ' + src.file : '') + ')');
+    if (src.kind === 'file') return level + ': ' + src.name + ' 재생 중';
+    return level + ': 합성 비프음' + (src.why === 'no file selected' ? '' : ' (' + (WHY_TEXT[src.why] || src.why) + (src.file ? ': ' + src.file : '') + ')');
   }
 
   // 반복·중단 판단. 시계와 타이머를 모르는 순수 함수라서 now 를 받는다.
   //   state: {lastAt, lastLevel} (마지막으로 울린 시각 ms 와 레벨, 안 울렸으면 null)
-  //   input: {now, settings, targets(소리 낼 알람 레벨 목록), silenced(SIL), blocked(자동재생 차단), preview({level, since}|null)}
-  //   반환: {state, action: 'play' | 'stop' | 'none', level, endPreview, wanted(울려야 하는 레벨 또는 null)}
+  //   input: {now, settings, targets(소리 낼 알람: 레벨 문자열 또는 {level, file, interval}), silenced(SIL), blocked(자동재생 차단), preview({level, since}|null)}
+  //   반환: {state, action: 'play' | 'stop' | 'none', level, file(그 알람의 사운드 파일 이름 또는 ''), endPreview, wanted(울려야 하는 레벨 또는 null)}
   // 규칙: 시험 재생 > 전체 끔/SIL > 레벨별 끔. 레벨이 바뀌면 바로 울리고, 같은 레벨은 반복 주기마다 울린다. 울릴 게 없어지면(ACK/해소/SIL) 바로 멈춘다 (FRA3-5).
   function step(state, input) {
     const idle = { lastAt: null, lastLevel: null };
-    let level = null, endPreview = false;
+    let level = null, file = '', interval = null, endPreview = false;
     const pv = input.preview;
     if (pv && input.now - pv.since > PREVIEW_MAX_MS) endPreview = true;
     if (pv && !endPreview) level = pv.level;                  // 시험 재생은 켜짐/끔/SIL 과 상관없이 들려 준다 (실제 알람을 만들지 않는다: FRA3-4)
-    else if (input.settings.enabled && !input.silenced) level = pickLevel(input.targets, input.settings);
-    if (level === null) return { state: idle, action: state.lastAt === null ? 'none' : 'stop', level: null, endPreview, wanted: null };
-    if (input.blocked) return { state: idle, action: 'none', level: null, endPreview, wanted: level };   // 차단이 풀리면 바로 울리도록 마지막 시각을 비워 둔다
-    const due = state.lastAt === null || level !== state.lastLevel || input.now - state.lastAt >= input.settings.interval * 1000;
-    if (!due) return { state, action: 'none', level: null, endPreview, wanted: level };
-    return { state: { lastAt: input.now, lastLevel: level }, action: 'play', level, endPreview, wanted: level };
+    else if (input.settings.enabled && !input.silenced) {
+      const t = pickTarget(input.targets, input.settings);
+      if (t) { level = t.level; file = t.file; interval = t.interval; }   // 이기는 알람의 사운드 파일과 반복 주기 (없으면 레벨 파일과 설정 주기)
+    }
+    if (level === null) return { state: idle, action: state.lastAt === null ? 'none' : 'stop', level: null, file: '', endPreview, wanted: null };
+    if (input.blocked) return { state: idle, action: 'none', level: null, file: '', endPreview, wanted: level };   // 차단이 풀리면 바로 울리도록 마지막 시각을 비워 둔다
+    const due = state.lastAt === null || level !== state.lastLevel || input.now - state.lastAt >= (interval || input.settings.interval) * 1000;
+    if (!due) return { state, action: 'none', level: null, file: '', endPreview, wanted: level };
+    return { state: { lastAt: input.now, lastLevel: level }, action: 'play', level, file, endPreview, wanted: level };
   }
 
   // ---------- 어댑터: Web Audio 합성음과 파일 재생만 한다 ----------
@@ -180,9 +198,9 @@
       if (opts.onUpdate) opts.onUpdate(info);
     }
 
-    function playNow(level) {
+    function playNow(level, file) {
       const settings = opts.getSettings();
-      const src = chooseSource(level, settings, files, failed);
+      const src = chooseSource(level, settings, files, failed, file);
       const token = ++playToken;
       status = describeSource(level, src);
       const beep = () => adapter.playBeep(level, settings.volume);
@@ -191,7 +209,7 @@
         if (token !== playToken) return;                      // 그 사이 멈췄거나 다시 울렸다
         if (res === 'failed') {
           failed.add(src.name);
-          status = describeSource(level, chooseSource(level, settings, files, failed));
+          status = describeSource(level, chooseSource(level, settings, files, failed, file));
           beep();                                            // 이번 발생도 소리 없이 넘기지 않는다
         } else if (res === 'blocked') {
           st = { lastAt: null, lastLevel: null };            // 클릭 뒤에 다시 시도한다
@@ -207,7 +225,7 @@
       st = r.state;
       if (r.endPreview) preview = null;
       if (r.action === 'stop') { playToken++; adapter.stop(); status = ''; }
-      if (r.action === 'play') { playNow(r.level); playing = r.level; }
+      if (r.action === 'play') { playNow(r.level, r.file); playing = r.level; }
       if (r.wanted === null || adapter.isBlocked()) playing = null;
       last.wanted = r.wanted;
       notify();
@@ -233,7 +251,7 @@
   }
 
   const api = { SOUND_LEVELS, STORAGE_KEY, INTERVAL_MIN, INTERVAL_MAX, PREVIEW_MAX_MS, defaultSettings, normalizeSettings, loadSettings, saveSettings,
-                pickLevel, chooseSource, describeSource, step, beepPattern, createAdapter, createController };
+                pickLevel, pickTarget, chooseSource, describeSource, step, beepPattern, createAdapter, createController };
   root.AlarmSound = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

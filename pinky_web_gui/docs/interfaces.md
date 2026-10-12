@@ -262,7 +262,7 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(인증이 켜져 있을 때만 true, `--no-auth` 면 false)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
 
-## 6-7. 웹 GUI 알람 (알람바 Step A1, A2, A3, A4)
+## 6-7. 웹 GUI 알람 (알람바 Step A1, A2, A3, A4, A5)
 
 알람바(화면 위)에 보이는 사건은 **서버가 만든다** (`backend/alarms.py` 의 `AlarmManager`). 접속한 모든 화면이 같은 알람을 보고, 하단 명령 이력 패널은 알람바에 통합돼 없어졌다. 서버가 알 수 없는 사건(WS 끊김, 지도·설정 불러오기 실패, 화면 안내, 요청이 서버에 닿지 못함)은 브라우저가 같은 목록에 직접 추가한다 (id 가 `local-N`, 시각은 브라우저 시계).
 
@@ -281,7 +281,7 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | `state` | `active`(조건 지속) \| `cleared`(조건 사라짐). `info` 는 해소 개념이 없어 만들 때부터 `cleared`. ACK 는 상태를 바꾸지 않는다 (아래 `acked_by`) |
 | `t_raised`, `t_last`, `t_cleared` | 처음 발생, 마지막 발생, 해소 시각 (서버 epoch 초, 해소 전엔 `t_cleared` 가 `null`) |
 | `count` | 같은 알람이 ACK 전에 반복된 횟수 (새 행은 1) |
-| `acked_by`, `acked_at` | ACK 한 계정 ID(`mngr` \| `oper`, `--no-auth` 서버는 `no-auth`)와 시각(epoch 초). ACK 전에는 `null`. `info` 는 ACK 대상이 아니라 항상 `null`. **해소된 알람이 ACK 되어 있으면 알람바에서 숨긴다** (활성 알람은 `Acknowledged` 로 계속 보이다가 해소되면 숨는다). 숨긴 알람은 서버 메모리와 이력 파일에는 남고 `snapshot.alarms`/`GET /api/alarms` 에서는 빠진다 |
+| `acked_by`, `acked_at` | ACK 한 계정 ID(`mngr` \| `oper`, `--no-auth` 서버는 `no-auth`)와 시각(epoch 초). ACK 전에는 `null`. `info` 는 ACK 대상이 아니라 항상 `null`. **해소된 알람이 ACK 되어 있으면 알람바에서 숨긴다** (활성 알람은 `확인됨` 로 계속 보이다가 해소되면 숨는다). 숨긴 알람은 서버 메모리와 이력 파일에는 남고 `snapshot.alarms`/`GET /api/alarms` 에서는 빠진다 |
 
 **메시지와 REST**
 
@@ -305,12 +305,13 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | `ESTOP_PARTIAL` | HH | 둘 중 하나만 나감. 이후 비상정지가 성공하면 해소 |
 | `CMD_SEND_FAILED` | H | 명령 발행 실패 (구독자 없음 등, HTTP 503). 같은 로봇에 새 명령이 나가면 해소 |
 | `ROBOT_OFFLINE` | H | 로봇 online 이 꺼짐 (`StateStore` 타임아웃). 신호가 돌아오면 해소. 서버 시작 뒤 한 번도 신호가 없던 로봇은 만들지 않는다 |
+| `PROC_FAILED` | H | 시스템 패널 프로세스가 `failed` 가 되는 순간(시작 실패, SSH 연결 실패, 시작 직후 종료, 예기치 않은 종료, 정지 실패). 알람 키(`robot` 칸)는 프로세스 id, 문구 `{resource} 실패: {reason}`. 다시 시작하거나(`starting`) 정지·종료되면 해소. 이 실패 응답에는 `alarmed: true` 가 실려 화면이 `PROC_REQUEST_FAILED` 를 또 만들지 않는다(알람을 끄면 `false`) |
 | `PATROL_FAILED` / `PATROL_RETRY` | H | `patrol_status` 의 `FAILED` / `RETRY`. 다른 상태로 바뀌면 해소 (한 로봇에 순찰 알람은 하나만 active) |
 | `CMD_REJECTED` | L | 백엔드 검증이 명령을 거절 (HTTP 400). 로봇 응답이 오거나 새 명령이 나가면 해소 |
 | `CMD_NO_RESPONSE` | L | 명령 뒤 `no_response_sec` 안에 `patrol_status` 가 안 바뀜. 응답이 오거나 새 명령이 나가면 해소. 비상정지는 무응답이어도 만들지 않는다 |
 | `PATROL_STOPPED` | LL | `patrol_status` 가 `STOPPED`. 다른 상태로 바뀌면 해소 |
-| `CMD_SENT`, `ROBOT_ONLINE` | info | 기록용 행 (명령 전송 성공 · 비상정지 성공은 `cmd` 가 `estop` · 로봇이 온라인이 됨). 소리·확인 대상이 아니고 알람바 `Hide info` 로 숨길 수 있다 |
-| `SERVER_DISCONNECTED`, `LOAD_FAILED` | H, LL | **브라우저 전용** (서버는 만들지 않는다). 연결 끊김은 재접속하면 해소하고 `Server reconnected`(info) 를 남긴다 |
+| `CMD_SENT`, `ROBOT_ONLINE` | info | 기록용 행 (명령 전송 성공 · 비상정지 성공은 `cmd` 가 `estop` · 로봇이 온라인이 됨). 소리·확인 대상이 아니고 알람바 `기록 숨김` 로 숨길 수 있다 |
+| `SERVER_DISCONNECTED`, `LOAD_FAILED` | H, LL | **브라우저 전용** (서버는 만들지 않는다). 연결 끊김은 재접속하면 해소하고 `서버에 다시 연결됨`(info) 를 남긴다 |
 
 **알람 이력 파일** (`backend/alarmlog.py`): 알람바(모니터링)에는 최근 **100건**만 있지만(서버도 100건으로 자른다), 일어난 알람 이벤트는 모두 파일로 남는다.
 
@@ -337,15 +338,22 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | 설정 저장 | 이 브라우저의 localStorage `pinky.alarmsound.v1` `{enabled, volume, interval, levels: {HH: {on, file}, H, L, LL}}`. 깨진 값은 기본값으로 고치고, 저장소를 못 써도 이번 화면에서는 동작한다 |
 | 시각 경고 | 소리 설정과 상관없이 알람 행은 그대로 보인다 (HH 도 전체 음소거에서 행이 유지된다) |
 
-**알람 카탈로그** (Step A4, 읽기 전용. 정의는 `backend/alarmcatalog.py`, 덮어쓰기는 `config/alarms.yaml`):
+**알람 카탈로그** (Step A4 표시, Step A5 수정. 정의와 검증은 `backend/alarmcatalog.py`):
 
 | 항목 | 내용 |
 |---|---|
-| 정의 | 시스템이 낼 수 있는 모든 알람 21개: 코드(ID), 이름, 발생 조건, 메시지 템플릿, 레벨, `origin`, 근거 코드(`source`). `origin` 은 `server`(서버가 만들어 모든 화면에 보냄)와 `browser`(브라우저가 이 화면에만 만듦: 서버 끊김, 요청 실패, 로드 실패, 화면 안내 등). 브라우저 알람은 `addAlarm(..., {code})` 의 `code` 로 구분한다 |
-| `GET /api/alarms/catalog` | operator 이상(로그인 없으면 401). `{alarms: [{code, name, condition, message, level, sound, enabled, protected, origin, source, last_raised, count}], levels, counted_since}`. 심각한 레벨 순. `sound` 는 `info` 만 false (알람별 소리 지정은 A5). `last_raised`(epoch)·`count` 는 **이번 서버 실행 중** 센 값이고 반복(`repeated`)도 한 번으로 센다. 서버를 켜면 0 부터이며 모든 발생은 이력 파일에 있다. 브라우저 알람은 서버가 모르므로 `null`. 수정 API 는 없다 (PUT/POST/DELETE 는 405) |
-| `GET /api/alarms/history`, `.../history/files` | 기존 이벤트 단위 응답 그대로. A4 에서 operator 이상 권한 검사를 더했다 (인증이 꺼져 있으면 영향 없음) |
-| `config/alarms.yaml` | `alarms: {코드: {name, condition, message, level, enabled}}` 로 기본값을 덮어쓴다 (`robots.yaml` 의 `alarms_yaml`). 파일을 고친 뒤 서버를 다시 켠다. `level`·`message`·`enabled` 는 서버 알람만 따른다 (`enabled: false` 이면 그 알람을 만들지 않음, 해소는 가능). 브라우저 알람은 `name`·`condition` 만 바꿀 수 있다. 알 수 없는 코드·레벨, `sound` 항목, 브라우저 알람의 `level`/`message`/`enabled`, 비상정지 알람(`ESTOP_FAILED`, `ESTOP_PARTIAL`)의 `enabled: false` 는 서버 시작 때 오류로 거절한다. 파일이 없으면 기본값 |
-| 화면 | 왼쪽 메뉴 `Alarm` → `Catalog` 탭 (`History` 탭은 Step A7 이 채우므로 비활성). 열 `ID / Name / Condition / Message / Level / Sound / Enabled / Last raised / Count`, 필터 Level·Origin·검색, 열려 있는 동안 5초마다 갱신. 고정 문구는 영문 |
+| 정의 | 시스템이 낼 수 있는 모든 알람 22개: 코드(ID), 이름, 발생 조건, 메시지 템플릿, 레벨, `origin`, 근거 코드(`source`), 허용 자리표시자(`placeholders`), `soundable`. `origin` 은 `server`(서버가 만들어 모든 화면에 보냄)와 `browser`(브라우저가 이 화면에만 만듦: 서버 끊김, 요청 실패, 로드 실패, 화면 안내 등. `addAlarm(..., {code})` 의 `code` 로 구분). `soundable` 은 소리를 낼 수 있는 종류인지: 서버 알람과 `SERVER_DISCONNECTED`(active 상태가 있음)만 true, 나머지 브라우저 알람은 "한 번 알리고 끝나는 기록"(ACK 로 끌 수 없음)이라 소리가 없다 |
+| 세 겹 | 코드 기본값 ← `config/alarms.yaml`(사람이 편집기로 고침, GUI 는 쓰지 않음) ← `config/alarms.local.yaml`(manager 가 GUI 에서 저장한 변경분). local 파일에는 **기본과 다른 항목만** 들어가고, 기본과 같아지면 그 항목이 빠진다. 임시 파일에 쓴 뒤 `os.replace` 로 교체(쓰다 끊겨도 옛 파일이 남음), git 에는 올리지 않는다(`.gitignore`). `--mock` 은 `alarms.local-mock.yaml`(인자 `--alarms-local` 로 지정 가능). local 파일이 깨졌으면 서버는 멈추지 않고 기본값으로 시작하며 `local_error` 로 알린다(파일은 건드리지 않음). `alarms.yaml` 이 틀렸으면 서버 시작을 거절한다 |
+| `GET /api/alarms/catalog` | operator 이상(로그인 없으면 401). `{alarms: [{code, name, condition, message, level, sound, sound_file, repeat, enabled, protected, origin, soundable, source, placeholders, defaults, modified, last_raised, count}], levels, counted_since, can_edit, local_error}`. 심각한 레벨 순. `sound` 는 해소된 값(기본: 소리를 낼 수 있고 `info` 가 아니면 true). `defaults`(기본값)와 `modified`(GUI 로 바꾼 적 있음)로 변경 여부를 안다. `last_raised`(epoch)·`count` 는 **이번 서버 실행 중** 센 값이고 반복(`repeated`)도 한 번으로 센다(끈 알람은 세지 않음). 브라우저 알람은 서버가 모르므로 `null` |
+| `PUT /api/alarms/catalog/{code}` | **manager 만** (로그인 없음 401, operator 403 `알람 카탈로그는 manager 만 바꿀 수 있습니다`, 응답 문구는 한국어). Origin·Content-Type(JSON) 검사. 본문은 바꿀 항목만: `message`, `level`, `enabled`, `sound`, `sound_file`, `repeat`. 하나라도 검증에 실패하면 400 과 한국어 `error` 이고 **아무것도 바뀌지 않는다**. 성공하면 `{ok, changes, alarm}` 이고 모든 화면에 WS `alarm_policy` 를 방송한다. 모르는 코드 404, 저장 실패 500(메모리 상태는 되돌림) |
+| `POST /api/alarms/catalog/{code}/reset` | manager 만. 그 알람의 GUI 변경분을 지워 기본값(코드 + `alarms.yaml`)으로 되돌린다. 이미 기본이면 변경 없음으로 200 |
+| 검증 (FRA5-6, 오류 문구는 한국어, 화면의 검사와 같은 문구) | `message`: 1~120 **글자**(바이트 아님, 한글·이모지도 한 글자), 줄바꿈·제어문자 거부, 자리표시자는 `{name}` 형태만(`{a.b}` `{a[0]}` `{a:>5}` `{}` 와 짝 없는 중괄호 거부)이고 이름은 그 알람의 **기본 문구가 쓰는 것과 `{robot}`** 만. 브라우저 알람의 `message` 는 바꿀 수 없음(호출부의 동적 문장). `level` ∈ HH,H,L,LL,info. `enabled`·`sound` 는 bool. `sound_file` 은 `config/sounds/` 에 지금 있는 파일(또는 빈 값=레벨 파일). `repeat` 는 1~60 정수 또는 null(=브라우저 소리 설정의 주기). 이름·조건·모르는 항목은 거절 |
+| 보호 (FRA5-4) | `ESTOP_FAILED`, `ESTOP_PARTIAL`, `ESTOP_REQUEST_FAILED`(비상정지 요청 실패, 브라우저)는 **끄기·레벨 변경·소리 끄기를 서버가 거부**한다(레벨은 HH 고정). 문구·사운드 파일·반복 주기는 바꿀 수 있다. `info` 알람에 `sound: true`, 소리 없는 알람(`soundable: false`)에 소리·파일·주기를 주는 것도 거부 |
+| 끄기의 의미 (FRA5-1) | `enabled: false` 인 서버 알람은 **만들어지지 않는다**(알람바·이력 파일·발생 횟수 모두 없음). 끄는 순간 이미 active 인 같은 코드 알람은 해소(cleared)되어 소리가 멈춘다. 브라우저 알람은 서버 정책(`alarm_policy`)을 받은 화면이 만들지 않는다. **레벨·문구 변경은 이후에 생기는 알람부터** 적용되고 이미 뜬 행은 그대로다 |
+| 정책 방송 | `snapshot.alarm_policy` 와 WS `{type: 'alarm_policy', policy}`: `{code: {enabled, level, sound, sound_file, repeat}}`. 접속한 모든 화면이 브라우저 알람의 Enable·레벨과 알람별 소리를 같게 적용한다 |
+| 알람별 소리 (결정 11 확장) | 소리 우선순위: **알람의 `sound_file` > 소리 설정 화면에서 레벨마다 고른 파일 > 합성 비프**. 알람 파일이 없거나 재생에 실패하면 레벨 파일로, 그것도 안 되면 비프. 반복 주기는 이기는 알람(가장 높은 레벨, 같으면 가장 최근)의 `repeat`, 없으면 소리 설정의 주기. 음량, 전체 켜기/끄기, 레벨별 켜기/끄기는 계속 브라우저(localStorage)가 정한다. `sound: false` 인 알람은 소리 대상도 SIL 대상도 아니다(알람바에는 보인다) |
+| 감사 기록 (FRA5-5) | 저장·되돌리기·거절은 GUI 서버 로그로 남아 **로그 화면(`GUI 서버`)**에서 보인다: `알람 카탈로그 변경 (mngr): CMD_REJECTED level 'L'→'H'`, `알람 카탈로그 되돌리기 (mngr): ...`, `알람 카탈로그 변경 거절 (mngr, CMD_REJECTED): <사유>`. 끄기는 WARN. 계정은 `mngr`(인증이 꺼져 있으면 `no-auth`). 별도 이력 파일은 없다 |
+| 화면 | 왼쪽 메뉴 `알람` → `카탈로그` 탭 (`이력` 탭은 Step A7 이 채우므로 비활성). 열 `ID / 이름 / 발생 조건 / 메시지 / 레벨 / 소리 / 사용 / 최근 발생 / 횟수`, manager 에게만 `편집` 열(버튼 → 대화상자: 사용, 레벨, 메시지, 소리, 사운드 파일, 반복 주기(초), 저장 / 취소 / 기본값으로 되돌리기). 바꾼 알람은 ID 옆에 `•`. 열 머리글 경계를 끌어 열 너비 조절(더블클릭: 자동, 브라우저 localStorage `pinky.avColWidths`), 탭 줄의 `알람소리` 버튼은 소리 설정 창을 연다. 필터 레벨·출처·검색, 열려 있는 동안 5초마다와 정책 방송 때 갱신. 고정 문구는 한국어 |
 | 누락 검사 | `tests/test_alarmcatalog.py`: `raise_(...)`·`PATROL_CODES`·`addAlarm(.., {code})` 가 내는 모든 코드가 카탈로그에 있고, `code` 없는 `addAlarm` 호출이 없고, 어디에서도 내지 않는 항목이 없고, `origin` 이 실제로 내는 쪽과 맞는지 코드를 읽어 확인한다. 새 알람을 추가할 때 카탈로그를 빠뜨리면 이 테스트가 실패한다 |
 
 **`command` 이벤트** (기존, 이력 패널이 없어진 뒤에도 서버는 계속 보낸다): WS `{"type":"command","entry":{id, time, robot, cmd, points, sent, result, detail}}`, `snapshot.commands`(오래된 것이 앞). `result` 는 `sent` \| `acknowledged` \| `no_response` \| `rejected` \| `failed`. 화면은 그리지 않고 브라우저의 `app.history` 와 카드의 진행 문구(`last_command`/`last_task`)가 쓴다.

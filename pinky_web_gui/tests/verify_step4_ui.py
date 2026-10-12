@@ -277,7 +277,7 @@ async def run(shot, zone_shot, scan_shot):
             await asyncio.sleep(0.8)
             cmds = api('GET', '/api/state')['commands']
             check('누른 횟수만큼 비상정지가 전송되고 이력에 남음', len([c for c in cmds[n0:] if c['cmd'] == 'estop' and c['robot'] == 'pinky1']) == 2, cmds[n0:])
-            check('알람바에 비상정지 전송 행이 표시됨 (이력 통합)', await pg.wait("[...document.querySelectorAll('#alarmBody tr[data-code=\"CMD_SENT\"] td.msg')].some(td => td.textContent.includes('Command `estop` sent to pinky1'))", 4))
+            check('알람바에 비상정지 전송 행이 표시됨 (이력 통합)', await pg.wait("[...document.querySelectorAll('#alarmBody tr[data-code=\"CMD_SENT\"] td.msg')].some(td => td.textContent.includes('pinky1 에 명령 `estop` 전송'))", 4))
             check('하단 명령 이력 패널이 없음', await pg.js("!document.getElementById('panelHist') && !document.getElementById('historyBody')"))
             await pg.click_sel('#estopAll')
             await asyncio.sleep(0.8)

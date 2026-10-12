@@ -37,5 +37,5 @@ def test_alarmsound_cases_in_chrome():
     res = json.loads(m.group(1).replace('&quot;', '"').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>'))
     assert 'error' not in res, res.get('error')
     failed = [n for n, ok in res['results'] if not ok]
-    assert len(res['results']) >= 80
+    assert len(res['results']) >= 104
     assert not failed, failed

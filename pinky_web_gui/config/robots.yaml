@@ -42,6 +42,9 @@ alarm_sound_dir: sounds
 
 # 알람 카탈로그 덮어쓰기 (알람바 Step A4, 선택). 알람 정의 기본값은 backend/alarmcatalog.py, 바꿀 항목만 이 파일에 적는다. 줄을 지우면 기본값만 쓴다.
 alarms_yaml: alarms.yaml
+# GUI(manager)가 Catalog 탭에서 저장한 변경분 파일 (선택, 없으면 만든다). 실행 상태라 git 에 올리지 않는다. 지우면 기본값으로 돌아간다.
+#   --mock 으로 띄우면 이름 뒤에 -mock 을 붙인 파일(alarms.local-mock.yaml)을 써서 실제 변경분과 섞이지 않는다.
+alarms_local_yaml: alarms.local.yaml
 
 # 로봇별 설정. 키는 robots 와 같아야 한다.
 #   goto_allowed : 백엔드가 허용하는 goto 지점. RED* (구역 문)는 넣을 수 없다 (노드가 문 경유와 락을 처리한다).

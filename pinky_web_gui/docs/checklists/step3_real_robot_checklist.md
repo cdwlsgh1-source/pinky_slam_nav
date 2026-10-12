@@ -17,7 +17,7 @@ mock 으로는 `tests/verify_step3_mock.py`, `tests/verify_step3_ui.py`, `pytest
 | 1 | 구독자 연결 | `ros2 topic info /pinky1/patrol_cmd` (도메인 50) | Subscription count ≥ 1 (domain_bridge), Publisher 에 `pinky_web_gui_backend` | |
 | 2 | RED 거절 | `curl -s -X POST localhost:8000/api/robots/pinky1/command -H 'Content-Type: application/json' -d '{"cmd":"goto","points":["RED1IN"]}'` | HTTP 400, 로봇에는 아무 토픽도 가지 않음 (`ros2 topic echo /pinky1/patrol_cmd` 로 확인). 이력에 "거절됨" | |
 | 3 | 알 수 없는 지점 / 개수 초과 | `points:["P99"]`, 11개 | 400 | |
-| 4 | 브리지 꺼짐 | 브리지를 끄고 화면에서 `정지` | 503 (구독자 없음), 알람바에 `Command ... could not be sent` (CMD_SEND_FAILED) 와 사유. 브리지를 다시 켠다 | |
+| 4 | 브리지 꺼짐 | 브리지를 끄고 화면에서 `정지` | 503 (구독자 없음), 알람바에 `... 에 명령 ... 를 보내지 못함` (CMD_SEND_FAILED) 와 사유. 브리지를 다시 켠다 | |
 | 5 | offline | 로봇 한 대의 전원을 끈다 | 그 카드의 버튼 3개만 비활성, 다른 로봇은 그대로 | |
 
 ## B. pinky1 단독 (로봇이 움직임)

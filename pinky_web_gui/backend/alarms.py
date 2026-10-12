@@ -132,6 +132,20 @@ class AlarmManager:
                 msgs.append(self._msg(a))
         return msgs
 
+    def set_catalog(self, catalog):
+        """카탈로그를 바꾼다 (Step A5, manager 가 저장하거나 되돌렸을 때). 이미 떠 있는 알람의 레벨·문구는 그대로이고 이후에 생기는 알람부터 새 값을 쓴다.
+        새로 꺼진 코드의 active 알람은 해소해서 소리를 멈춘다. 해소된 알람의 메시지 목록을 돌려준다."""
+        newly_off = [c for c, e in catalog.items() if not e['enabled'] and self.catalog.get(c, {}).get('enabled', True)]
+        self.catalog = catalog
+        msgs = []
+        for code in newly_off:
+            for a in self._alarms:
+                if a['code'] == code and a['state'] == ACTIVE:
+                    a['state'], a['t_cleared'] = CLEARED, self._now()
+                    self._emit('cleared', a)
+                    msgs.append(self._msg(a))
+        return msgs
+
     def stats(self):
         """코드별 {count, last} (이번 서버 실행 중). 서버를 다시 켜면 0 부터 센다 (이력 파일에는 모든 발생이 남아 있다)."""
         return {c: dict(v) for c, v in self._stats.items()}
@@ -164,6 +178,12 @@ class AlarmManager:
         if online:
             return self.clear('ROBOT_OFFLINE', robot) + self.raise_('ROBOT_ONLINE', robot)
         return self.raise_('ROBOT_OFFLINE', robot)
+
+    def proc_state(self, pid, label, state, message=''):
+        """시스템 패널 프로세스의 상태 (알람 키는 프로세스 id). FAILED 가 되면 알람이고, 다시 시작하거나 정지·종료되면 해소한다."""
+        if state == 'failed':
+            return self.raise_('PROC_FAILED', pid, resource=label, reason=message)
+        return self.clear('PROC_FAILED', pid)
 
     def patrol(self, robot, state, detail=''):
         """patrol_status 의 상태. FAILED/RETRY/STOPPED 만 알람이고, 그 밖의 상태로 바뀌면 순찰 알람을 해소한다."""

@@ -66,7 +66,7 @@
 ## 4. 예시
 
 ```json
-{"saved_at":"2026-10-11 19:01:17","t":1791712877.6030862,"event":"repeated","id":2,"code":"ESTOP_FAILED","level":"HH","robot":"pinky2","text":"E-STOP failed on pinky2: patrol_cmd stop 전송 실패: /pinky2/patrol_cmd 를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다) · cmd_vel 0 속도를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다)","detail":"patrol_cmd stop 전송 실패: /pinky2/patrol_cmd 를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다) · cmd_vel 0 속도를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다)","state":"active","t_raised":1791712750.9648645,"t_last":1791712877.603082,"t_cleared":null,"count":32,"acked_by":null,"acked_at":null}
+{"saved_at":"2026-10-11 19:01:17","t":1791712877.6030862,"event":"repeated","id":2,"code":"ESTOP_FAILED","level":"HH","robot":"pinky2","text":"pinky2 비상정지 실패: patrol_cmd stop 전송 실패: /pinky2/patrol_cmd 를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다) · cmd_vel 0 속도를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다)","detail":"patrol_cmd stop 전송 실패: /pinky2/patrol_cmd 를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다) · cmd_vel 0 속도를 받는 구독자가 없습니다 (domain_bridge 가 꺼져 있을 수 있습니다)","state":"active","t_raised":1791712750.9648645,"t_last":1791712877.603082,"t_cleared":null,"count":32,"acked_by":null,"acked_at":null}
 ```
 
 읽는 법: pinky2 의 비상정지 실패(`HH`)가 처음 생긴 뒤(`t_raised`) 약 127초 동안 반복되어 이 줄에서 `count` 가 32 가 되었고, 아직 해소되지 않았으며(`t_cleared` 가 `null`) 아무도 확인(ACK)하지 않았다(`acked_by` 가 `null`). 원인은 domain_bridge 가 꺼져 있어 `patrol_cmd` 와 `cmd_vel` 구독자가 없는 것이다. 이 알람을 ACK 한 뒤에 또 실패하면 같은 `id` 가 아니라 새 `id` 의 `raised` 줄이 생긴다.

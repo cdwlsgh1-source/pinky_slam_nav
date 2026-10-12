@@ -67,7 +67,7 @@ def test_same_second_second_file_gets_suffix(tmp_path):
 
 def test_record_carries_save_date_and_event(tmp_path):
     h = AlarmHistory(tmp_path, 100, now=Clock(epoch(2026, 10, 11, 18, 32, 47)))
-    h.record('cleared', {'id': 7, 'code': 'ROBOT_OFFLINE', 'robot': 'pinky1', 'text': 'pinky1 is offline'})
+    h.record('cleared', {'id': 7, 'code': 'ROBOT_OFFLINE', 'robot': 'pinky1', 'text': 'pinky1 오프라인'})
     row = lines(tmp_path / 'alarms_2026-10-11_183247.jsonl')[0]
     assert row['saved_at'] == '2026-10-11 18:32:47' and row['event'] == 'cleared'
     assert row['id'] == 7 and row['robot'] == 'pinky1' and isinstance(row['t'], float)
@@ -202,7 +202,7 @@ def test_manager_saves_info_rows_too(tmp_path):
     a, h, _ = manager(tmp_path)
     a.command_sent('pinky1', 'goto', ['P2', 'P3'])
     rows = h.read()
-    assert len(rows) == 1 and rows[0]['event'] == 'raised' and rows[0]['level'] == 'info' and rows[0]['text'] == 'Command `goto P2 P3` sent to pinky1'
+    assert len(rows) == 1 and rows[0]['event'] == 'raised' and rows[0]['level'] == 'info' and rows[0]['text'] == 'pinky1 에 명령 `goto P2 P3` 전송'
 
 
 def test_monitor_is_capped_at_100_but_history_keeps_everything(tmp_path):
@@ -210,7 +210,7 @@ def test_monitor_is_capped_at_100_but_history_keeps_everything(tmp_path):
     for i in range(250):
         a.raise_('CMD_SENT', 'pinky1', cmd=f'start{i}')
     assert MONITOR_SIZE == 100 and len(a.snapshot()) == 100
-    assert a.snapshot()[0]['text'].endswith('sent to pinky1') and 'start249' in a.snapshot()[0]['text']
+    assert a.snapshot()[0]['text'].endswith('전송') and 'start249' in a.snapshot()[0]['text']
     assert sum(f['records'] for f in h.files()) == 250 and [f['records'] for f in h.files()] == [50, 100, 100]
 
 

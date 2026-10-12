@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .alarmcatalog import rows as catalog_rows
+from .alarmcatalog import CatalogError, CatalogStore
 from .alarmlog import AlarmHistory
 from .alarms import LEVELS, AlarmManager
 from .auth import COOKIE, MANAGER, SESSION_SEC, OPERATOR, Auth
@@ -58,7 +58,7 @@ PROC_STATUS = {'unknown': 404, 'unset': 409, 'busy': 409, 'external': 409, 'conf
 PUBLIC_API = ('/api/health', '/api/login', '/api/logout', '/api/me')  # 로그인 없이 부를 수 있는 API
 
 
-def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None, alarm_dir: str = None, alarm_chunk: int = None, sound_dir: str = None) -> FastAPI:
+def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None, alarm_dir: str = None, alarm_chunk: int = None, sound_dir: str = None, alarms_local: str = None) -> FastAPI:
     auth = auth if auth is not None else Auth()   # 고정 계정 (backend/auth.py). 끄려면 Auth.disabled() 또는 --no-auth
     store = StateStore(cfg.robots, cfg.zone_status_topic, cfg.online_timeout_sec, cfg.pose_max_hz)
     tracker = CommandTracker(cfg.robots, cfg.command_history_size, cfg.no_response_sec)
@@ -69,7 +69,10 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         log.info('알람 이력 저장: %s (파일당 %d건)', alarm_history.dir, alarm_history.chunk)
     sounds = SoundLibrary(sound_dir or cfg.alarm_sound_dir or Path(__file__).resolve().parent.parent / 'config' / 'sounds')   # 알람 소리 파일 (사용자가 폴더에 직접 둔다)
     started_at = time.time()   # 카탈로그의 발생 횟수를 세기 시작한 시각 (서버 실행 시각)
-    alarms = AlarmManager(sink=alarm_history.record if alarm_history else None, catalog=cfg.alarm_catalog)   # 알람바에 보이는 모든 사건. 서버가 만들어 모든 화면에 같은 알람을 보낸다
+    # 알람 카탈로그: 코드 기본값 + alarms.yaml(수동) + alarms.local.yaml(manager 가 GUI 에서 저장). mock 은 실제 변경분과 섞이지 않게 '-mock' 파일을 쓴다 (인자로 정하면 그대로)
+    local_path = alarms_local or (cfg.alarms_local_path and (str(Path(cfg.alarms_local_path).with_name(Path(cfg.alarms_local_path).stem + '-mock' + Path(cfg.alarms_local_path).suffix)) if mock else cfg.alarms_local_path))
+    catalog_store = CatalogStore(cfg.alarm_overrides, local_path, sound_ok=lambda n: sounds.resolve(n) is not None)
+    alarms = AlarmManager(sink=alarm_history.record if alarm_history else None, catalog=catalog_store.current)   # 알람바에 보이는 모든 사건. 서버가 만들어 모든 화면에 같은 알람을 보낸다
     hub = Hub()
     bg = {}  # lifespan 에서 만든 리소스 (commander: publish_cmd(rid, data) 를 가진 RosBridge 또는 MockFleet)
     client_ids = itertools.count(1)
@@ -82,8 +85,16 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
 
     bg['procs_dirty'] = False
 
+    bg['proc_seen'] = {}   # 프로세스 id -> 마지막으로 알람 판단에 쓴 (state, message)
+
     def procs_changed():
         bg['procs_dirty'] = True  # ticker 가 모아서 한 번에 보낸다 (로그가 많이 나와도 WS 가 넘치지 않게)
+        # FAILED 로 바뀌는 순간 알람을 만든다 (ticker 를 기다리면 FAILED→STARTING 이 한 주기에 묻힐 수 있다)
+        for pid, (label, state, message) in procs.states().items():
+            cur = (state, message)
+            if bg['proc_seen'].get(pid) != cur and (state == 'failed' or pid in bg['proc_seen']):
+                hub.broadcast(alarms.proc_state(pid, label, state, message))
+            bg['proc_seen'][pid] = cur
 
     if proc_runner is None and mock:
         from .mock_runner import MockRunner
@@ -121,6 +132,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             r['last_task'] = tracker.last_task(rid)
         snap['commands'] = tracker.history()
         snap['alarms'] = alarms.snapshot()
+        snap['alarm_policy'] = catalog_store.policy()   # 브라우저가 적용할 알람별 Enable/레벨/소리 (브라우저 전용 알람은 서버가 아니라 화면이 만든다)
         snap['procs'] = procs_message()
         return snap
 
@@ -478,8 +490,11 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             return JSONResponse({'accepted': False, 'error': '프로세스 제어는 로그인이 켜져 있어야 합니다 (--no-auth 서버에서는 인증 없이 원격 실행을 열지 않습니다)'}, status_code=403)
         return None
 
-    def proc_error(e):
-        return JSONResponse({'accepted': False, 'error': str(e), 'needs_confirm': e.code == 'confirm'}, status_code=PROC_STATUS.get(e.code, 502))
+    def proc_error(e, pid=None):
+        # alarmed: 이 실패를 서버가 이미 PROC_FAILED 알람으로 올렸다 (화면이 같은 사건을 또 알람으로 만들지 않게)
+        failed = pid is not None and procs.states().get(pid, (None, None, None))[1] == 'failed'
+        alarmed = failed and alarms.catalog['PROC_FAILED']['enabled']
+        return JSONResponse({'accepted': False, 'error': str(e), 'needs_confirm': e.code == 'confirm', 'alarmed': alarmed}, status_code=PROC_STATUS.get(e.code, 502))
 
     async def confirm_flag(request):
         try:
@@ -525,7 +540,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             await procs.start(proc_id)
         except ProcError as e:
             log.warning('%s 시작 거절: %s', proc_id, e)
-            return proc_error(e)
+            return proc_error(e, proc_id)
         return {'accepted': True}
 
     @app.post('/api/procs/{proc_id}/stop')
@@ -537,7 +552,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             await procs.stop(proc_id, await confirm_flag(request))
         except ProcError as e:
             log.warning('%s 정지 거절/실패: %s', proc_id, e)
-            return proc_error(e)
+            return proc_error(e, proc_id)
         return {'accepted': True}
 
     @app.get('/api/logs')
@@ -598,12 +613,57 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
 
     @app.get('/api/alarms/catalog')
     async def api_alarm_catalog(request: Request):
-        """알람 카탈로그 (읽기 전용, operator 이상): 시스템이 낼 수 있는 모든 알람의 이름·조건·문구·레벨·소리·사용 여부.
-        last_raised/count 는 이번 서버 실행 중 센 값이고, 브라우저 전용 알람(origin=browser)은 서버가 모르므로 null 이다."""
+        """알람 카탈로그 (operator 이상): 시스템이 낼 수 있는 모든 알람의 이름·조건·문구·레벨·소리·사용 여부.
+        last_raised/count 는 이번 서버 실행 중 센 값이고, 브라우저 전용 알람(origin=browser)은 서버가 모르므로 null 이다.
+        can_edit 는 이 계정이 고칠 수 있는지(manager), local_error 는 GUI 변경 파일을 읽지 못했을 때의 사유다."""
         denied = require(request, OPERATOR)
         if denied:
             return denied
-        return {'alarms': catalog_rows(alarms.catalog, alarms.stats()), 'levels': list(LEVELS), 'counted_since': started_at}
+        return {'alarms': catalog_store.rows(alarms.stats()), 'levels': list(LEVELS), 'counted_since': started_at,
+                'can_edit': Auth.allows(role_of(request), MANAGER), 'local_error': catalog_store.local_error}
+
+    def catalog_denied(request):
+        """카탈로그 수정은 manager 만. 새 엔드포인트의 응답 문구는 영문이다 (PRD FRA5-7)."""
+        role = role_of(request)
+        if role is None:
+            return JSONResponse({'ok': False, 'error': '로그인이 필요합니다'}, status_code=401)
+        if not Auth.allows(role, MANAGER):
+            return JSONResponse({'ok': False, 'error': '알람 카탈로그는 manager 만 바꿀 수 있습니다'}, status_code=403)
+        return None
+
+    def catalog_apply(request, code, action, what):
+        """수정 또는 되돌리기를 적용한다: 저장 -> 카탈로그 교체(꺼진 알람 해소) -> 모든 화면에 방송 -> 누가 바꿨는지 로그 화면에 남김."""
+        user = auth.user_of(request.cookies.get(COOKIE)) or 'no-auth'
+        try:
+            changes = action()
+        except CatalogError as e:
+            log.info('알람 카탈로그 변경 거절 (%s, %s): %s', user, code, e)
+            return JSONResponse({'ok': False, 'error': str(e)}, status_code=e.status)
+        cleared = alarms.set_catalog(catalog_store.current)
+        hub.broadcast([{'type': 'alarm_policy', 'policy': catalog_store.policy()}] + cleared)
+        text = '알람 카탈로그 %s (%s): %s %s' % (what, user, code, ', '.join(changes) or '(바뀐 것 없음)')
+        (log.warning if any(c.startswith('enabled') and c.endswith('False') for c in changes) else log.info)(text)
+        return {'ok': True, 'changes': changes, 'alarm': next(r for r in catalog_store.rows(alarms.stats()) if r['code'] == code)}
+
+    @app.put('/api/alarms/catalog/{code}')
+    async def api_alarm_catalog_update(code: str, request: Request):
+        """알람 하나의 변경분 저장 (manager 만). 본문: {message, level, enabled, sound, sound_file, repeat} 중 바꿀 것. 검증을 통과하지 못하면 아무것도 바뀌지 않는다."""
+        denied = catalog_denied(request) or guard_post(request)
+        if denied:
+            return denied
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        return catalog_apply(request, code, lambda: catalog_store.update(code, body), '변경')
+
+    @app.post('/api/alarms/catalog/{code}/reset')
+    async def api_alarm_catalog_reset(code: str, request: Request):
+        """알람 하나를 기본값(코드 + alarms.yaml)으로 되돌린다 (manager 만). local 변경분에서 그 알람을 지운다."""
+        denied = catalog_denied(request) or guard_post(request)
+        if denied:
+            return denied
+        return catalog_apply(request, code, lambda: catalog_store.reset(code), '되돌리기')
 
     @app.get('/api/alarms/history')
     async def api_alarm_history(request: Request, date: str = None, limit: int = 100):
@@ -638,7 +698,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         """사운드 파일 한 개. 폴더 밖 경로, 허용 안 된 확장자, 크기 초과는 모두 404 (존재 여부를 구분해 주지 않는다)."""
         p = sounds.resolve(name)
         if p is None:
-            return JSONResponse({'error': 'sound not found'}, status_code=404)
+            return JSONResponse({'error': '사운드 파일을 찾을 수 없습니다'}, status_code=404)
         return FileResponse(p, media_type=sounds.media_type(name))
 
     @app.post('/api/alarms/ack')
@@ -655,7 +715,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         raw = body.get('id') if isinstance(body, dict) else None
         ids = raw if isinstance(raw, list) else (None if raw is None else [raw])
         if not isinstance(body, dict) or (ids is not None and not all(isinstance(i, int) and not isinstance(i, bool) for i in ids)):
-            return JSONResponse({'ok': False, 'error': 'body must be {"id": <int | [int, ...] | null>}'}, status_code=400)
+            return JSONResponse({'ok': False, 'error': '요청 본문은 {"id": <정수 | [정수, ...] | null>} 형식이어야 합니다'}, status_code=400)
         user = auth.user_of(request.cookies.get(COOKIE)) or 'no-auth'
         msgs = alarms.ack(ids, user)
         hub.broadcast(msgs)
@@ -819,6 +879,7 @@ def main():
     ap.add_argument('--mock-proc-external', default='', help='--mock 에서 이미 다른 곳에서 실행 중인 것으로 보이는 프로세스 id (쉼표로 구분)')
     ap.add_argument('--no-auth', action='store_true', help='로그인을 끈다 (개발/시험용. 프로세스 제어도 꺼진다)')
     ap.add_argument('--alarm-history-chunk', type=int, default=None, help='이력 파일 하나에 담는 건수 (기본: 설정의 alarm_history_chunk, 시험용)')
+    ap.add_argument('--alarms-local', default=None, help='GUI 가 저장하는 알람 카탈로그 변경 파일 (기본: 설정의 alarms_local_yaml, mock 이면 이름에 -mock, 시험용)')
     ap.add_argument('--alarm-sound-dir', default=None, help='알람 사운드 파일 폴더 (기본: 설정의 alarm_sound_dir, config/sounds)')
     ap.add_argument('--alarm-history-dir', default=None, help='알람 이력 폴더 (기본: 설정의 alarm_history_dir, mock 이면 뒤에 -mock)')
     ap.add_argument('--config', default=None, help='robots.yaml 경로 (기본 config/robots.yaml)')
@@ -844,7 +905,7 @@ def main():
                                                  'scan_mount_tf': not args.mock_scan_no_tf,
                                                  'proc_opts': {'fail_start': [x for x in args.mock_proc_fail.split(',') if x],
                                                                'external': [x for x in args.mock_proc_external.split(',') if x]}},
-                                            auth=auth, alarm_dir=args.alarm_history_dir, alarm_chunk=args.alarm_history_chunk, sound_dir=args.alarm_sound_dir), host=args.host, port=args.port, log_level='info')
+                                            auth=auth, alarm_dir=args.alarm_history_dir, alarm_chunk=args.alarm_history_chunk, sound_dir=args.alarm_sound_dir, alarms_local=args.alarms_local), host=args.host, port=args.port, log_level='info')
 
 
 if __name__ == '__main__':

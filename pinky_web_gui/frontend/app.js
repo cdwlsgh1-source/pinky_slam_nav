@@ -61,7 +61,7 @@ function normAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.P
 // 서버가 만든 알람과 서버가 알 수 없는 브라우저 전용 알람(연결 끊김, 로드 실패, 화면 안내)을 한 목록으로 보여 준다.
 // 브라우저 전용 알람은 id 가 'local-N' 이고 시각은 이 브라우저의 시계다 (서버 알람은 서버 시각 epoch).
 const clock = (t) => new Date(t * 1000).toTimeString().slice(0, 8);   // 24시간제 HH:MM:SS
-const STATE_LABEL = { active: 'Active', cleared: 'Cleared', acked: 'Acknowledged', event: '-' };
+const STATE_LABEL = { active: '활성', cleared: '해소', acked: '확인됨', event: '-' };
 const ALARM_LEVELS = ['HH', 'H', 'L', 'LL', 'info'];
 const LOCAL_LEVEL = { ok: 'info', warn: 'L', bad: 'H' };   // 옛 addAlarm 의 ok/warn/bad 를 알람 레벨로
 let localAlarmSeq = 0;
@@ -92,7 +92,8 @@ const stateText = (a) => {
 };
 // ACK 대상: info 가 아니고 아직 ACK 안 된 서버 알람(활성·해소), 이 브라우저에서 해소된 브라우저 전용 알람. SIL 대상: ACK 안 된 활성 알람 (소리가 나는 알람)
 const ackTargets = () => app.alarms.filter((a) => a.level !== 'info' && (a.local ? a.state !== 'active' && a.state !== 'event' : a.acked_by == null) );
-const silTargets = () => app.alarms.filter((a) => a.level !== 'info' && a.state === 'active' && a.acked_by == null);   // ACK 하면 그 알람의 소리는 멈춘다 (PRD FRA3-5)
+const silTargets = () => app.alarms.filter((a) => a.level !== 'info' && a.state === 'active' && a.acked_by == null && AlarmView.soundOn(app.alarmPolicy, a.code));   // ACK 하면 그 알람의 소리는 멈춘다 (PRD FRA3-5)
+app.alarmPolicy = {};   // 서버 카탈로그 정책 {code: {enabled, level, sound, sound_file, repeat}} (snapshot.alarm_policy, WS alarm_policy). 브라우저 알람의 Enable/레벨/소리와 알람별 소리 파일·주기
 let sound = null;   // 알람 소리 컨트롤러 (아래 '알람 소리' 절에서 만든다). 알람/ACK/SIL 이 바뀔 때마다 refresh 해서 울림·멈춤을 다시 판단한다
 function updateAlarmButtons() {
   const ack = el('alarmAckBtn'), sil = el('alarmSilBtn');
@@ -101,6 +102,12 @@ function updateAlarmButtons() {
   sil.disabled = silTargets().length === 0;
   sil.setAttribute('aria-pressed', String(app.silenced));
   if (sound) sound.refresh();
+}
+
+function setAlarmPolicy(policy) {
+  app.alarmPolicy = policy || {};
+  updateAlarmButtons();                         // 소리 대상(SIL)이 바뀔 수 있다
+  if (!el('alarmView').hidden) loadCatalog();   // 다른 화면에서 고친 내용을 열려 있는 카탈로그에도
 }
 
 function renderAlarms() {
@@ -120,7 +127,7 @@ function renderAlarms() {
     body.appendChild(tr);
   }
   const btn = el('alarmInfoBtn');
-  btn.textContent = app.showInfo ? 'Hide info' : 'Show info';
+  btn.textContent = app.showInfo ? '기록 숨김' : '기록 표시';
   btn.setAttribute('aria-pressed', String(app.showInfo));
   updateAlarmButtons();
 }
@@ -144,7 +151,9 @@ function upsertAlarm(a) {
 // 브라우저 전용 알람. level 은 옛 호출처의 ok/warn/bad. extra 로 code/state 를 바꿀 수 있다.
 function addAlarm(level, text, extra) {
   const t = Date.now() / 1000;
-  upsertAlarm(Object.assign({ id: 'local-' + (++localAlarmSeq), code: 'LOCAL', level: LOCAL_LEVEL[level] || (ALARM_LEVELS.includes(level) ? level : 'L'), robot: null, text, detail: '',
+  const pol = AlarmView.applyPolicy(app.alarmPolicy, extra && extra.code, LOCAL_LEVEL[level] || (ALARM_LEVELS.includes(level) ? level : 'L'));
+  if (pol.skip) return;   // 카탈로그에서 꺼진 알람은 만들지 않는다 (manager 가 Alarm 화면에서 끈 것)
+  upsertAlarm(Object.assign({ id: 'local-' + (++localAlarmSeq), code: 'LOCAL', level: pol.level, robot: null, text, detail: '',
     state: 'event', t_raised: t, t_last: t, t_cleared: null, count: 1, acked_by: null, acked_at: null, local: true }, extra));
 }
 
@@ -155,9 +164,9 @@ async function ackAlarms() {
   if (!app.alarms.some((a) => !a.local && a.level !== 'info' && a.acked_by == null)) return;
   try {
     const res = await fetch('/api/alarms/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) });
-    if (!res.ok) addAlarm('bad', 'ACK was not accepted (HTTP ' + res.status + ')', { code: 'ACK_REQUEST_FAILED' });   // 성공하면 서버가 보낸 WS alarm 으로 화면이 바뀐다
+    if (!res.ok) addAlarm('bad', 'ACK 요청이 거절되었습니다 (HTTP ' + res.status + ')', { code: 'ACK_REQUEST_FAILED' });   // 성공하면 서버가 보낸 WS alarm 으로 화면이 바뀐다
   } catch (err) {
-    addAlarm('bad', 'ACK request failed: ' + err.message, { code: 'ACK_REQUEST_FAILED' });
+    addAlarm('bad', 'ACK 요청 오류: ' + err.message, { code: 'ACK_REQUEST_FAILED' });
   }
 }
 
@@ -217,7 +226,7 @@ const saveSound = () => AlarmSound.saveSettings(safeStorage(), soundCfg.s);
 sound = AlarmSound.createController({
   adapter: AlarmSound.createAdapter({ AudioContext: window.AudioContext || window.webkitAudioContext, Audio: window.Audio }),
   getSettings: () => soundCfg.s,
-  getTargets: () => silTargets().map((a) => a.level),
+  getTargets: () => silTargets().map((a) => { const p = app.alarmPolicy[a.code] || {}; return { level: a.level, file: p.sound_file || '', interval: p.repeat || null }; }),   // 알람별 사운드 파일·반복 주기는 서버 카탈로그 정책 (Step A5)
   getSilenced: () => app.silenced,
   now: () => Date.now(),
   urlOf: (name) => '/sounds/' + encodeURIComponent(name),
@@ -241,7 +250,7 @@ async function loadSoundFiles() {
     soundCfg.filesErr = '';
     soundCfg.maxBytes = j.max_bytes; soundCfg.exts = j.extensions || [];
   } catch (e) {
-    soundCfg.files = []; soundCfg.filesErr = 'Could not load the sound file list';
+    soundCfg.files = []; soundCfg.filesErr = '사운드 파일 목록을 받지 못했습니다';
   }
   sound.setFiles(soundCfg.files.map((f) => f.name));
   if (el('soundDlg').open) renderSoundDialog();
@@ -260,31 +269,31 @@ function renderSoundDialog() {
     const tr = document.createElement('tr');
     const cell = (child) => { const td = document.createElement('td'); td.appendChild(child); tr.appendChild(td); return td; };
     const name = document.createElement('b'); name.textContent = lv; cell(name);
-    const on = document.createElement('input'); on.type = 'checkbox'; on.checked = cfg.on; on.setAttribute('aria-label', lv + ' sound on');
+    const on = document.createElement('input'); on.type = 'checkbox'; on.checked = cfg.on; on.setAttribute('aria-label', lv + ' 소리 켜짐');
     on.onchange = () => { cfg.on = on.checked; saveSound(); sound.refresh(); };
     cell(on);
-    const sel = document.createElement('select'); sel.setAttribute('aria-label', lv + ' sound file');
-    sel.add(new Option('Fallback beep', ''));
+    const sel = document.createElement('select'); sel.setAttribute('aria-label', lv + ' 사운드 파일');
+    sel.add(new Option('합성 비프음', ''));
     for (const f of soundCfg.files) sel.add(new Option(f.name, f.name));
-    if (cfg.file && !soundCfg.files.some((f) => f.name === cfg.file)) sel.add(new Option(cfg.file + ' (missing)', cfg.file));   // 파일이 지워졌어도 선택은 보이고, 소리는 합성음으로 난다
+    if (cfg.file && !soundCfg.files.some((f) => f.name === cfg.file)) sel.add(new Option(cfg.file + ' (파일 없음)', cfg.file));   // 파일이 지워졌어도 선택은 보이고, 소리는 합성음으로 난다
     sel.value = cfg.file;
     sel.onchange = () => {
       cfg.file = sel.value; saveSound(); sound.forgetFailures();
       if (sound.info().preview === lv) sound.startPreview(lv); else sound.refresh();   // 시험 중이면 바꾼 소리로 바로 다시 들려 준다
     };
     cell(sel);
-    const test = document.createElement('button'); test.type = 'button'; test.textContent = 'Test'; test.dataset.test = lv;
-    test.title = 'Play ' + lv + ' sound repeatedly (no alarm is created)';
+    const test = document.createElement('button'); test.type = 'button'; test.textContent = '시험'; test.dataset.test = lv;
+    test.title = lv + ' 소리를 반복해서 들려 줍니다 (알람은 만들지 않습니다)';
     test.onclick = () => sound.startPreview(lv);
-    const stop = document.createElement('button'); stop.type = 'button'; stop.textContent = 'Stop'; stop.dataset.stop = lv; stop.disabled = true;
+    const stop = document.createElement('button'); stop.type = 'button'; stop.textContent = '정지'; stop.dataset.stop = lv; stop.disabled = true;
     stop.onclick = () => sound.stopPreview();
     const td = cell(test); td.appendChild(document.createTextNode(' ')); td.appendChild(stop);
     rows.appendChild(tr);
   }
   const exts = (soundCfg.exts || []).join(' ') || '.mp3 .wav .ogg';
   el('sndFilesNote').textContent = soundCfg.filesErr
-    || (soundCfg.files.length ? soundCfg.files.length + ' sound file(s) found. ' : 'No sound files found: fallback beeps are used. ')
-       + 'Put ' + exts + ' files (up to ' + Math.round((soundCfg.maxBytes || 1048576) / 1048576) + ' MB each) in config/sounds/ on the server.';
+    || (soundCfg.files.length ? '사운드 파일 ' + soundCfg.files.length + '개를 찾았습니다. ' : '사운드 파일이 없어 합성 비프음을 씁니다. ')
+       + '서버의 config/sounds/ 폴더에 ' + exts + ' 파일(파일당 ' + Math.round((soundCfg.maxBytes || 1048576) / 1048576) + 'MB 이하)을 두세요.';
   sound.refresh();
 }
 
@@ -851,6 +860,7 @@ function applySnapshot(msg) {
   });
   for (const id of Object.keys(app.robots)) if (!ids.includes(id)) delete app.robots[id];
   setZone(msg.zone, msg.zone_info);
+  if (msg.alarm_policy) setAlarmPolicy(msg.alarm_policy);
   loadSoundFiles();   // 접속(재접속)마다 파일 목록을 새로 읽는다. 로그인 전에는 401 이라 빈 목록이었을 수 있다
   if (msg.procs) setProcs(msg.procs);
   app.history = (msg.commands || []).slice().reverse();
@@ -881,6 +891,7 @@ function onMessage(msg) {
   if (msg.type === 'zone') { setZone(msg.status, msg); return; }
   if (msg.type === 'command') { trackCommand(msg.entry); return; }
   if (msg.type === 'alarm') { upsertAlarm(msg.alarm); return; }
+  if (msg.type === 'alarm_policy') { setAlarmPolicy(msg.policy); return; }
   if (msg.type === 'procs') { setProcs(msg); return; }
   if (msg.type === 'scan') {
     const s = app.scan[msg.robot];
@@ -920,7 +931,7 @@ function connect() {
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
   sock = ws;
   ws.onopen = () => {
-    if (attempt > 0) { clearLocalAlarms('SERVER_DISCONNECTED'); addAlarm('ok', 'Server reconnected', { code: 'SERVER_RECONNECTED' }); }
+    if (attempt > 0) { clearLocalAlarms('SERVER_DISCONNECTED'); addAlarm('ok', '서버에 다시 연결됨', { code: 'SERVER_RECONNECTED' }); }
     attempt = 0; app.wsUp = true; setChip('connChip', 'ok', '연결됨');
     // 서버는 연결이 끊기면 이 화면의 LiDAR 구독을 지운다. 켜 둔 토글은 다시 요청한다
     for (const [rid, s] of Object.entries(app.scan)) if (s.on) sendWs({ type: 'scan', robot: rid, on: true });
@@ -928,7 +939,7 @@ function connect() {
   ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch (err) { console.error('메시지 처리 오류', err); } };
   ws.onclose = () => {
     driveHalt();  // 연결이 끊기면 서버도 0 속도를 보내지만, 화면에서도 즉시 조작을 멈춘다
-    if (app.wsUp || attempt === 0) addAlarm('bad', 'Server disconnected', { code: 'SERVER_DISCONNECTED', state: 'active' });
+    if (app.wsUp || attempt === 0) addAlarm('bad', '서버 연결 끊김', { code: 'SERVER_DISCONNECTED', state: 'active' });
     app.wsUp = false; setChip('connChip', 'bad', '연결 끊김');
     attempt += 1;
     checkSession();  // 인증이 켜져 있고 세션이 사라졌다면(만료, 서버 재시작) 로그인 화면을 띄운다
@@ -1044,9 +1055,9 @@ async function estop(id) {
   try {
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     // 비상정지 결과 알람(E-STOP failed / partially sent)은 서버가 만든다 (WS alarm). 서버가 처리하지 못한 응답(401, 403 …)만 여기서 알린다
-    if (!res.ok && res.status !== 503) addAlarm('bad', who + ' 비상정지 요청이 처리되지 않았습니다 (HTTP ' + res.status + ')', { code: 'ESTOP_REQUEST_FAILED' });
+    if (!res.ok && res.status !== 503) addAlarm('HH', who + ' 비상정지 요청이 처리되지 않았습니다 (HTTP ' + res.status + ')', { code: 'ESTOP_REQUEST_FAILED' });
   } catch (err) {
-    addAlarm('bad', who + ' 비상정지 전송 오류: ' + err.message, { code: 'ESTOP_REQUEST_FAILED' });
+    addAlarm('HH', who + ' 비상정지 전송 오류: ' + err.message, { code: 'ESTOP_REQUEST_FAILED' });
   }
 }
 
@@ -1265,6 +1276,7 @@ async function procPost(path, body) {
     const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) showLogin('세션이 만료됐습니다. 다시 로그인하세요');
+    else if (!res.ok && data.alarmed) { /* 서버가 PROC_FAILED 알람으로 이미 올렸다 */ }
     else if (!res.ok) addAlarm('bad', (data.error || '요청 실패 (' + res.status + ')'), { code: 'PROC_REQUEST_FAILED' });
     return res.ok;
   } catch (err) {
@@ -1584,6 +1596,52 @@ function setupSplits() {
 }
 setupSplits();
 
+// ---------- 카탈로그 표 열 너비 조절: 머리글 경계를 끌면 그 열만 넓어지고 표는 가로로 스크롤된다 ----------
+const AV_WIDTH_KEY = 'pinky.avColWidths';
+const avCols = { w: null };   // null 이면 자동 배치, 배열이면 열 번호별 px (고정 배치)
+function avTable() { return el('avTable'); }
+function avHeads() { return Array.from(avTable().querySelectorAll('thead th')); }
+function avApplyWidths() {
+  const t = avTable();
+  if (!avCols.w) { t.classList.remove('fixed'); t.style.width = ''; avHeads().forEach((h) => { h.style.width = ''; }); return; }
+  let sum = 0;
+  avHeads().forEach((h, i) => {
+    if (h.hidden) return;
+    const w = avCols.w[i] || 70;
+    h.style.width = w + 'px'; sum += w;
+  });
+  t.classList.add('fixed'); t.style.width = sum + 'px';
+}
+function avSaveWidths() { try { localStorage.setItem(AV_WIDTH_KEY, JSON.stringify(avCols.w)); } catch (e) { /* 저장 안 돼도 화면은 동작 */ } }
+function avFreeze() {   // 처음 끌 때 현재 자동 배치 너비를 그대로 고정값으로 옮긴다
+  if (avCols.w) return;
+  avCols.w = avHeads().map((h) => (h.hidden ? 70 : Math.max(40, Math.round(h.getBoundingClientRect().width))));
+  avApplyWidths();
+}
+function setupAvResize() {
+  try { const v = JSON.parse(localStorage.getItem(AV_WIDTH_KEY) || 'null'); if (Array.isArray(v) && v.length === avHeads().length && v.every((n) => Number.isFinite(n) && n >= 40 && n <= 2000)) avCols.w = v; } catch (e) { /* 무시 */ }
+  avHeads().forEach((h, i) => {
+    const g = document.createElement('span');
+    g.className = 'av-rz'; g.title = '끌어서 열 너비 조절 (더블클릭: 자동)';
+    g.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); avFreeze();
+      g.classList.add('drag');
+      const x0 = e.clientX, w0 = avCols.w[i];
+      const move = (m) => { avCols.w[i] = Math.max(40, Math.min(2000, Math.round(w0 + m.clientX - x0))); avApplyWidths(); };
+      const done = () => {   // 놓았을 때(창 밖 포함) 리스너를 걷고 저장한다
+        g.classList.remove('drag');
+        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', done); window.removeEventListener('pointercancel', done);
+        avSaveWidths();
+      };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', done); window.addEventListener('pointercancel', done);
+    });
+    g.addEventListener('dblclick', () => { avCols.w = null; avApplyWidths(); try { localStorage.removeItem(AV_WIDTH_KEY); } catch (e) { /* 무시 */ } });
+    h.appendChild(g);
+  });
+  avApplyWidths();
+}
+setupAvResize();
+
 // ---------- 화면 전환 (메인 / 로그 / Alarm) ----------
 function setView(name) {
   if (lay.editing) return;   // 레이아웃 편집 중에는 화면을 바꾸지 않는다 (완료/취소 먼저)
@@ -1601,7 +1659,7 @@ document.querySelectorAll('.menu-item[data-view]').forEach((b) => b.addEventList
 
 // ---------- Alarm 화면: Catalog 탭 (읽기 전용) ----------
 // 서버가 GET /api/alarms/catalog 로 주는 표를 거르고 그린다. 발생 횟수가 바뀌므로 화면이 열려 있는 동안 5초마다 다시 받는다.
-const catalog = { rows: [], since: null, err: null, timer: null, busy: false };
+const catalog = { rows: [], since: null, err: null, timer: null, busy: false, canEdit: false, localErr: '', editing: null };
 
 function catalogFilter() { return { level: el('avLevel').value, origin: el('avOrigin').value, q: el('avSearch').value }; }
 
@@ -1611,32 +1669,43 @@ function renderCatalog() {
   const rows = AlarmView.sort(AlarmView.filter(catalog.rows, catalogFilter()));
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.className = 'lvl-' + r.level + (r.enabled ? '' : ' off');
+    tr.className = 'lvl-' + r.level + (r.enabled ? '' : ' off') + (r.modified ? ' modified' : '');
     tr.dataset.code = r.code; tr.dataset.origin = r.origin;
-    tr.title = 'Source: ' + r.source;
+    tr.title = '근거: ' + r.source + (r.modified ? ' | 기본값에서 바뀜' : '');
     AlarmView.cells(r).forEach((text, i) => {
       const td = document.createElement('td'); td.textContent = text;
       td.className = ['code', 'name', 'cond', 'msg', 'lvl', 'snd', 'en', 'last', 'cnt'][i];
       if (i === 6 && r.protected) td.title = AlarmView.TEXT.protectedTip;
       tr.appendChild(td);
     });
+    if (catalog.canEdit) {   // 편집 버튼은 manager 에게만 보인다 (서버가 can_edit 로 알려 준다. 눌러도 서버가 다시 권한을 확인한다)
+      const td = document.createElement('td'), b = document.createElement('button');
+      td.className = 'edit'; b.type = 'button'; b.textContent = '편집'; b.dataset.code = r.code;
+      b.onclick = () => openCatalogEdit(r.code);
+      td.appendChild(b); tr.appendChild(td);
+    }
     body.appendChild(tr);
   }
+  el('avEditTh').hidden = !catalog.canEdit;
+  avApplyWidths();
+  el('avLocalErr').hidden = !catalog.localErr;
+  el('avLocalErr').textContent = catalog.localErr ? AlarmView.TEXT.localError(catalog.localErr) : '';
   el('avEmpty').hidden = rows.length > 0;
-  el('avNote').textContent = catalog.err ? AlarmView.TEXT.loadFailed(catalog.err) : AlarmView.TEXT.note(rows.length, catalog.rows.length);
+  el('avNote').textContent = catalog.err ? (catalog.err === AlarmView.TEXT.oldServer ? catalog.err : AlarmView.TEXT.loadFailed(catalog.err)) : AlarmView.TEXT.note(rows.length, catalog.rows.length);
   el('avNote').classList.toggle('bad', !!catalog.err);
-  el('avFoot').textContent = (catalog.since ? AlarmView.TEXT.since(AlarmView.clock(catalog.since)) + '. ' : '') + AlarmView.TEXT.readonly;
+  el('avFoot').textContent = (catalog.since ? AlarmView.TEXT.since(AlarmView.clock(catalog.since)) + '. ' : '') + AlarmView.TEXT.footer(catalog.canEdit);
 }
 
 async function loadCatalog() {
-  if (catalog.busy) return;
+  if (catalog.busy) { catalog.again = true; return; }   // 받는 중에 바뀌었을 수 있다: 끝나면 한 번 더 받는다 (저장 직후의 방송과 겹쳐도 낡은 표가 남지 않게)
   catalog.busy = true;
   try {
     const res = await fetch('/api/alarms/catalog');
     if (res.status === 401) { showLogin('세션이 만료됐습니다. 다시 로그인하세요'); return; }
+    if (res.status === 404) throw new Error(AlarmView.TEXT.oldServer);   // 화면(정적 파일)은 새 것인데 서버가 옛 코드로 떠 있는 경우
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
-    catalog.rows = d.alarms; catalog.since = d.counted_since; catalog.err = null;
+    catalog.rows = d.alarms; catalog.since = d.counted_since; catalog.err = null; catalog.canEdit = !!d.can_edit; catalog.localErr = d.local_error || '';
     const sel = el('avLevel');
     if (sel.options.length <= 1) for (const lv of d.levels) sel.add(new Option(lv, lv));
   } catch (err) {
@@ -1644,8 +1713,83 @@ async function loadCatalog() {
   } finally {
     catalog.busy = false;
     renderCatalog();
+    if (catalog.again) { catalog.again = false; loadCatalog(); }
   }
 }
+// ---- 편집 (manager) ----
+const avEd = (id) => el('avEd' + id);
+function fillFileSelect(current) {
+  const sel = avEd('File');
+  sel.replaceChildren(new Option(AlarmView.TEXT.defaultFile, ''));
+  const names = soundCfg.files.map((f) => f.name);
+  if (current && !names.includes(current)) names.push(current);   // 저장된 파일이 지금 폴더에 없어도 보이게 (고르면 서버가 거절한다)
+  for (const n of names) sel.add(new Option(n, n));
+  sel.value = current || '';
+}
+function syncEditControls() {
+  const r = catalog.editing;
+  if (!r) return;
+  const info = avEd('Level').value === 'info';
+  if (info) avEd('Sound').checked = false;
+  const quiet = info || !r.soundable;   // info 와 '한 번 알리고 끝나는' 브라우저 알람은 소리가 없다
+  if (!r.soundable) avEd('Sound').checked = false;
+  avEd('Sound').disabled = quiet || r.protected;
+  const off = quiet || !avEd('Sound').checked;   // 소리를 끈 알람은 파일·반복 주기를 고를 필요가 없다
+  avEd('File').disabled = off; avEd('Repeat').disabled = off;
+}
+async function openCatalogEdit(code) {
+  const r = catalog.rows.find((x) => x.code === code);
+  if (!r) return;
+  catalog.editing = r;
+  await loadSoundFiles();
+  avEd('Title').textContent = r.code + ' \u2013 ' + r.name;
+  avEd('Cond').textContent = r.condition;
+  avEd('Enabled').checked = r.enabled; avEd('Enabled').disabled = r.protected;
+  const lv = avEd('Level');
+  lv.replaceChildren(...['HH', 'H', 'L', 'LL', 'info'].map((l) => new Option(l, l)));
+  lv.value = r.level; lv.disabled = r.protected;
+  avEd('Msg').value = r.message; avEd('Msg').disabled = r.origin !== 'server';
+  avEd('Ph').textContent = r.origin === 'server' ? '자리표시자: ' + r.placeholders.map((n) => '{' + n + '}').join(' ') : '';
+  avEd('Sound').checked = r.sound;
+  fillFileSelect(r.sound_file);
+  avEd('Repeat').value = r.repeat == null ? '' : String(r.repeat); avEd('Repeat').placeholder = AlarmView.TEXT.browserSetting;
+  avEd('Note').textContent = [r.protected ? AlarmView.TEXT.protectedNote : '', r.origin === 'browser' ? AlarmView.TEXT.browserNote : '', r.soundable ? '' : AlarmView.TEXT.noSoundNote].filter(Boolean).join(' ');
+  avEd('Err').textContent = '';
+  avEd('Reset').disabled = !r.modified;
+  syncEditControls();
+  el('avEditDlg').showModal();
+}
+function editForm() {
+  const rep = AlarmView.parseRepeat(avEd('Repeat').value);
+  return { form: { enabled: avEd('Enabled').checked, level: avEd('Level').value, message: avEd('Msg').value, sound: avEd('Sound').checked, sound_file: avEd('File').value, repeat: rep.value },
+           error: rep.error || (catalog.editing.origin === 'server' ? AlarmView.validateMessage(avEd('Msg').value, catalog.editing.placeholders) : '') };
+}
+async function sendCatalog(method, url, body) {
+  avEd('Err').textContent = '';
+  try {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { el('avEditDlg').close(); showLogin('세션이 만료됐습니다. 다시 로그인하세요'); return; }
+    if (!res.ok) { avEd('Err').textContent = data.error || AlarmView.TEXT.failed('HTTP ' + res.status); return; }   // 서버 오류 문구는 한국어다 (FRA5-7)
+    el('avEditDlg').close();
+    await loadCatalog();
+  } catch (err) {
+    avEd('Err').textContent = AlarmView.TEXT.failed(String(err.message || err));
+  }
+}
+avEd('Sound').onchange = syncEditControls;
+avEd('Level').onchange = () => { if (avEd('Level').value !== 'info') avEd('Sound').checked = true; syncEditControls(); };
+avEd('Save').onclick = () => {
+  const { form, error } = editForm();
+  if (error) { avEd('Err').textContent = error; return; }
+  const patch = AlarmView.diffPatch(catalog.editing, form);
+  if (!Object.keys(patch).length) { avEd('Err').textContent = AlarmView.TEXT.nothing; return; }
+  sendCatalog('PUT', '/api/alarms/catalog/' + encodeURIComponent(catalog.editing.code), patch);
+};
+avEd('Reset').onclick = () => sendCatalog('POST', '/api/alarms/catalog/' + encodeURIComponent(catalog.editing.code) + '/reset');
+avEd('Cancel').onclick = () => el('avEditDlg').close();
+el('avEditDlg').addEventListener('close', () => { catalog.editing = null; });
+
 function startCatalog() { loadCatalog(); clearInterval(catalog.timer); catalog.timer = setInterval(loadCatalog, 5000); }
 function stopCatalog() { clearInterval(catalog.timer); catalog.timer = null; }
 ['avLevel', 'avOrigin'].forEach((id) => { el(id).onchange = renderCatalog; });

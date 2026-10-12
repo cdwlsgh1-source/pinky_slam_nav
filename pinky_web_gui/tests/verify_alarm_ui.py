@@ -24,6 +24,7 @@ import websockets
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verify_step3_ui as v3  # noqa: E402  (Page 헬퍼 재사용)
+from uitext import english_left  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT, CDP = 8018, 9236
@@ -94,10 +95,10 @@ async def run(shot, narrow_shot):
 
             # ---- 구조와 고정 문구 ----
             check('하단 명령 이력 패널이 없음', await pg.js("!document.getElementById('panelHist') && !document.getElementById('historyBody')"))
-            check('알람바 열 제목이 Time / Robot / Message / State',
-                  await pg.js("[...document.querySelectorAll('#alarmList thead th')].map(t => t.textContent).join('/')") == 'Time/Robot/Message/State')
+            check('알람바 열 제목이 시각 / 로봇 / 메시지 / 상태',
+                  await pg.js("[...document.querySelectorAll('#alarmList thead th')].map(t => t.textContent).join('/')") == '시각/로봇/메시지/상태')
             fixed = await pg.js("[...document.querySelectorAll('#alarmList thead th, #alarmList button, #alarmEmpty')].map(e => e.textContent + ' ' + (e.title || '')).join(' ') + ' ' + document.querySelector('.alarmbar').getAttribute('aria-label')")
-            check('알람바 고정 문구에 한글이 없음', not HANGUL.search(fixed), fixed)
+            check('알람바 고정 문구에 영문 문장이 없음 (한국어)', not english_left(fixed), english_left(fixed))
             # 시작하면 두 로봇이 처음 신호를 보내므로 info 행(ROBOT_ONLINE)이 생긴다
             check('로봇 online 이 info 행으로 기록됨', await pg.wait(ROW_COUNT('ROBOT_ONLINE') + ' === 2', 5))
 
@@ -105,8 +106,8 @@ async def run(shot, narrow_shot):
             st, _ = api('POST', '/api/mock/robot/pinky2/silent', {'on': True})
             check('mock 훅: pinky2 침묵', st == 200)
             check('5초 넘게 신호가 없으면 ROBOT_OFFLINE 활성 알람', await pg.wait(ROW_COUNT('ROBOT_OFFLINE', 'pinky2', 'active') + ' === 1', 12))
-            check('오프라인 알람 문구', await pg.js(ROW_TEXT('ROBOT_OFFLINE', 'pinky2')) == 'pinky2 is offline')
-            check('활성 알람은 Active 로 표시', await pg.js(ROW('ROBOT_OFFLINE', 'pinky2', 'active') + "[0].children[3].textContent") == 'Active')
+            check('오프라인 알람 문구', await pg.js(ROW_TEXT('ROBOT_OFFLINE', 'pinky2')) == 'pinky2 오프라인')
+            check('활성 알람은 활성 으로 표시', await pg.js(ROW('ROBOT_OFFLINE', 'pinky2', 'active') + "[0].children[3].textContent") == '활성')
 
             # ---- 새 탭에서도 같은 알람 (G5) ----
             req = urllib.request.Request(f'http://127.0.0.1:{CDP}/json/new?about:blank', method='PUT')
@@ -126,7 +127,7 @@ async def run(shot, narrow_shot):
                 check('신호가 돌아오면 알람이 해소(Cleared)됨 (두 탭 모두)',
                       await pg.wait(ROW_COUNT('ROBOT_OFFLINE', 'pinky2', 'cleared') + ' === 1', 5)
                       and await pg2.wait(ROW_COUNT('ROBOT_OFFLINE', 'pinky2', 'cleared') + ' === 1', 5))
-                check('해소 시각이 State 에 표시됨', bool(re.fullmatch(r'Cleared \d\d:\d\d:\d\d', await pg.js(ROW('ROBOT_OFFLINE', 'pinky2', 'cleared') + '[0].children[3].textContent'))))
+                check('해소 시각이 State 에 표시됨', bool(re.fullmatch(r'해소 \d\d:\d\d:\d\d', await pg.js(ROW('ROBOT_OFFLINE', 'pinky2', 'cleared') + '[0].children[3].textContent'))))
 
             # ---- 구독자 없음: 명령 전송 실패와 비상정지 실패 ----
             api('POST', '/api/mock/no-subscriber', {'on': True})
@@ -141,13 +142,13 @@ async def run(shot, narrow_shot):
             check('비상정지가 둘 다 실패하면 503', st == 503, (st, body))
             check('ESTOP_FAILED 알람 (HH, 해소 전까지 활성)', await pg.wait(ROW_COUNT('ESTOP_FAILED', 'pinky1', 'active') + ' === 1', 4)
                   and (await pg.js(ROW('ESTOP_FAILED', 'pinky1') + '[0].className')).startswith('lvl-HH'))
-            check('비상정지 실패 문구', (await pg.js(ROW_TEXT('ESTOP_FAILED', 'pinky1'))).startswith('E-STOP failed on pinky1: '))
+            check('비상정지 실패 문구', (await pg.js(ROW_TEXT('ESTOP_FAILED', 'pinky1'))).startswith('pinky1 비상정지 실패: '))
             if shot:
                 await screenshot(pg, shot)
             api('POST', '/api/mock/no-subscriber', {'on': False})
             api('POST', '/api/robots/pinky1/estop', {})
             check('구독자가 돌아온 뒤 비상정지가 성공하면 ESTOP_FAILED 가 해소됨', await pg.wait(ROW_COUNT('ESTOP_FAILED', 'pinky1', 'cleared') + ' === 1 && ' + ROW_COUNT('ESTOP_FAILED', 'pinky1', 'active') + ' === 0', 4))
-            check('비상정지 전송이 info 행으로 남음', await pg.wait(ROW_TEXT('CMD_SENT', 'pinky1') + ".includes('Command `estop` sent to pinky1')", 4))
+            check('비상정지 전송이 info 행으로 남음', await pg.wait(ROW_TEXT('CMD_SENT', 'pinky1') + ".includes('pinky1 에 명령 `estop` 전송')", 4))
             api('POST', '/api/robots/pinky1/command', {'cmd': 'start'})
             check('새 명령이 나가면 이전 전송 실패 알람이 해소됨', await pg.wait(ROW_COUNT('CMD_SEND_FAILED', 'pinky1', 'active') + ' === 0', 4))
 
@@ -159,7 +160,7 @@ async def run(shot, narrow_shot):
 
             # ---- patrol FAILED / RETRY (mock 훅으로 주입) ----
             api('POST', '/api/mock/robot/pinky2/patrol', {'state': 'FAILED', 'detail': 'not allowed: [P3]'})
-            check('PATROL_FAILED 알람과 사유', await pg.wait(ROW_TEXT('PATROL_FAILED', 'pinky2', 'active') + ".includes('Patrol failed on pinky2: not allowed: [P3]')", 4))
+            check('PATROL_FAILED 알람과 사유', await pg.wait(ROW_TEXT('PATROL_FAILED', 'pinky2', 'active') + ".includes('pinky2 순찰 실패: not allowed: [P3]')", 4))
             api('POST', '/api/mock/robot/pinky2/patrol', {'state': 'RETRY', 'detail': 'amcl'})
             check('RETRY 로 바뀌면 FAILED 는 해소되고 PATROL_RETRY 가 활성',
                   await pg.wait(ROW_COUNT('PATROL_FAILED', 'pinky2', 'cleared') + ' === 1 && ' + ROW_COUNT('PATROL_RETRY', 'pinky2', 'active') + ' === 1', 4))
@@ -181,20 +182,20 @@ async def run(shot, narrow_shot):
 
             # ---- info 필터와 저장 ----
             info_rows = lambda: pg.js("[...document.querySelectorAll('#alarmBody tr.lvl-info')].length")  # noqa: E731
-            check('기본은 info 행이 보임', await info_rows() > 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == 'Hide info')
+            check('기본은 info 행이 보임', await info_rows() > 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == '기록 숨김')
             await pg.click_sel('#alarmInfoBtn')
-            check('Hide info 를 누르면 info 행이 사라지고 버튼이 Show info', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == 'Show info')
+            check('기록 숨김 을 누르면 info 행이 사라지고 버튼이 기록 표시', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == '기록 표시')
             check('info 가 아닌 알람은 그대로 보임', await pg.js(ROW_COUNT('ESTOP_FAILED') + ' === 1'))
             await pg.call('Page.navigate', url=BASE + '/')
             check('새로고침 뒤 다시 로드', await pg.wait("app.cfg && app.wsUp && document.querySelectorAll('#alarmBody tr').length > 0", 10))
-            check('info 숨김이 새로고침 뒤에도 유지', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == 'Show info')
+            check('info 숨김이 새로고침 뒤에도 유지', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == '기록 표시')
             await pg.click_sel('#alarmInfoBtn')
-            check('Show info 를 누르면 다시 보임', await info_rows() > 0)
+            check('기록 표시 를 누르면 다시 보임', await info_rows() > 0)
 
             # ---- 브라우저 전용 알람: 서버 연결 끊김과 재연결 ----
             await pg.js("sock.close()")
-            check('연결이 끊기면 Server disconnected 알람 (브라우저 전용)', await pg.wait(ROW_COUNT('SERVER_DISCONNECTED') + ' >= 1', 3))
-            check('다시 연결되면 끊김은 해소(Cleared)되고 Server reconnected 가 기록됨',
+            check('연결이 끊기면 서버 연결 끊김 알람 (브라우저 전용)', await pg.wait(ROW_COUNT('SERVER_DISCONNECTED') + ' >= 1', 3))
+            check('다시 연결되면 끊김은 해소(Cleared)되고 서버 재연결이 기록됨',
                   await pg.wait(ROW_COUNT('SERVER_DISCONNECTED', None, 'active') + ' === 0 && ' + ROW_COUNT('SERVER_RECONNECTED') + ' === 1', 8))
             check('재연결 뒤에도 서버 알람이 유지됨 (새 스냅샷)', await pg.wait(ROW_COUNT('ESTOP_FAILED', 'pinky1', 'cleared') + ' === 1', 4))
 
@@ -293,8 +294,8 @@ async def run(shot, narrow_shot):
                 await pgb.call('Page.navigate', url=BASE + '/')
                 check('두 번째 브라우저 로드', await pgb.wait("app.cfg && app.wsUp", 10))
                 BTN = lambda i, prop: f"document.getElementById('{i}').{prop}"  # noqa: E731
-                check('ACK / SIL 버튼과 툴팁 문구', await pg.js(BTN('alarmAckBtn', 'title')) == 'Acknowledge cleared alarms'
-                      and await pg.js(BTN('alarmSilBtn', 'title')) == 'Silence current alarm sound'
+                check('ACK / SIL 버튼과 툴팁 문구', await pg.js(BTN('alarmAckBtn', 'title')) == '알람을 확인(ACK)합니다: 해소된 알람은 목록에서 숨기고 활성 알람은 확인됨으로 표시'
+                      and await pg.js(BTN('alarmSilBtn', 'title')) == '지금 울리는 알람 소리를 끕니다 (이 브라우저만)'
                       and await pg.js(BTN('alarmAckBtn', 'textContent')) == 'ACK' and await pg.js(BTN('alarmSilBtn', 'textContent')) == 'SIL')
                 await asyncio.sleep(1.0)
                 api('POST', '/api/alarms/ack', {'id': None})   # stop 으로 새로 생긴 PATROL_STOPPED 도 확인 처리해 깨끗한 상태로 시작
@@ -308,7 +309,7 @@ async def run(shot, narrow_shot):
                 await pg.click_sel('#alarmAckBtn')
                 ack_state = ROW('ROBOT_OFFLINE', 'pinky2', 'active') + '[0].children[3].textContent'
                 check('활성 알람을 ACK 하면 숨기지 않고 Acknowledged (계정, 시각) 표시 - 두 브라우저',
-                      all(await both(ack_state + ".startsWith('Acknowledged no-auth ')")), (await pg.js(ack_state), await pgb.js(ack_state)))
+                      all(await both(ack_state + ".startsWith('확인됨 no-auth ')")), (await pg.js(ack_state), await pgb.js(ack_state)))
                 check('ACK 로 대상이 없어지면 ACK / SIL 이 모두 비활성 (ACK 한 알람은 소리가 멈춤)',
                       await pg.wait(BTN('alarmAckBtn', 'disabled') + ' && ' + BTN('alarmSilBtn', 'disabled'), 4))
                 # ACK 한 활성 알람이 해소되면 숨는다
@@ -325,12 +326,12 @@ async def run(shot, narrow_shot):
                 await pgb.click_sel('#alarmAckBtn')                                              # 다른 브라우저에서 누른다
                 check('해소 알람 ACK 는 두 브라우저 모두에서 사라지고 활성 알람은 유지됨',
                       all(await both(ROW_COUNT('CMD_REJECTED', 'pinky1') + ' === 0 && ' + ROW_COUNT('CMD_REJECTED', 'pinky2', 'active') + ' === 1')))
-                check('유지된 활성 알람에 ACK 한 계정이 표시됨', await pg.wait(ROW('CMD_REJECTED', 'pinky2', 'active') + "[0].children[3].textContent.startsWith('Acknowledged no-auth')", 4))
+                check('유지된 활성 알람에 ACK 한 계정이 표시됨', await pg.wait(ROW('CMD_REJECTED', 'pinky2', 'active') + "[0].children[3].textContent.startsWith('확인됨 no-auth')", 4))
 
                 # 같은 사건이 또 일어나면 새 행 (ACK 는 행마다)
                 api('POST', '/api/robots/pinky2/command', {'cmd': 'goto', 'points': ['P99']})
                 check('ACK 한 뒤 같은 사건이 또 일어나면 ACK 안 된 새 행이 생김', all(await both(ROW_COUNT('CMD_REJECTED', 'pinky2', 'active') + ' === 2'))
-                      and await pg.js(ROW('CMD_REJECTED', 'pinky2', 'active') + ".filter(tr => tr.children[3].textContent === 'Active').length") == 1)
+                      and await pg.js(ROW('CMD_REJECTED', 'pinky2', 'active') + ".filter(tr => tr.children[3].textContent === '활성').length") == 1)
 
                 # SIL: 이 브라우저의 소리만 끈다 (상태는 서버에 저장되지 않는다), 새 알람이 오면 해제
                 await pg.click_sel('#alarmSilBtn')

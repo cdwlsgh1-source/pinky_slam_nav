@@ -36,5 +36,5 @@ def test_alarmview_cases_in_chrome():
     res = json.loads(m.group(1).replace('&quot;', '"').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>'))
     assert 'error' not in res, res.get('error')
     failed = [n for n, ok in res['results'] if not ok]
-    assert len(res['results']) >= 15
+    assert len(res['results']) >= 35
     assert not failed, failed

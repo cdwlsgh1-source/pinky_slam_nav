@@ -32,7 +32,7 @@ def test_raise_creates_active_alarm_and_message():
     assert len(msgs) == 1 and msgs[0]['type'] == 'alarm'
     al = msgs[0]['alarm']
     assert al['code'] == 'ROBOT_OFFLINE' and al['level'] == 'H' and al['robot'] == 'pinky1'
-    assert al['text'] == 'pinky1 is offline' and al['state'] == ACTIVE and al['acked_by'] is None and al['count'] == 1
+    assert al['text'] == 'pinky1 오프라인' and al['state'] == ACTIVE and al['acked_by'] is None and al['count'] == 1
     assert al['t_raised'] == 1000.0 and al['t_cleared'] is None
 
 
@@ -114,9 +114,9 @@ def test_info_rows_are_records_not_grouped():
 def test_template_uses_allowed_keys_only_and_trims_empty_reason():
     a, _ = make()
     al = a.raise_('PATROL_FAILED', 'pinky1', reason='', evil='{x}')[0]['alarm']
-    assert al['text'] == 'Patrol failed on pinky1'
+    assert al['text'] == 'pinky1 순찰 실패'
     al = a.raise_('CMD_SEND_FAILED', 'pinky2', cmd='start', reason='구독자 없음')[0]['alarm']
-    assert al['text'] == 'Command `start` could not be sent to pinky2: 구독자 없음'
+    assert al['text'] == 'pinky2 에 명령 `start` 를 보내지 못함: 구독자 없음'
 
 
 def test_robot_online_transitions():
@@ -131,7 +131,7 @@ def test_robot_online_transitions():
 def test_patrol_states():
     a, _ = make()
     a.patrol('pinky1', 'FAILED', 'not allowed: [P3]')
-    assert active(a, 'PATROL_FAILED')[0]['text'] == 'Patrol failed on pinky1: not allowed: [P3]'
+    assert active(a, 'PATROL_FAILED')[0]['text'] == 'pinky1 순찰 실패: not allowed: [P3]'
     a.patrol('pinky1', 'RETRY', 'again')     # FAILED 는 해소되고 RETRY 가 활성
     assert not active(a, 'PATROL_FAILED') and len(active(a, 'PATROL_RETRY')) == 1
     a.patrol('pinky1', 'STOPPED')
@@ -175,7 +175,7 @@ def test_estop_outcomes():
     assert [x['code'] for x in active(a)] == ['ESTOP_PARTIAL']
     a.estop('pinky1', True, True)
     assert not active(a)
-    assert a.snapshot()[0]['text'] == 'Command `estop` sent to pinky1'
+    assert a.snapshot()[0]['text'] == 'pinky1 에 명령 `estop` 전송'
 
 
 def test_estop_codes_are_protected():
