@@ -1,5 +1,5 @@
 # Pinky 알람바 개선 — 단계별 PRD
-2026-10-11 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
+2026-10-12 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1, A2, A3 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`, `alarm_a2_...`, `alarm_a3_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
 
 ## 0. 공통 개요
 ### 0-1 배경과 문제
@@ -159,10 +159,12 @@ CLAUDE.md, docs/interfaces.md, 그리고 이 PRD 의 Step A1 구현물(backend/a
 | FRA3-10 | 소리 설정 화면의 모든 문구는 영문이다(Alarm sound, Volume, Test, Stop, Repeat interval, Sound file, Fallback beep 등) |
 
 ### 완료 기준
-- [ ] 소리 로직(반복·중단·SIL·파일 실패 시 합성음 대체)을 순수 함수로 분리해 테스트
-- [ ] 사운드 파일 업로드(또는 배치) 후 레벨별 시험 재생으로 재생 확인(사용자가 확인)
-- [ ] 파일을 지운 상태에서 합성음으로 대체되는지 확인
-- [ ] 자동재생 차단 안내 문구 확인
+- [x] 소리 로직(반복·중단·SIL·파일 실패 시 합성음 대체)을 순수 함수로 분리해 테스트 (`frontend/alarmsound.js`, `tests/test_alarmsound_js.py`)
+- [ ] 사운드 파일 업로드(또는 배치) 후 레벨별 시험 재생으로 재생 확인(사용자가 확인): 1차안이라 `config/sounds/` 에 배치. 자동 확인은 재생 호출을 세는 `verify_alarm_sound_ui.py` 까지, 실제 소리는 `docs/checklists/alarm_a3_real_robot_checklist.md`
+- [x] 파일을 지운 상태에서 합성음으로 대체되는지 확인 (`verify_alarm_sound_ui.py`; 실제 소리는 사용자 확인)
+- [x] 자동재생 차단 안내 문구 확인 (`verify_alarm_sound_ui.py`, 칩 줄에 표시, 첫 클릭 뒤 사라짐)
+
+**구현 메모 (A3, 사용자 결정 10 의 1차안)**: 파일은 `config/sounds/` 에 직접 두고(GUI 업로드 없음) 서버가 `/sounds/<파일>` 로 서빙한다. 안내 문구는 소리가 켜져 있고 브라우저가 막은 동안 **알람이 없어도** 항상 보여, 첫 알람이 오기 전에 한 번 눌러 두게 한다(알람이 올 때 처음 알리면 그 알람의 소리는 이미 막힌 뒤다). 반복 주기는 레벨별이 아니라 하나다(8-4절 `Repeat interval (s)` 한 칸).
 
 ### Claude Code 프롬프트
 

@@ -26,6 +26,7 @@ from .procs import ProcError, ProcessManager, SystemRunner
 from .planner import GridPlanner, NoPath, path_length
 import math
 
+from .sounds import ALLOWED_EXT, SoundLibrary
 from .scan import to_world, to_world_tf, yaw_of
 from .state import StateStore
 
@@ -55,7 +56,7 @@ PROC_STATUS = {'unknown': 404, 'unset': 409, 'busy': 409, 'external': 409, 'conf
 PUBLIC_API = ('/api/health', '/api/login', '/api/logout', '/api/me')  # 로그인 없이 부를 수 있는 API
 
 
-def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None, alarm_dir: str = None, alarm_chunk: int = None) -> FastAPI:
+def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = None, proc_runner=None, alarm_dir: str = None, alarm_chunk: int = None, sound_dir: str = None) -> FastAPI:
     auth = auth if auth is not None else Auth()   # 고정 계정 (backend/auth.py). 끄려면 Auth.disabled() 또는 --no-auth
     store = StateStore(cfg.robots, cfg.zone_status_topic, cfg.online_timeout_sec, cfg.pose_max_hz)
     tracker = CommandTracker(cfg.robots, cfg.command_history_size, cfg.no_response_sec)
@@ -64,6 +65,7 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
     alarm_history = AlarmHistory(hist_dir, alarm_chunk or cfg.alarm_history_chunk) if hist_dir else None
     if alarm_history:
         log.info('알람 이력 저장: %s (파일당 %d건)', alarm_history.dir, alarm_history.chunk)
+    sounds = SoundLibrary(sound_dir or cfg.alarm_sound_dir or Path(__file__).resolve().parent.parent / 'config' / 'sounds')   # 알람 소리 파일 (사용자가 폴더에 직접 둔다)
     alarms = AlarmManager(sink=alarm_history.record if alarm_history else None)   # 알람바에 보이는 모든 사건. 서버가 만들어 모든 화면에 같은 알람을 보낸다
     hub = Hub()
     bg = {}  # lifespan 에서 만든 리소스 (commander: publish_cmd(rid, data) 를 가진 RosBridge 또는 MockFleet)
@@ -608,6 +610,19 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             return JSONResponse({'error': '알람 이력 저장이 꺼져 있습니다 (alarm_history_dir)'}, status_code=404)
         return {'dir': str(alarm_history.dir), 'chunk': alarm_history.chunk, 'files': alarm_history.files()}
 
+    @app.get('/api/alarms/sounds')
+    async def api_alarm_sounds():
+        """소리 설정 화면의 사운드 파일 목록: [{name, size, type}]. 허용 확장자와 크기 상한을 통과한 파일만 나온다."""
+        return {'files': sounds.files(), 'max_bytes': sounds.max_bytes, 'extensions': sorted(ALLOWED_EXT)}
+
+    @app.get('/sounds/{name}')
+    async def alarm_sound_file(name: str):
+        """사운드 파일 한 개. 폴더 밖 경로, 허용 안 된 확장자, 크기 초과는 모두 404 (존재 여부를 구분해 주지 않는다)."""
+        p = sounds.resolve(name)
+        if p is None:
+            return JSONResponse({'error': 'sound not found'}, status_code=404)
+        return FileResponse(p, media_type=sounds.media_type(name))
+
     @app.post('/api/alarms/ack')
     async def api_alarm_ack(request: Request):
         """알람 확인(ACK). body {"id": 정수 | [정수…] | null}, id 가 없으면 전체. operator 이상.
@@ -786,6 +801,7 @@ def main():
     ap.add_argument('--mock-proc-external', default='', help='--mock 에서 이미 다른 곳에서 실행 중인 것으로 보이는 프로세스 id (쉼표로 구분)')
     ap.add_argument('--no-auth', action='store_true', help='로그인을 끈다 (개발/시험용. 프로세스 제어도 꺼진다)')
     ap.add_argument('--alarm-history-chunk', type=int, default=None, help='이력 파일 하나에 담는 건수 (기본: 설정의 alarm_history_chunk, 시험용)')
+    ap.add_argument('--alarm-sound-dir', default=None, help='알람 사운드 파일 폴더 (기본: 설정의 alarm_sound_dir, config/sounds)')
     ap.add_argument('--alarm-history-dir', default=None, help='알람 이력 폴더 (기본: 설정의 alarm_history_dir, mock 이면 뒤에 -mock)')
     ap.add_argument('--config', default=None, help='robots.yaml 경로 (기본 config/robots.yaml)')
     args = ap.parse_args()
@@ -810,7 +826,7 @@ def main():
                                                  'scan_mount_tf': not args.mock_scan_no_tf,
                                                  'proc_opts': {'fail_start': [x for x in args.mock_proc_fail.split(',') if x],
                                                                'external': [x for x in args.mock_proc_external.split(',') if x]}},
-                                            auth=auth, alarm_dir=args.alarm_history_dir, alarm_chunk=args.alarm_history_chunk), host=args.host, port=args.port, log_level='info')
+                                            auth=auth, alarm_dir=args.alarm_history_dir, alarm_chunk=args.alarm_history_chunk, sound_dir=args.alarm_sound_dir), host=args.host, port=args.port, log_level='info')
 
 
 if __name__ == '__main__':

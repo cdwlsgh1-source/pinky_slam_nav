@@ -92,12 +92,14 @@ const stateText = (a) => {
 // ACK 대상: info 가 아니고 아직 ACK 안 된 서버 알람(활성·해소), 이 브라우저에서 해소된 브라우저 전용 알람. SIL 대상: ACK 안 된 활성 알람 (소리가 나는 알람)
 const ackTargets = () => app.alarms.filter((a) => a.level !== 'info' && (a.local ? a.state !== 'active' && a.state !== 'event' : a.acked_by == null) );
 const silTargets = () => app.alarms.filter((a) => a.level !== 'info' && a.state === 'active' && a.acked_by == null);   // ACK 하면 그 알람의 소리는 멈춘다 (PRD FRA3-5)
+let sound = null;   // 알람 소리 컨트롤러 (아래 '알람 소리' 절에서 만든다). 알람/ACK/SIL 이 바뀔 때마다 refresh 해서 울림·멈춤을 다시 판단한다
 function updateAlarmButtons() {
   const ack = el('alarmAckBtn'), sil = el('alarmSilBtn');
   ack.disabled = ackTargets().length === 0;
   if (silTargets().length === 0) app.silenced = false;   // 소리 낼 알람이 없으면 SIL 도 풀린다
   sil.disabled = silTargets().length === 0;
   sil.setAttribute('aria-pressed', String(app.silenced));
+  if (sound) sound.refresh();
 }
 
 function renderAlarms() {
@@ -201,8 +203,103 @@ function setAlarmH(px, save) {
 renderAlarms();   // 새로고침 전의 브라우저 전용 알람을 서버 스냅샷이 오기 전에도 보여 준다
 
 el('alarmAckBtn').onclick = ackAlarms;
-el('alarmSilBtn').onclick = () => { app.silenced = !app.silenced; updateAlarmButtons(); };   // 이 브라우저만 (서버 상태는 안 바뀐다). 소리 재생은 Step A3 이 app.silenced 를 읽는다
+el('alarmSilBtn').onclick = () => { app.silenced = !app.silenced; updateAlarmButtons(); };   // 이 브라우저만 (서버 상태는 안 바뀐다). 알람 소리(아래)가 app.silenced 를 읽어 멈춘다
 el('alarmInfoBtn').onclick = () => { app.showInfo = !app.showInfo; saveShowInfo(app.showInfo); renderAlarms(); };
+
+// ---------- 알람 소리 (alarmsound.js: 판단은 순수 함수, 여기서는 설정 화면과 저장만) ----------
+// 소리 낼 알람 = SIL 대상(ACK 안 된 활성 알람, info 제외). ACK / 해소 / SIL 이면 대상이 사라져 소리가 멈춘다 (FRA3-5).
+// 설정은 이 브라우저의 localStorage 에만 둔다 (FRA3-7). 저장소를 못 써도 이번 화면에서는 바꾼 값대로 동작한다.
+const safeStorage = () => { try { return window.localStorage; } catch (e) { return null; } };
+const soundCfg = { s: AlarmSound.loadSettings(safeStorage()), files: [], filesErr: '' };
+const saveSound = () => AlarmSound.saveSettings(safeStorage(), soundCfg.s);
+
+sound = AlarmSound.createController({
+  adapter: AlarmSound.createAdapter({ AudioContext: window.AudioContext || window.webkitAudioContext, Audio: window.Audio }),
+  getSettings: () => soundCfg.s,
+  getTargets: () => silTargets().map((a) => a.level),
+  getSilenced: () => app.silenced,
+  now: () => Date.now(),
+  urlOf: (name) => '/sounds/' + encodeURIComponent(name),
+  setTimer: (f, ms) => setInterval(f, ms),
+  onUpdate: (info) => {
+    el('soundHint').hidden = !(info.blocked && soundCfg.s.enabled);   // 막힌 동안만 안내한다 (소리가 필요해지기 전에 미리 한 번 누르게)
+    el('sndStatus').textContent = info.status;
+    for (const b of document.querySelectorAll('#sndRows [data-stop]')) b.disabled = info.preview !== b.dataset.stop;
+  },
+});
+// 브라우저는 사용자 입력 전에는 소리를 막는다: 화면 어디든 처음 누르거나 키를 누르면 풀어 준다 (FRA3-8)
+for (const ev of ['pointerdown', 'keydown']) document.addEventListener(ev, () => { if (sound.info().blocked) sound.unlock(); }, true);
+el('soundHint').onclick = () => sound.unlock();
+
+async function loadSoundFiles() {
+  try {
+    const r = await fetch('/api/alarms/sounds');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    soundCfg.files = j.files || [];
+    soundCfg.filesErr = '';
+    soundCfg.maxBytes = j.max_bytes; soundCfg.exts = j.extensions || [];
+  } catch (e) {
+    soundCfg.files = []; soundCfg.filesErr = 'Could not load the sound file list';
+  }
+  sound.setFiles(soundCfg.files.map((f) => f.name));
+  if (el('soundDlg').open) renderSoundDialog();
+}
+
+function renderSoundDialog() {
+  const s = soundCfg.s;
+  el('sndEnabled').checked = s.enabled;
+  el('sndVolume').value = String(Math.round(s.volume * 100));
+  el('sndVolumeText').textContent = Math.round(s.volume * 100) + '%';
+  el('sndInterval').value = String(s.interval);
+  const rows = el('sndRows');
+  rows.replaceChildren();
+  for (const lv of AlarmSound.SOUND_LEVELS) {
+    const cfg = s.levels[lv];
+    const tr = document.createElement('tr');
+    const cell = (child) => { const td = document.createElement('td'); td.appendChild(child); tr.appendChild(td); return td; };
+    const name = document.createElement('b'); name.textContent = lv; cell(name);
+    const on = document.createElement('input'); on.type = 'checkbox'; on.checked = cfg.on; on.setAttribute('aria-label', lv + ' sound on');
+    on.onchange = () => { cfg.on = on.checked; saveSound(); sound.refresh(); };
+    cell(on);
+    const sel = document.createElement('select'); sel.setAttribute('aria-label', lv + ' sound file');
+    sel.add(new Option('Fallback beep', ''));
+    for (const f of soundCfg.files) sel.add(new Option(f.name, f.name));
+    if (cfg.file && !soundCfg.files.some((f) => f.name === cfg.file)) sel.add(new Option(cfg.file + ' (missing)', cfg.file));   // 파일이 지워졌어도 선택은 보이고, 소리는 합성음으로 난다
+    sel.value = cfg.file;
+    sel.onchange = () => {
+      cfg.file = sel.value; saveSound(); sound.forgetFailures();
+      if (sound.info().preview === lv) sound.startPreview(lv); else sound.refresh();   // 시험 중이면 바꾼 소리로 바로 다시 들려 준다
+    };
+    cell(sel);
+    const test = document.createElement('button'); test.type = 'button'; test.textContent = 'Test'; test.dataset.test = lv;
+    test.title = 'Play ' + lv + ' sound repeatedly (no alarm is created)';
+    test.onclick = () => sound.startPreview(lv);
+    const stop = document.createElement('button'); stop.type = 'button'; stop.textContent = 'Stop'; stop.dataset.stop = lv; stop.disabled = true;
+    stop.onclick = () => sound.stopPreview();
+    const td = cell(test); td.appendChild(document.createTextNode(' ')); td.appendChild(stop);
+    rows.appendChild(tr);
+  }
+  const exts = (soundCfg.exts || []).join(' ') || '.mp3 .wav .ogg';
+  el('sndFilesNote').textContent = soundCfg.filesErr
+    || (soundCfg.files.length ? soundCfg.files.length + ' sound file(s) found. ' : 'No sound files found: fallback beeps are used. ')
+       + 'Put ' + exts + ' files (up to ' + Math.round((soundCfg.maxBytes || 1048576) / 1048576) + ' MB each) in config/sounds/ on the server.';
+  sound.refresh();
+}
+
+el('sndEnabled').onchange = () => { soundCfg.s.enabled = el('sndEnabled').checked; saveSound(); sound.refresh(); };
+el('sndVolume').oninput = () => { soundCfg.s.volume = Number(el('sndVolume').value) / 100; el('sndVolumeText').textContent = el('sndVolume').value + '%'; saveSound(); };
+el('sndInterval').onchange = () => {
+  const v = Number(el('sndInterval').value);
+  soundCfg.s.interval = AlarmSound.normalizeSettings({ interval: Number.isFinite(v) ? v : soundCfg.s.interval }).interval;   // 범위 밖은 1~60 초로 맞춘다 (행의 cfg 참조를 유지하려고 제자리에서 바꾼다)
+  el('sndInterval').value = String(soundCfg.s.interval);
+  saveSound();
+};
+el('alarmSoundBtn').onclick = () => { renderSoundDialog(); el('soundDlg').showModal(); loadSoundFiles(); };
+el('sndClose').onclick = () => el('soundDlg').close();
+el('soundDlg').addEventListener('close', () => sound.stopPreview());   // 닫으면(Esc 포함) 시험 재생은 멈춘다
+sound.start();
+loadSoundFiles();
 
 function setChip(id, level, text) {
   const c = el(id); c.dataset.level = level; c.textContent = text;
@@ -753,6 +850,7 @@ function applySnapshot(msg) {
   });
   for (const id of Object.keys(app.robots)) if (!ids.includes(id)) delete app.robots[id];
   setZone(msg.zone, msg.zone_info);
+  loadSoundFiles();   // 접속(재접속)마다 파일 목록을 새로 읽는다. 로그인 전에는 401 이라 빈 목록이었을 수 있다
   if (msg.procs) setProcs(msg.procs);
   app.history = (msg.commands || []).slice().reverse();
   app.alarms = (msg.alarms || []).concat(app.alarms.filter((a) => a.local));   // 서버 알람은 접속할 때마다 통째로 바꾼다 (서버를 다시 켜면 id 가 처음부터 다시 매겨진다)

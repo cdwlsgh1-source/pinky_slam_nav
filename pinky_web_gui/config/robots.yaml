@@ -35,6 +35,11 @@ command_history_size: 50   # 명령 이력 보관 개수
 alarm_history_dir: ../data/alarms
 alarm_history_chunk: 1000
 
+# 알람 사운드 파일 폴더 (알람바 Step A3). 레벨별 알람 소리를 여기 둔 mp3 / wav / ogg 파일로 재생한다 (파일당 1MB 이하, 소리 설정 화면에서 레벨마다 고른다).
+#   파일을 두면 GUI 서버를 다시 켜지 않아도 소리 설정 화면의 Sound file 목록에 나온다 (화면을 다시 열 때 목록을 새로 읽는다). 업로드 화면은 아직 없다.
+#   파일이 없거나 재생에 실패하면 레벨별 합성 비프음으로 대체한다. robots.yaml 이 있는 폴더 기준 상대 경로.
+alarm_sound_dir: sounds
+
 # 로봇별 설정. 키는 robots 와 같아야 한다.
 #   goto_allowed : 백엔드가 허용하는 goto 지점. RED* (구역 문)는 넣을 수 없다 (노드가 문 경유와 락을 처리한다).
 #   home         : goto 완료 후 복귀하는 지점 (노드의 HOME_NAME)

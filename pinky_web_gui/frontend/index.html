@@ -15,6 +15,7 @@
     <div class="brand">Pinky</div>
     <button class="menu-item active" data-view="main">메인</button>
     <button class="menu-item" data-view="log" id="logMenu" title="GUI 가 켠 프로세스의 출력과 GUI 서버 로그">로그</button>
+    <button type="button" class="menu-item" id="alarmSoundBtn" title="Alarm sound settings (volume, sound files, repeat interval, test)">Sound</button>
     <button class="menu-item" disabled title="준비 중">포인트</button>
     <div class="layout-tools" id="layoutTools" data-only-view="main">
       <button type="button" class="menu-item" id="layoutEditBtn" aria-pressed="false" title="지도와 사이드바 패널을 끌어서 옮기고 크기를 조절합니다">레이아웃 편집</button>
@@ -38,17 +39,20 @@
   <header class="alarmbar" aria-label="System alarms">
     <span class="chip" id="connChip" data-level="warn">연결 중...</span>
     <span class="chip" id="zoneChip" data-level="dim">구역: -</span>
+    <!-- ACK / SIL / info 표시: 비상 정지와 같은 크기·서식의 버튼을 칩 줄에 나열한다 (알람 표가 그만큼 넓어진다) -->
+    <div class="alarm-tools" role="group" aria-label="Alarm actions">
+      <button type="button" id="alarmAckBtn" title="Acknowledge cleared alarms" disabled>ACK</button>
+      <button type="button" id="alarmSilBtn" aria-pressed="false" title="Silence current alarm sound" disabled>SIL</button>
+      <button type="button" id="alarmInfoBtn" aria-pressed="true" title="Show or hide info rows (sent commands, robot online)">Hide info</button>
+    </div>
+    <!-- 브라우저가 첫 클릭 전에는 소리를 막는다. 막힌 동안만 보이고, 화면 아무 곳이나 누르면 사라진다 (FRA3-8). 칩 줄에 둬서 알람 표가 밀리지 않는다 -->
+    <button type="button" class="sound-hint" id="soundHint" hidden>Click to enable alarm sound</button>
     <!-- 비상정지: 항상 보이고, 확인 팝업 없이 한 번 누르면 동작한다 (FR4-7). 로봇별 비상 정지는 로봇 카드 안에 있다 -->
     <div class="estop" id="estopBar" role="group" aria-label="비상정지">
       <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">비상 정지</button>
     </div>
     <!-- 알람 목록: 서버가 만든 알람과 브라우저 전용 알람을 한 표로 (app.js renderAlarms). 비상정지 명령 이력도 여기 통합됐다 -->
     <div class="alarm-list" id="alarmList">
-      <div class="alarm-tools">
-        <button type="button" id="alarmAckBtn" title="Acknowledge cleared alarms" disabled>ACK</button>
-        <button type="button" id="alarmSilBtn" aria-pressed="false" title="Silence current alarm sound" disabled>SIL</button>
-        <button type="button" id="alarmInfoBtn" aria-pressed="true" title="Show or hide info rows (sent commands, robot online)">Hide info</button>
-      </div>
       <div class="alarm-main">
         <div class="alarm-scroll" id="alarmScroll" tabindex="0" aria-label="Alarm list">
           <table>
@@ -192,6 +196,23 @@
   <div class="row-actions"><button type="button" id="arClose" class="primary">닫기</button></div>
 </dialog>
 
+<dialog id="soundDlg" class="wide" aria-label="Alarm sound">
+  <p><b>Alarm sound</b></p>
+  <p class="hint">Saved in this browser only. Test plays the sound with the repeat interval and does not create an alarm. Level <b>info</b> is always silent.</p>
+  <div class="sound-top">
+    <label class="field"><input type="checkbox" id="sndEnabled"> Alarm sound on</label>
+    <label class="field">Volume <input type="range" id="sndVolume" min="0" max="100" step="5"> <span id="sndVolumeText" class="dim"></span></label>
+    <label class="field">Repeat interval (s) <input type="number" id="sndInterval" min="1" max="60" step="1"></label>
+  </div>
+  <table class="sound-table">
+    <thead><tr><th>Level</th><th>On</th><th>Sound file</th><th>Test</th></tr></thead>
+    <tbody id="sndRows"></tbody>
+  </table>
+  <p class="hint" id="sndFilesNote"></p>
+  <p class="hint" id="sndStatus" aria-live="polite"></p>
+  <div class="row-actions"><button type="button" id="sndClose" class="primary">Close</button></div>
+</dialog>
+
 <dialog id="confirmDlg">
   <form method="dialog">
     <p id="confirmText"></p>
@@ -208,6 +229,7 @@
 <script src="procview.js"></script>
 <script src="logview.js"></script>
 <script src="addrobot.js"></script>
+<script src="alarmsound.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

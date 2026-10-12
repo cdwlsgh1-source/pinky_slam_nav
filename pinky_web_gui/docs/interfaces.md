@@ -262,7 +262,7 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(인증이 켜져 있을 때만 true, `--no-auth` 면 false)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
 
-## 6-7. 웹 GUI 알람 (알람바 Step A1, A2)
+## 6-7. 웹 GUI 알람 (알람바 Step A1, A2, A3)
 
 알람바(화면 위)에 보이는 사건은 **서버가 만든다** (`backend/alarms.py` 의 `AlarmManager`). 접속한 모든 화면이 같은 알람을 보고, 하단 명령 이력 패널은 알람바에 통합돼 없어졌다. 서버가 알 수 없는 사건(WS 끊김, 지도·설정 불러오기 실패, 화면 안내, 요청이 서버에 닿지 못함)은 브라우저가 같은 목록에 직접 추가한다 (id 가 `local-N`, 시각은 브라우저 시계).
 
@@ -323,6 +323,19 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | 저장 대상 | 서버가 만든 알람 전부(info 행 포함). 브라우저 전용 알람(서버 끊김 등)은 서버가 모르므로 저장하지 않는다 |
 | 쓰기 시점 | 이벤트가 올 때마다 즉시 한 줄 추가 (갑자기 꺼져도 직전까지 남는다). 쓰기에 실패해도 알람은 계속 동작하고 경고 로그만 남기며, 복구되면 다시 쓴다 |
 | 보관 | 파일은 자동으로 지우지 않는다 (오래된 것은 직접 지운다) |
+
+**알람 소리** (Step A3, 소리는 브라우저에서 나므로 서버는 파일만 준다. 판단 로직은 `frontend/alarmsound.js`):
+
+| 항목 | 내용 |
+|---|---|
+| `GET /api/alarms/sounds` | 사운드 파일 목록 `{files: [{name, size, type}], max_bytes, extensions}`. `config/sounds/`(설정 `alarm_sound_dir`, `--alarm-sound-dir`)의 `.mp3 .wav .ogg` 중 1MB 이하만 이름 순으로. 로그인 필요(인증을 켠 경우). 폴더가 없으면 빈 목록 |
+| `GET /sounds/<파일>` | 그 파일. 폴더 밖 경로, 하위 폴더, 숨김 파일, 허용 안 된 확장자, 크기 초과, 폴더 밖을 가리키는 심볼릭 링크는 모두 404 (존재 여부를 구분해 주지 않는다). 화면 파일처럼 로그인 없이 받을 수 있다 (`<audio>` 가 쓰는 주소) |
+| 업로드 | 없다 (PRD 결정 10 의 1차안). 파일을 폴더에 직접 두면 소리 설정 화면을 열 때(또는 화면에 다시 접속할 때) 목록에 나타난다 |
+| 소리를 내는 알람 | ACK 안 된 active 알람 (`info` 제외, SIL 대상과 같다). ACK, 해소, SIL, 전체 끄기, 레벨 끄기 중 하나면 멈춘다 |
+| 소리의 종류 | 레벨마다 파일 하나를 고른다. 파일이 없거나 목록에 없거나 재생이 실패하면 레벨별 합성 비프음(HH 1400Hz 4연타, H 1000Hz 2연타, L 700Hz, LL 480Hz). 자동재생이 막힌 것은 실패가 아니다 (클릭 뒤 다시 시도) |
+| 반복 | 설정한 주기(1~60초, 기본 5)마다. 더 심각한 알람이 생기거나 남은 알람의 레벨이 바뀌면 주기를 기다리지 않고 바로 |
+| 설정 저장 | 이 브라우저의 localStorage `pinky.alarmsound.v1` `{enabled, volume, interval, levels: {HH: {on, file}, H, L, LL}}`. 깨진 값은 기본값으로 고치고, 저장소를 못 써도 이번 화면에서는 동작한다 |
+| 시각 경고 | 소리 설정과 상관없이 알람 행은 그대로 보인다 (HH 도 전체 음소거에서 행이 유지된다) |
 
 **`command` 이벤트** (기존, 이력 패널이 없어진 뒤에도 서버는 계속 보낸다): WS `{"type":"command","entry":{id, time, robot, cmd, points, sent, result, detail}}`, `snapshot.commands`(오래된 것이 앞). `result` 는 `sent` \| `acknowledged` \| `no_response` \| `rejected` \| `failed`. 화면은 그리지 않고 브라우저의 `app.history` 와 카드의 진행 문구(`last_command`/`last_task`)가 쓴다.
 
