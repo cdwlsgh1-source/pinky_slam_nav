@@ -62,6 +62,7 @@ function normAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.P
 // 브라우저 전용 알람은 id 가 'local-N' 이고 시각은 이 브라우저의 시계다 (서버 알람은 서버 시각 epoch).
 const clock = (t) => new Date(t * 1000).toTimeString().slice(0, 8);   // 24시간제 HH:MM:SS
 const STATE_LABEL = { active: 'Active', cleared: 'Cleared', acked: 'Acknowledged', event: '-' };
+const ALARM_LEVELS = ['HH', 'H', 'L', 'LL', 'info'];
 const LOCAL_LEVEL = { ok: 'info', warn: 'L', bad: 'H' };   // 옛 addAlarm 의 ok/warn/bad 를 알람 레벨로
 let localAlarmSeq = 0;
 
@@ -143,7 +144,7 @@ function upsertAlarm(a) {
 // 브라우저 전용 알람. level 은 옛 호출처의 ok/warn/bad. extra 로 code/state 를 바꿀 수 있다.
 function addAlarm(level, text, extra) {
   const t = Date.now() / 1000;
-  upsertAlarm(Object.assign({ id: 'local-' + (++localAlarmSeq), code: 'LOCAL', level: LOCAL_LEVEL[level] || 'L', robot: null, text, detail: '',
+  upsertAlarm(Object.assign({ id: 'local-' + (++localAlarmSeq), code: 'LOCAL', level: LOCAL_LEVEL[level] || (ALARM_LEVELS.includes(level) ? level : 'L'), robot: null, text, detail: '',
     state: 'event', t_raised: t, t_last: t, t_cleared: null, count: 1, acked_by: null, acked_at: null, local: true }, extra));
 }
 
@@ -154,9 +155,9 @@ async function ackAlarms() {
   if (!app.alarms.some((a) => !a.local && a.level !== 'info' && a.acked_by == null)) return;
   try {
     const res = await fetch('/api/alarms/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) });
-    if (!res.ok) addAlarm('bad', 'ACK was not accepted (HTTP ' + res.status + ')');   // 성공하면 서버가 보낸 WS alarm 으로 화면이 바뀐다
+    if (!res.ok) addAlarm('bad', 'ACK was not accepted (HTTP ' + res.status + ')', { code: 'ACK_REQUEST_FAILED' });   // 성공하면 서버가 보낸 WS alarm 으로 화면이 바뀐다
   } catch (err) {
-    addAlarm('bad', 'ACK request failed: ' + err.message);
+    addAlarm('bad', 'ACK request failed: ' + err.message, { code: 'ACK_REQUEST_FAILED' });
   }
 }
 
@@ -760,9 +761,9 @@ async function sendCommand(id, cmd, points) {
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) showLogin('세션이 만료됐습니다. 다시 로그인하세요');
-    else if (!res.ok && res.status !== 400 && res.status !== 503) addAlarm('bad', id + ' ' + cmd + ' 실패: ' + (data.error || res.status));  // 400(거절)/503(전송 실패)은 서버가 알람을 만든다
+    else if (!res.ok && res.status !== 400 && res.status !== 503) addAlarm('bad', id + ' ' + cmd + ' 실패: ' + (data.error || res.status), { code: 'CMD_REQUEST_FAILED' });  // 400(거절)/503(전송 실패)은 서버가 알람을 만든다
   } catch (err) {
-    addAlarm('bad', id + ' ' + cmd + ' 전송 오류: ' + err.message);
+    addAlarm('bad', id + ' ' + cmd + ' 전송 오류: ' + err.message, { code: 'CMD_REQUEST_FAILED' });
   }
 }
 
@@ -777,9 +778,9 @@ function selectRouteTarget(id) {
 function addRoutePoint(name) {
   const id = app.routeTarget, cfg = robotCfg(id);
   if (!cfg) return;
-  if (!cfg.goto_allowed.includes(name)) { addAlarm('warn', id + ' 는 ' + name + ' 로 이동할 수 없습니다'); return; }
+  if (!cfg.goto_allowed.includes(name)) { addAlarm('warn', id + ' 는 ' + name + ' 로 이동할 수 없습니다', { code: 'ROUTE_INVALID' }); return; }
   const route = app.routes[id] || (app.routes[id] = []);
-  if (route.length >= app.cfg.max_goto_points) { addAlarm('warn', '경로는 최대 ' + app.cfg.max_goto_points + '개 지점까지입니다'); return; }
+  if (route.length >= app.cfg.max_goto_points) { addAlarm('warn', '경로는 최대 ' + app.cfg.max_goto_points + '개 지점까지입니다', { code: 'ROUTE_INVALID' }); return; }
   route.push(name);
   renderRoute();
   app.dirtyCards = true;
@@ -1043,9 +1044,9 @@ async function estop(id) {
   try {
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     // 비상정지 결과 알람(E-STOP failed / partially sent)은 서버가 만든다 (WS alarm). 서버가 처리하지 못한 응답(401, 403 …)만 여기서 알린다
-    if (!res.ok && res.status !== 503) addAlarm('bad', who + ' 비상정지 요청이 처리되지 않았습니다 (HTTP ' + res.status + ')');
+    if (!res.ok && res.status !== 503) addAlarm('bad', who + ' 비상정지 요청이 처리되지 않았습니다 (HTTP ' + res.status + ')', { code: 'ESTOP_REQUEST_FAILED' });
   } catch (err) {
-    addAlarm('bad', who + ' 비상정지 전송 오류: ' + err.message);
+    addAlarm('bad', who + ' 비상정지 전송 오류: ' + err.message, { code: 'ESTOP_REQUEST_FAILED' });
   }
 }
 
@@ -1079,7 +1080,7 @@ function renderScanInfo() {
 
 function setScan(id, on) {
   app.scan[id] = { on, points: [], t: 0 };
-  if (!sendWs({ type: 'scan', robot: id, on })) addAlarm('warn', '서버에 연결되면 LiDAR 가 켜집니다');
+  if (!sendWs({ type: 'scan', robot: id, on })) addAlarm('warn', '서버에 연결되면 LiDAR 가 켜집니다', { code: 'SCAN_PENDING' });
 }
 
 // ---------- 수동 조작 (FR4-9) ----------
@@ -1132,7 +1133,7 @@ function driveHalt() {
 function driveDenied(id, reason) {
   driveHalt();
   el('driveMsg').textContent = '거절됨: ' + reason;
-  addAlarm('warn', id + ' 수동 조작 거절: ' + reason);
+  addAlarm('warn', id + ' 수동 조작 거절: ' + reason, { code: 'DRIVE_DENIED' });
 }
 
 function renderDrivePanel() {
@@ -1264,10 +1265,10 @@ async function procPost(path, body) {
     const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) showLogin('세션이 만료됐습니다. 다시 로그인하세요');
-    else if (!res.ok) addAlarm('bad', (data.error || '요청 실패 (' + res.status + ')'));
+    else if (!res.ok) addAlarm('bad', (data.error || '요청 실패 (' + res.status + ')'), { code: 'PROC_REQUEST_FAILED' });
     return res.ok;
   } catch (err) {
-    addAlarm('bad', '프로세스 제어 요청 오류: ' + err.message);
+    addAlarm('bad', '프로세스 제어 요청 오류: ' + err.message, { code: 'PROC_REQUEST_FAILED' });
     return false;
   }
 }
@@ -1583,18 +1584,74 @@ function setupSplits() {
 }
 setupSplits();
 
-// ---------- 화면 전환 (메인 / 로그) ----------
+// ---------- 화면 전환 (메인 / 로그 / Alarm) ----------
 function setView(name) {
   if (lay.editing) return;   // 레이아웃 편집 중에는 화면을 바꾸지 않는다 (완료/취소 먼저)
-  const log = name === 'log';
-  el('workspace').hidden = log;
+  const log = name === 'log', alarm = name === 'alarm';
+  el('workspace').hidden = log || alarm;
   el('logView').hidden = !log;
+  el('alarmView').hidden = !alarm;
   document.querySelectorAll('.menu-item[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   document.querySelectorAll('[data-only-view]').forEach((n) => { n.hidden = n.dataset.onlyView !== name; });
   if (log) startLogs(); else stopLogs();
-  if (!log) resizeCanvas();
+  if (alarm) startCatalog(); else stopCatalog();
+  if (!log && !alarm) resizeCanvas();
 }
 document.querySelectorAll('.menu-item[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+
+// ---------- Alarm 화면: Catalog 탭 (읽기 전용) ----------
+// 서버가 GET /api/alarms/catalog 로 주는 표를 거르고 그린다. 발생 횟수가 바뀌므로 화면이 열려 있는 동안 5초마다 다시 받는다.
+const catalog = { rows: [], since: null, err: null, timer: null, busy: false };
+
+function catalogFilter() { return { level: el('avLevel').value, origin: el('avOrigin').value, q: el('avSearch').value }; }
+
+function renderCatalog() {
+  const body = el('avBody');
+  body.replaceChildren();
+  const rows = AlarmView.sort(AlarmView.filter(catalog.rows, catalogFilter()));
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.className = 'lvl-' + r.level + (r.enabled ? '' : ' off');
+    tr.dataset.code = r.code; tr.dataset.origin = r.origin;
+    tr.title = 'Source: ' + r.source;
+    AlarmView.cells(r).forEach((text, i) => {
+      const td = document.createElement('td'); td.textContent = text;
+      td.className = ['code', 'name', 'cond', 'msg', 'lvl', 'snd', 'en', 'last', 'cnt'][i];
+      if (i === 6 && r.protected) td.title = AlarmView.TEXT.protectedTip;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  }
+  el('avEmpty').hidden = rows.length > 0;
+  el('avNote').textContent = catalog.err ? AlarmView.TEXT.loadFailed(catalog.err) : AlarmView.TEXT.note(rows.length, catalog.rows.length);
+  el('avNote').classList.toggle('bad', !!catalog.err);
+  el('avFoot').textContent = (catalog.since ? AlarmView.TEXT.since(AlarmView.clock(catalog.since)) + '. ' : '') + AlarmView.TEXT.readonly;
+}
+
+async function loadCatalog() {
+  if (catalog.busy) return;
+  catalog.busy = true;
+  try {
+    const res = await fetch('/api/alarms/catalog');
+    if (res.status === 401) { showLogin('세션이 만료됐습니다. 다시 로그인하세요'); return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    catalog.rows = d.alarms; catalog.since = d.counted_since; catalog.err = null;
+    const sel = el('avLevel');
+    if (sel.options.length <= 1) for (const lv of d.levels) sel.add(new Option(lv, lv));
+  } catch (err) {
+    catalog.err = String(err.message || err);   // 알람바에는 올리지 않는다: 이 화면 안에서만 알린다
+  } finally {
+    catalog.busy = false;
+    renderCatalog();
+  }
+}
+function startCatalog() { loadCatalog(); clearInterval(catalog.timer); catalog.timer = setInterval(loadCatalog, 5000); }
+function stopCatalog() { clearInterval(catalog.timer); catalog.timer = null; }
+['avLevel', 'avOrigin'].forEach((id) => { el(id).onchange = renderCatalog; });
+el('avSearch').oninput = renderCatalog;
+el('avRefresh').onclick = loadCatalog;
+el('avReset').onclick = () => { el('avLevel').value = 'all'; el('avOrigin').value = 'all'; el('avSearch').value = ''; renderCatalog(); };
 
 // ---------- 로그 화면 ----------
 // 서버가 모아 둔 로그(프로세스 출력, GUI 서버)를 1초마다 '마지막 번호 이후' 만 받아 소스 탭, 레벨, 검색으로 거른다.
@@ -1728,17 +1785,17 @@ function boot() {
 connect();
 fetch('/api/commands/config').then((r) => { if (!r.ok) throw new Error('명령 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((cfg) => { app.cfg = cfg; setupRoutePanel(); app.dirtyCards = true; })
-  .catch((err) => addAlarm('bad', String(err.message || err)));
+  .catch((err) => addAlarm('LL', String(err.message || err), { code: 'LOAD_FAILED' }));
 fetch('/api/zone/config').then((r) => { if (!r.ok) throw new Error('구역 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((z) => { app.zoneCfg = z; el('zoneChip').title = z.confirmed ? '' : '구역 영역은 초안입니다 (config/zone.yaml 의 confirmed: false)'; })
-  .catch((err) => addAlarm('bad', String(err.message || err)));
+  .catch((err) => addAlarm('LL', String(err.message || err), { code: 'LOAD_FAILED' }));
 // 경로 선을 켰을 때만 경로 추정(/api/plans)을 받는다 (서버는 첫 요청에서 계산해 캐시한다)
 function ensurePlans() {
   if (app.plans || app.plansLoading) return;
   app.plansLoading = true;
   fetch('/api/plans').then((r) => { if (!r.ok) throw new Error('경로 추정을 받지 못해 경로 선을 직선으로 그립니다 (' + r.status + ')'); return r.json(); })
     .then((d) => { app.plans = d.plans; })
-    .catch((err) => addAlarm('warn', String(err.message || err)))
+    .catch((err) => addAlarm('LL', String(err.message || err), { code: 'LOAD_FAILED' }))
     .finally(() => { app.plansLoading = false; });
 }
 function setShowRoutes(on) {
@@ -1749,8 +1806,8 @@ function setShowRoutes(on) {
 el('routeLinesBtn').onclick = () => setShowRoutes(!app.showRoutes);
 fetch('/api/motion/config').then((r) => { if (!r.ok) throw new Error('모션 설정을 받지 못했습니다 (' + r.status + ')'); return r.json(); })
   .then((m) => { app.motion = m; app.dirtyCards = true; })
-  .catch((err) => addAlarm('bad', String(err.message || err)));
-loadMap().catch((err) => { el('stageNote').textContent = String(err.message || err); addAlarm('bad', String(err.message || err)); });
+  .catch((err) => addAlarm('LL', String(err.message || err), { code: 'LOAD_FAILED' }));
+loadMap().catch((err) => { el('stageNote').textContent = String(err.message || err); addAlarm('LL', String(err.message || err), { code: 'LOAD_FAILED' }); });
 }
 setInterval(() => { app.dirtyCards = true; renderZoneChip(); tickProcUptimes(); }, 500); // STARTING 5초 안내처럼 시간이 지나야 바뀌는 표시용
 requestAnimationFrame(frame);
@@ -1758,4 +1815,4 @@ requestAnimationFrame(frame);
 fetch('/api/me').then((r) => r.json()).then((me) => {
   app.me = me; renderAuth();
   if (me.auth && !me.role) showLogin(); else boot();
-}).catch((err) => { addAlarm('bad', '로그인 상태를 확인하지 못했습니다: ' + err.message); boot(); });
+}).catch((err) => { addAlarm('LL', '로그인 상태를 확인하지 못했습니다: ' + err.message, { code: 'LOAD_FAILED' }); boot(); });

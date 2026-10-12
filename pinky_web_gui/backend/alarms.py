@@ -13,35 +13,19 @@ rclpy 와 무관한 순수 클래스이며 시계는 주입한다 (CommandTracke
 """
 import time
 
-MONITOR_SIZE = 100   # 알람바(모니터링 화면)에 두는 최대 알람 수. 잘려 나간 것도 이력 파일(alarmlog.py)에는 남아 있다
+from .alarmcatalog import DEFAULTS, HH, H, INFO, L, LEVELS, LL, PROTECTED, effective
 
-HH, H, L, LL, INFO = 'HH', 'H', 'L', 'LL', 'info'
-LEVELS = (HH, H, L, LL, INFO)   # 심각도 순서 (높을수록 앞). PRD 결정 9 로 확정
+MONITOR_SIZE = 100   # 알람바(모니터링 화면)에 두는 최대 알람 수. 잘려 나간 것도 이력 파일(alarmlog.py)에는 남아 있다
 
 ACTIVE, CLEARED = 'active', 'cleared'
 
-# code -> (레벨, 메시지 템플릿). 메시지는 한영 혼용을 허용한다 (PRD 8-2절). 치환 가능한 키는 TEMPLATE_KEYS 뿐이다.
-CATALOG = {
-    'ESTOP_FAILED': (HH, 'E-STOP failed on {robot}: {reason}'),
-    'ESTOP_PARTIAL': (HH, 'E-STOP partially sent on {robot}: {reason}'),
-    'CMD_SEND_FAILED': (H, 'Command `{cmd}` could not be sent to {robot}: {reason}'),
-    'ROBOT_OFFLINE': (H, '{robot} is offline'),
-    'PATROL_FAILED': (H, 'Patrol failed on {robot}: {reason}'),
-    'PATROL_RETRY': (H, 'Patrol retrying on {robot}: {reason}'),
-    'SERVER_DISCONNECTED': (H, 'Server disconnected'),
-    'CMD_REJECTED': (L, 'Command `{cmd}` rejected for {robot}: {reason}'),
-    'CMD_NO_RESPONSE': (L, 'No response from {robot} to `{cmd}`'),
-    'PATROL_STOPPED': (LL, 'Patrol stopped on {robot}'),
-    'LOAD_FAILED': (LL, 'Failed to load {resource}'),
-    'CMD_SENT': (INFO, 'Command `{cmd}` sent to {robot}'),
-    'ROBOT_ONLINE': (INFO, '{robot} is online'),
-}
+# code -> (레벨, 메시지 템플릿): 코드 기본값. 정의 전체(이름, 발생 조건, 근거 코드 …)와 config/alarms.yaml 덮어쓰기는 alarmcatalog.py.
+# 메시지는 한영 혼용을 허용한다 (PRD 8-2절). 치환 가능한 키는 TEMPLATE_KEYS 뿐이다.
+CATALOG = {code: (e['level'], e['message']) for code, e in DEFAULTS.items()}
 TEMPLATE_KEYS = ('robot', 'cmd', 'reason', 'resource')
 
 # 서버가 알 수 없어 브라우저가 직접 만드는 알람 (서버는 발생시키지 않는다)
-BROWSER_ONLY = ('SERVER_DISCONNECTED', 'LOAD_FAILED')
-# 비상정지 계열은 어떤 설정으로도 끌 수 없다 (Step A5 의 Enable/Disable 이 이 값을 보고 거부한다)
-PROTECTED = ('ESTOP_FAILED', 'ESTOP_PARTIAL')
+BROWSER_ONLY = tuple(code for code, e in DEFAULTS.items() if e['origin'] == 'browser')
 
 
 PATROL_CODES = {'FAILED': 'PATROL_FAILED', 'RETRY': 'PATROL_RETRY', 'STOPPED': 'PATROL_STOPPED'}
@@ -72,9 +56,13 @@ def command_text(cmd, points=None):
 
 
 class AlarmManager:
-    def __init__(self, now=time.time, max_alarms=MONITOR_SIZE, sink=None):
-        """sink(event, alarm): 알람 이벤트(raised | repeated | acked | cleared)마다 부른다 (이력 파일 저장용). 예외는 알람 동작에 영향을 주지 않는다."""
+    def __init__(self, now=time.time, max_alarms=MONITOR_SIZE, sink=None, catalog=None):
+        """sink(event, alarm): 알람 이벤트(raised | repeated | acked | cleared)마다 부른다 (이력 파일 저장용). 예외는 알람 동작에 영향을 주지 않는다.
+        catalog: alarmcatalog.effective() 결과 (config/alarms.yaml 을 반영한 레벨·메시지·사용 여부). 없으면 코드 기본값."""
         self._now = now
+        self.catalog = catalog if catalog is not None else effective()
+        self._stats = {}      # code -> {'count': 이번 서버 실행 중 발생 횟수(반복 포함), 'last': 마지막 발생 시각}. 카탈로그 화면용
+
         self._sink = sink
         self._max = max(1, int(max_alarms))
         self._alarms = []     # 오래된 것이 앞. 새 알람은 뒤에 붙는다
@@ -83,14 +71,20 @@ class AlarmManager:
     # ---- 기본 동작 ----
     def raise_(self, code, robot=None, **fmt):
         """알람 행을 만들거나, ACK 전의 같은 알람이 active 이면 count 를 올린다. 반복도 이력에는 매번 한 줄 남긴다. 메시지 목록을 돌려준다."""
-        if code not in CATALOG:
+        entry = self.catalog.get(code)
+        if entry is None:
             raise ValueError(f'알 수 없는 알람 코드: {code}')
-        level, template = CATALOG[code]
+        if not entry['enabled']:   # 카탈로그에서 끈 알람은 만들지 않는다 (config/alarms.yaml enabled: false)
+            return []
+        level, template = entry['level'], entry['message']
         keys = _Fmt({k: ('' if v is None else str(v)) for k, v in fmt.items() if k in TEMPLATE_KEYS})
         keys['robot'] = robot or ''
         text = template.format_map(keys).rstrip().rstrip(':').rstrip()
         reason = keys['reason']
         t = self._now()
+        st = self._stats.setdefault(code, {'count': 0, 'last': None})
+        st['count'] += 1
+        st['last'] = t
         for a in self._alarms:
             if a['code'] == code and a['robot'] == robot and a['state'] == ACTIVE:
                 if a['acked_by'] is None:   # ACK 전의 같은 알람은 묶는다 (ACK 했다면 새 확인이 필요하므로 아래에서 새 행)
@@ -137,6 +131,10 @@ class AlarmManager:
                 self._emit('acked', a)
                 msgs.append(self._msg(a))
         return msgs
+
+    def stats(self):
+        """코드별 {count, last} (이번 서버 실행 중). 서버를 다시 켜면 0 부터 센다 (이력 파일에는 모든 발생이 남아 있다)."""
+        return {c: dict(v) for c, v in self._stats.items()}
 
     def snapshot(self):
         """새 화면에 보낼 알람 (최신이 앞). ACK 로 숨긴 알람은 뺀다."""

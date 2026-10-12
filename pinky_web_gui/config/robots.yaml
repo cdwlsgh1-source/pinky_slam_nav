@@ -40,6 +40,9 @@ alarm_history_chunk: 1000
 #   파일이 없거나 재생에 실패하면 레벨별 합성 비프음으로 대체한다. robots.yaml 이 있는 폴더 기준 상대 경로.
 alarm_sound_dir: sounds
 
+# 알람 카탈로그 덮어쓰기 (알람바 Step A4, 선택). 알람 정의 기본값은 backend/alarmcatalog.py, 바꿀 항목만 이 파일에 적는다. 줄을 지우면 기본값만 쓴다.
+alarms_yaml: alarms.yaml
+
 # 로봇별 설정. 키는 robots 와 같아야 한다.
 #   goto_allowed : 백엔드가 허용하는 goto 지점. RED* (구역 문)는 넣을 수 없다 (노드가 문 경유와 락을 처리한다).
 #   home         : goto 완료 후 복귀하는 지점 (노드의 HOME_NAME)

@@ -6,6 +6,7 @@ import itertools
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -13,8 +14,9 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from .alarmcatalog import rows as catalog_rows
 from .alarmlog import AlarmHistory
-from .alarms import AlarmManager
+from .alarms import LEVELS, AlarmManager
 from .auth import COOKIE, MANAGER, SESSION_SEC, OPERATOR, Auth
 from .commands import CommandRejected, CommandTracker, CommandUnavailable, FAILED, NO_RESPONSE, validate
 from .config import Config, load_config
@@ -66,7 +68,8 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
     if alarm_history:
         log.info('알람 이력 저장: %s (파일당 %d건)', alarm_history.dir, alarm_history.chunk)
     sounds = SoundLibrary(sound_dir or cfg.alarm_sound_dir or Path(__file__).resolve().parent.parent / 'config' / 'sounds')   # 알람 소리 파일 (사용자가 폴더에 직접 둔다)
-    alarms = AlarmManager(sink=alarm_history.record if alarm_history else None)   # 알람바에 보이는 모든 사건. 서버가 만들어 모든 화면에 같은 알람을 보낸다
+    started_at = time.time()   # 카탈로그의 발생 횟수를 세기 시작한 시각 (서버 실행 시각)
+    alarms = AlarmManager(sink=alarm_history.record if alarm_history else None, catalog=cfg.alarm_catalog)   # 알람바에 보이는 모든 사건. 서버가 만들어 모든 화면에 같은 알람을 보낸다
     hub = Hub()
     bg = {}  # lifespan 에서 만든 리소스 (commander: publish_cmd(rid, data) 를 가진 RosBridge 또는 MockFleet)
     client_ids = itertools.count(1)
@@ -593,9 +596,21 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         """현재 알람 목록 (최신이 앞). 접속한 화면은 WS snapshot.alarms 로 같은 값을 받는다."""
         return {'alarms': alarms.snapshot()}
 
+    @app.get('/api/alarms/catalog')
+    async def api_alarm_catalog(request: Request):
+        """알람 카탈로그 (읽기 전용, operator 이상): 시스템이 낼 수 있는 모든 알람의 이름·조건·문구·레벨·소리·사용 여부.
+        last_raised/count 는 이번 서버 실행 중 센 값이고, 브라우저 전용 알람(origin=browser)은 서버가 모르므로 null 이다."""
+        denied = require(request, OPERATOR)
+        if denied:
+            return denied
+        return {'alarms': catalog_rows(alarms.catalog, alarms.stats()), 'levels': list(LEVELS), 'counted_since': started_at}
+
     @app.get('/api/alarms/history')
-    async def api_alarm_history(date: str = None, limit: int = 100):
-        """저장된 알람 이력 (최신이 앞). date=YYYY-MM-DD 로 그날 것만, limit 은 최대 1000. 모니터링 화면의 100건 제한과 무관하다."""
+    async def api_alarm_history(request: Request, date: str = None, limit: int = 100):
+        """저장된 알람 이력 (최신이 앞, operator 이상). date=YYYY-MM-DD 로 그날 것만, limit 은 최대 1000. 모니터링 화면의 100건 제한과 무관하다."""
+        denied = require(request, OPERATOR)
+        if denied:
+            return denied
         if alarm_history is None:
             return JSONResponse({'error': '알람 이력 저장이 꺼져 있습니다 (alarm_history_dir)'}, status_code=404)
         try:
@@ -604,8 +619,11 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             return JSONResponse({'error': str(e)}, status_code=400)
 
     @app.get('/api/alarms/history/files')
-    async def api_alarm_history_files():
-        """저장된 이력 파일 목록 (최신이 앞): [{name, date, seq, records, size}]."""
+    async def api_alarm_history_files(request: Request):
+        """저장된 이력 파일 목록 (최신이 앞, operator 이상): [{name, date, seq, records, size}]."""
+        denied = require(request, OPERATOR)
+        if denied:
+            return denied
         if alarm_history is None:
             return JSONResponse({'error': '알람 이력 저장이 꺼져 있습니다 (alarm_history_dir)'}, status_code=404)
         return {'dir': str(alarm_history.dir), 'chunk': alarm_history.chunk, 'files': alarm_history.files()}

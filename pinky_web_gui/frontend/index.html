@@ -15,6 +15,7 @@
     <div class="brand">Pinky</div>
     <button class="menu-item active" data-view="main">메인</button>
     <button class="menu-item" data-view="log" id="logMenu" title="GUI 가 켠 프로세스의 출력과 GUI 서버 로그">로그</button>
+    <button class="menu-item" data-view="alarm" id="alarmMenu" title="Alarm catalog: every alarm the system can raise">Alarm</button>
     <button type="button" class="menu-item" id="alarmSoundBtn" title="Alarm sound settings (volume, sound files, repeat interval, test)">Sound</button>
     <button class="menu-item" disabled title="준비 중">포인트</button>
     <div class="layout-tools" id="layoutTools" data-only-view="main">
@@ -148,6 +149,34 @@
 
   </div><!-- /workspace -->
 
+  <!-- Alarm 화면 (Step A4: Catalog 탭. History 탭은 Step A7 이 채운다) -->
+  <section class="alarmview" id="alarmView" hidden aria-label="Alarm">
+    <div class="log-tabs" role="tablist" aria-label="Alarm views">
+      <button type="button" class="tab" role="tab" id="avTabHistory" aria-selected="false" disabled title="Available in a later step">History</button>
+      <button type="button" class="tab" role="tab" id="avTabCatalog" aria-selected="true">Catalog</button>
+    </div>
+    <div class="log-tools">
+      <label class="field">Level
+        <select id="avLevel"><option value="all">All</option></select>
+      </label>
+      <label class="field">Origin
+        <select id="avOrigin"><option value="all">All</option><option value="server">Server</option><option value="browser">Browser only</option></select>
+      </label>
+      <input type="search" id="avSearch" placeholder="Search" aria-label="Search catalog">
+      <button type="button" id="avRefresh">Refresh</button>
+      <button type="button" id="avReset">Reset</button>
+      <span class="dim" id="avNote"></span>
+    </div>
+    <div class="av-scroll">
+      <table class="av-table" id="avTable">
+        <thead><tr><th>ID</th><th>Name</th><th>Condition</th><th>Message</th><th>Level</th><th>Sound</th><th>Enabled</th><th>Last raised</th><th>Count</th></tr></thead>
+        <tbody id="avBody"></tbody>
+      </table>
+      <p class="dim" id="avEmpty" hidden>No alarms found</p>
+    </div>
+    <p class="dim" id="avFoot">Read-only.</p>
+  </section>
+
   <!-- 로그 화면: GUI 가 켠 프로세스의 터미널 출력과 GUI 서버 로그를 소스별로 본다 -->
   <section class="logview" id="logView" hidden aria-label="로그">
     <div class="log-tabs" id="logTabs" role="tablist" aria-label="로그 종류"></div>
@@ -228,6 +257,7 @@
 <script src="zoneview.js"></script>
 <script src="procview.js"></script>
 <script src="logview.js"></script>
+<script src="alarmview.js"></script>
 <script src="addrobot.js"></script>
 <script src="alarmsound.js"></script>
 <script src="app.js"></script>

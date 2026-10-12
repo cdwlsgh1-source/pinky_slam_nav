@@ -1,9 +1,12 @@
 """config/robots.yaml 로더. 로봇 이름, 토픽 이름, 타임아웃은 전부 이 파일을 거쳐서만 읽는다."""
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+from .alarmcatalog import effective
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / 'config' / 'robots.yaml'
 
@@ -28,6 +31,7 @@ class Config:
     alarm_history_dir: str = None      # 알람 이력 파일 폴더 (robots.yaml 위치 기준 상대 경로를 절대 경로로 바꿔 둔다). None 이면 저장하지 않는다
     alarm_history_chunk: int = 1000    # 이력 파일 하나에 담는 알람 이벤트 수
     alarm_sound_dir: str = None        # 알람 사운드 파일 폴더 (기본 config/sounds, robots.yaml 위치 기준 상대 경로를 절대 경로로 바꿔 둔다)
+    alarm_catalog: dict = None         # 알람 카탈로그 {코드: 항목} (코드 기본값 + alarms_yaml 덮어쓰기). alarmcatalog.effective() 결과
 
 
 # 수동 조작 하드 상한. 설정 파일이 실수로 큰 값을 적어도 이 이상은 나가지 않는다.
@@ -244,6 +248,24 @@ def _expand(text, path, what):
     return out
 
 
+def _load_alarm_catalog(path):
+    """config/alarms.yaml(선택)을 읽어 카탈로그를 만든다. 파일이 없으면 코드 기본값만 쓴다. 형식은 alarmcatalog.effective 참고."""
+    overrides = {}
+    if path is not None:
+        if not Path(path).exists():   # 선택 파일이다: 없으면 코드 기본값으로 시작한다
+            logging.getLogger('backend').warning('알람 카탈로그 파일이 없어 기본값을 쓴다: %s', path)
+        else:
+            with open(path, encoding='utf-8') as f:
+                raw = yaml.safe_load(f) or {}
+            if not isinstance(raw, dict):
+                raise ValueError(f'{path}: 최상위는 매핑이어야 한다')
+            overrides = raw.get('alarms') or {}
+    try:
+        return effective(overrides)
+    except ValueError as e:
+        raise ValueError(f'{path}: {e}')
+
+
 def _load_processes(path, robots):
     with open(path, encoding='utf-8') as f:
         raw = yaml.safe_load(f) or {}
@@ -417,7 +439,12 @@ def load_config(path=None) -> Config:
         raise ValueError(f'{path}: alarm_sound_dir 은 문자열 경로여야 한다')
     sound_dir = str((path.resolve().parent / sound_dir).resolve())
 
+    alarms_yaml = raw.get('alarms_yaml')
+    if alarms_yaml is not None and (not isinstance(alarms_yaml, str) or not alarms_yaml):
+        raise ValueError(f'{path}: alarms_yaml 은 문자열 경로여야 한다')
+    alarm_catalog = _load_alarm_catalog((path.resolve().parent / alarms_yaml).resolve() if alarms_yaml else None)
+
     return Config(tuple(robots), zone_topic, timeout, hz, map_yaml, points, robot_settings,
                   positive('max_goto_points', 10, int), positive('no_response_sec', 5.0, float),
                   positive('starting_notice_sec', 5.0, float), positive('command_history_size', 50, int),
-                  inflation, zone, motion, processes, alarm_dir, positive('alarm_history_chunk', 1000, int), sound_dir)
+                  inflation, zone, motion, processes, alarm_dir, positive('alarm_history_chunk', 1000, int), sound_dir, alarm_catalog)

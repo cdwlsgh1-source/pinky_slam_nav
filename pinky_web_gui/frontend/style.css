@@ -33,6 +33,26 @@ h2 small { font-weight: 400; }
 .logview { grid-area: work; display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .logview[hidden] { display: none; }
+.alarmview { grid-area: work; display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.alarmview[hidden] { display: none; }
+.alarmview .log-tabs .tab[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+.alarmview .log-tabs .tab:disabled { opacity: .45; }
+.alarmview .dim.bad { color: var(--bad); }
+.av-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.av-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.av-table th { text-align: left; color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); white-space: nowrap; }
+.av-table td, .av-table th { padding: 4px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.av-table td.code { font-weight: 700; white-space: nowrap; }
+.av-table td.msg { color: var(--dim); word-break: break-word; }
+.av-table td.last, .av-table td.cnt { white-space: nowrap; }
+.av-table td.cnt { text-align: right; }
+.av-table tr.lvl-HH td.lvl, .av-table tr.lvl-H td.lvl { color: var(--bad); font-weight: 700; }
+.av-table tr.lvl-L td.lvl { color: var(--warn); font-weight: 700; }
+.av-table tr.lvl-LL td.lvl { color: var(--caution); font-weight: 700; }
+.av-table tr.lvl-info td.lvl { color: var(--dim); }
+.av-table tr.off { opacity: .55; }
+@media (max-width: 860px) { .av-table td.cond { min-width: 160px; } .av-table td.msg { min-width: 180px; } }
 .workspace { grid-area: work; position: relative; min-height: 0; min-width: 0; }
 .panel { position: absolute; margin: 0; z-index: 1;
   left: calc(var(--x, 0) * 100% + 4px); top: calc(var(--y, 0) * 100% + 4px);

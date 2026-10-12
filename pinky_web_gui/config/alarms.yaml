@@ -1,0 +1,11 @@
+# 알람 카탈로그 덮어쓰기 (알람바 Step A4). 알람 정의의 기본값은 backend/alarmcatalog.py 에 있고, 여기에는 바꾸고 싶은 항목만 적는다.
+# 파일을 바꾼 뒤에는 GUI 서버를 다시 켠다. GUI 에서 고치는 기능은 아직 없다 (Step A5 에서 manager 에게 열린다).
+#   바꿀 수 있는 항목: name, condition (표시용 문구), message / level / enabled (서버가 만드는 알람만)
+#   level: HH > H > L > LL > info.  enabled: false 이면 그 알람을 만들지 않는다 (비상정지 알람 ESTOP_FAILED, ESTOP_PARTIAL 은 끌 수 없다)
+#   message 에는 {robot} {cmd} {reason} {resource} 를 쓸 수 있다.
+#   소리 여부는 레벨에서 정해진다 (info 만 소리 없음). 알람별 소리 지정은 Step A5.
+# 예) 로봇 오프라인을 H 대신 L 로 낮추려면:
+#   alarms:
+#     ROBOT_OFFLINE:
+#       level: L
+alarms: {}

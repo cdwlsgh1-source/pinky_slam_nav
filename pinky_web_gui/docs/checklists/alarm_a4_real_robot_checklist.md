@@ -1,0 +1,32 @@
+# 알람바 Step A4 실물 확인 체크리스트 (사용자 수행)
+
+> 역할: 알람 카탈로그(Step A4)를 **실제 로봇의 알람과 맞춰 보는** 순서. mock 으로는 `tests/test_alarmcatalog.py`(누락 검사, API, 덮어쓰기)와 `tests/verify_alarm_catalog_ui.py`(화면)가 통과했다. 이 문서의 항목은 아직 실제 로봇에서 실행되지 않았다.
+> 규칙은 `../interfaces.md` 6-7절 "알람 카탈로그", 계획은 `../prd/Pinky 알람바 개선 — 단계별 PRD.md` Step A4.
+
+> 로봇이 움직일 수 있는 항목은 주변을 비우고 전원 스위치에 손이 닿는 곳에서 한다.
+
+## 사전 조건
+- [ ] 관제 PC: `export ROS_DOMAIN_ID=50` 후 `.venv/bin/python -m backend.main` (**`--mock` 없이**). 브라우저로 `http://localhost:8000/`.
+
+## A. 화면
+- [ ] 왼쪽 메뉴에 `Alarm` 버튼이 있고 누르면 작업 영역 대신 카탈로그 표가 나온다. 위의 알람바와 비상 정지는 그대로 보이고 눌린다.
+- [ ] 열 제목이 `ID / Name / Condition / Message / Level / Sound / Enabled / Last raised / Count`, 알람 21개, HH 에서 info 순.
+- [ ] `History` 탭은 흐리게 비활성이다 (Step A7 에서 채운다). 표에서 값을 고칠 수 있는 곳이 없다.
+- [ ] Level / Origin 필터와 검색이 동작하고, `Reset` 으로 돌아온다. 행에 마우스를 올리면 그 알람을 내는 코드 위치(`Source: ...`)가 뜬다.
+- [ ] 860px 이하로 창을 줄여도 페이지 가로 스크롤이 없다 (표는 안에서 스크롤).
+
+## B. 실제 알람과 맞춰 보기 (Alarm 화면을 열어 둔 채)
+| # | 방법 | 기대 | 결과 |
+|---|---|---|---|
+| 1 | 로봇 한 대의 전원을 끈다 (약 5초) | `ROBOT_OFFLINE` 의 Count 가 1 늘고 Last raised 가 지금 시각 (5초 안에 갱신) | |
+| 2 | 로봇을 다시 켠다 | `ROBOT_ONLINE` 의 Count 가 1 늘어난다 | |
+| 3 | 브리지를 끄고 `순찰 정지` | `CMD_SEND_FAILED` Count +1 | |
+| 4 | 같은 명령을 여러 번 누른다 | 알람바에는 `×N` 으로 묶이지만 Count 는 누른 횟수만큼 는다 (묶인 것도 발생으로 센다) | |
+| 5 | 허용 안 된 명령(API 로 직접) | `CMD_REJECTED` Count +1 | |
+| 6 | 서버를 껐다 켠다 | 모든 Count 가 0 으로 돌아간다 (이력 파일에는 이전 발생이 남아 있다) | |
+| 7 | 서버를 껐다 켜는 동안 브라우저 | 알람바에 `Server disconnected`, 다시 켜면 `Server reconnected` (Catalog 의 browser 항목은 Count `-` 로 센 값이 없다) | |
+
+## C. 권한과 덮어쓰기
+- [ ] 인증을 켠 서버에서 로그인 전에는 Alarm 화면이 401 로 비고, `oper`·`mngr` 둘 다 볼 수 있다.
+- [ ] (선택) `config/alarms.yaml` 에 `alarms: {ROBOT_OFFLINE: {level: L}}` 을 적고 서버를 다시 켜면 카탈로그의 `ROBOT_OFFLINE` Level 이 L 이고 실제 알람도 L(주황)로 나온다. 되돌리면 H.
+- [ ] (선택) `ESTOP_FAILED` 에 `enabled: false` 를 적으면 서버가 시작 때 오류로 멈춘다.

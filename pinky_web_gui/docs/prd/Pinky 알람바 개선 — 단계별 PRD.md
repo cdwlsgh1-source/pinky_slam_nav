@@ -1,5 +1,5 @@
 # Pinky 알람바 개선 — 단계별 PRD
-2026-10-12 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1, A2, A3 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`, `alarm_a2_...`, `alarm_a3_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
+2026-10-12 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1, A2, A3, A4 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`, `alarm_a2_...`, `alarm_a3_...`, `alarm_a4_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
 
 ## 0. 공통 개요
 ### 0-1 배경과 문제
@@ -193,8 +193,10 @@ CLAUDE.md 와 이 PRD 의 Step A2 구현물(알람바, ACK/SIL)을 먼저 읽어
 레벨은 결정 9(확정)를 따른다. 영문 이름과 메시지는 8절: E-STOP failed / partially failed(HH), Command send failed(H), Robot offline(H), Patrol failed·retrying(H), Server disconnected(H, 브라우저 전용), Command rejected(L), No response to command(L), Patrol stopped(LL), Map / API load failed(LL), 구역 관련·프로세스 제어 오류(구현 때 확인 필요).
 
 ### 완료 기준
-- [ ] 누락 검사 테스트 통과, 화면 스크린샷
-- [ ] `docs/interfaces.md` 갱신
+- [x] 누락 검사 테스트 통과, 화면 스크린샷 (`tests/test_alarmcatalog.py`, `docs/alarm_a4.png`, `docs/alarm_a4_narrow.png`)
+- [x] `docs/interfaces.md` 갱신 (6-7절 "알람 카탈로그")
+
+**구현 메모 (A4)**: Step A7(Alarm 화면)은 아직 없어서 A4 가 **화면 껍데기**(왼쪽 메뉴 `Alarm`, 탭 두 개, 화면 전환)와 Catalog 탭을 함께 만들었다. History 탭은 비활성으로 두었고 A7 이 `frontend/alarmview.js` 와 `#alarmView` 에 이어서 채운다. 조사 결과 카탈로그에 없던 알람 8개를 더했다: 서버 쪽은 없음(8-2절 13개가 `backend/alarms.py` 가 내는 전부), 브라우저 쪽은 `SERVER_RECONNECTED`, `ACK_REQUEST_FAILED`, `CMD_REQUEST_FAILED`, `ESTOP_REQUEST_FAILED`, `PROC_REQUEST_FAILED`, `ROUTE_INVALID`, `SCAN_PENDING`, `DRIVE_DENIED` (모두 `frontend/app.js` 의 `addAlarm`; 전에는 전부 코드 `LOCAL` 이라 구분이 안 됐다). 로드 실패 알람(`LOAD_FAILED`)은 PRD 대로 LL 로 내도록 바꿨다 (전에는 H/L).
 
 ### Claude Code 프롬프트
 
