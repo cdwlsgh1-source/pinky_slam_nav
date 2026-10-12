@@ -1,0 +1,16 @@
+zone_manager_node_v3:
+  ros__parameters:
+    # zone_gate_client_v3를 쓰는 로봇들의 robot_id 목록 (patrol 노드의 robot_id 파라미터와 일치해야 함)
+    robot_ids: ["pinky1", "pinky2"]
+    # 로봇이 notify_exit를 못 보내는 비상 상황(크래시 등)에 대비한 강제 해제 시간(초)
+    max_hold_sec: 120.0
+
+    # ---- 대기열 (map 좌표계) ----
+    # TODO: 실측값으로 교체 (PRD 7절). 아래는 임시값이며 RED1IN(0.60, -0.50) 근처의 가정입니다.
+    #   앵커는 점유자의 이탈 경로(RED1OUT)와 겹치지 않는 곳으로 정할 것
+    queue_anchor: [0.30, -0.45, 0.0]    # slot 0 위치 [x, y, yaw(rad)]
+    queue_back_dir: [-1.0, 0.0]         # 줄이 늘어나는 방향 (자동으로 단위벡터로 정규화)
+    queue_spacing: 0.35                 # 슬롯 간격 d (m)
+    queue_max: 3                        # 최대 대기자 수 (넘으면 k=-1 거부)
+    queue_stale_sec: 5.0                # request_entry 재전송이 이 시간 끊기면 큐에서 제거
+    queue_advance_delay_sec: 1.5        # 앞 로봇이 앵커를 떠날 시간을 준 뒤 뒤 로봇을 전진 (0이면 즉시)

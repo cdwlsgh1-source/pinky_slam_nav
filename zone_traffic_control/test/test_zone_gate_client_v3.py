@@ -1,0 +1,177 @@
+"""zone_gate_client_v3 테스트.
+
+1) 순수 로직(슬롯/허가 파싱, 재전송 타이밍): ROS 없이 실행.
+2) 통합: zone_manager_node_v3 를 실제로 띄워 슬롯 변경·거부·허가 수신을 확인.
+   ROS_DOMAIN_ID=77 + ROS_LOCALHOST_ONLY=1 이 아니면 건너뜀 (실제 관제 도메인 보호).
+"""
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from zone_traffic_control.zone_gate_client_v3 import (RetryTimer,
+                                                      parse_grant_msg,
+                                                      parse_slot_msg)
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
+
+
+# ---------------- 순수 로직 ----------------
+def test_parse_slot_ok():
+    assert parse_slot_msg('pinky2:1:-0.050,-0.450,0.000') == ('pinky2', 1, -0.05, -0.45, 0.0)
+
+
+def test_parse_slot_queue_full():
+    assert parse_slot_msg('pinky3:-1:0.0,0.0,0.0')[1] == -1
+
+
+@pytest.mark.parametrize('bad', ['', 'pinky1', 'pinky1:1', 'pinky1:x:1,2,3',
+                                 'pinky1:1:1,2', 'pinky1:1:a,b,c', None])
+def test_parse_slot_bad(bad):
+    assert parse_slot_msg(bad) is None
+
+
+def test_parse_grant():
+    assert parse_grant_msg('pinky1:abc123') == ('pinky1', 'abc123')
+    assert parse_grant_msg('pinky1:a:b') == ('pinky1', 'a:b')
+    assert parse_grant_msg('noseparator') is None
+
+
+def test_retry_timer_due_boundaries():
+    t = RetryTimer(1.0)
+    assert t.due(0.0)                 # 한 번도 안 보냈으면 즉시 due
+    t.mark(10.0)
+    assert not t.due(10.5)
+    assert t.due(11.0)                # 경계: 정확히 period 경과 -> due
+    t.mark(11.0)
+    assert not t.due(11.9)
+    t.reset()
+    assert t.due(11.9)
+
+
+# ---------------- 통합 (실제 zone_manager_node_v3) ----------------
+ISOLATED = (os.environ.get('ROS_DOMAIN_ID') == '77'
+            and os.environ.get('ROS_LOCALHOST_ONLY') == '1')
+
+
+@pytest.fixture(scope='module')
+def ros_env():
+    if not ISOLATED:
+        pytest.skip('ROS_DOMAIN_ID=77 + ROS_LOCALHOST_ONLY=1 에서만 실행')
+    rclpy = pytest.importorskip('rclpy')
+    from rclpy.node import Node
+    from zone_traffic_control.zone_gate_client_v3 import ZoneGateClient
+
+    mgr = subprocess.Popen(
+        [sys.executable, '-m', 'zone_traffic_control.zone_manager_node_v3',
+         '--ros-args', '--params-file', str(PKG_ROOT / 'config/zone_params_v3.yaml')],
+        cwd=str(PKG_ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    rclpy.init()
+    node = Node('gate_client_v3_test')
+    clients = {rid: ZoneGateClient(node, rid) for rid in ('pinky1', 'pinky2', 'pinky3', 'pinky4')}
+
+    def spin_until(cond, timeout=6.0):
+        end = time.time() + timeout
+        while time.time() < end:
+            rclpy.spin_once(node, timeout_sec=0.05)
+            if cond():
+                return True
+        return False
+
+    # 매니저 discovery 대기: 점유자가 없으면 request 에 곧 grant 가 온다 (워밍업 후 해제)
+    warm = clients['pinky4']
+    warm.reset()
+    tok = warm.send_request()
+    ok = False
+    end = time.time() + 10.0
+    while time.time() < end and not ok:
+        warm.resend_if_due()
+        rclpy.spin_once(node, timeout_sec=0.05)
+        ok = warm.granted(tok)
+    assert ok, 'zone_manager_node_v3 가 응답하지 않음'
+    warm.notify_exit()
+    spin_until(lambda: False, 0.5)
+    yield node, clients, spin_until
+    mgr.terminate()
+    mgr.wait(timeout=5)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+def test_integration_grant_slots_full_and_cancel(ros_env):
+    node, c, spin_until = ros_env
+    p1, p2, p3, p4 = c['pinky1'], c['pinky2'], c['pinky3'], c['pinky4']
+    for x in (p1, p2, p3, p4):
+        x.reset()
+
+    # 1) 빈 구역: 즉시 허가, 슬롯 없음
+    t1 = p1.send_request()
+    assert spin_until(lambda: p1.granted(t1))
+    assert p1.current_slot is None
+
+    # 2) 점유 중: p2, p3 는 슬롯 k=0, 1 (앵커 / 앵커 - d)
+    t2 = p2.send_request()
+    assert spin_until(lambda: p2.current_slot is not None)
+    k, x, y, _ = p2.current_slot
+    assert k == 0 and (x, y) == pytest.approx((0.30, -0.45))
+    assert not p2.granted(t2)
+
+    p3.send_request()
+    assert spin_until(lambda: p3.current_slot is not None)
+    k, x, y, _ = p3.current_slot
+    assert k == 1 and (x, y) == pytest.approx((0.30 - 0.35, -0.45))
+
+    # 3) queue_max=3 이므로 p4 까지는 들어간다(k=2). 넘치는 경우는 pinky5 로 확인
+    p4.send_request()
+    assert spin_until(lambda: p4.current_slot is not None and p4.current_slot[0] == 2)
+
+    # 4) 취소: p3 가 cancel 하면 p4 가 k=1 로 전진 (advance delay 1.5s 이후)
+    p3.cancel_entry()
+    assert p3.current_slot is None
+    assert spin_until(lambda: p4.current_slot[0] == 1, timeout=6.0)
+
+    # 5) 출입: p1 이 exit -> p2 허가, p4 는 k=0
+    p1.notify_exit()
+    assert spin_until(lambda: p2.granted(t2))
+    assert spin_until(lambda: p4.current_slot[0] == 0, timeout=6.0)
+
+    # 정리: p2 exit -> p4 허가 -> p4 exit
+    p2.notify_exit()
+    assert spin_until(lambda: p4.granted())
+    p4.notify_exit()
+    spin_until(lambda: False, 0.5)
+
+
+def test_integration_queue_full_rejection(ros_env):
+    node, c, spin_until = ros_env
+    from rclpy.node import Node
+    from zone_traffic_control.zone_gate_client_v3 import ZoneGateClient
+    extra = {rid: ZoneGateClient(node, rid) for rid in ('pinky5', 'pinky6')}
+    p1, p2, p3, p4 = (c[r] for r in ('pinky1', 'pinky2', 'pinky3', 'pinky4'))
+    for x in (p1, p2, p3, p4, *extra.values()):
+        x.reset()
+
+    t1 = p1.send_request()
+    assert spin_until(lambda: p1.granted(t1))
+    for p in (p2, p3, p4):                       # 대기자 3명 = queue_max
+        p.send_request()
+    assert spin_until(lambda: all(p.current_slot is not None for p in (p2, p3, p4)))
+
+    full = extra['pinky5']
+    full.send_request()
+    assert spin_until(lambda: full.queue_full)
+    assert full.current_slot[0] == -1
+    assert not full.granted()
+
+    # 거부된 로봇이 cancel 해도 큐/점유에 영향 없음
+    full.cancel_entry()
+    assert not full.queue_full
+
+    # 정리
+    for p in (p2, p3, p4):
+        p.cancel_entry()
+    p1.notify_exit()
+    spin_until(lambda: False, 1.0)
