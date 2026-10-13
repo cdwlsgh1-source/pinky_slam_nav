@@ -58,12 +58,31 @@ def test_v2_pinky2_index_mismatch_is_documented():
 
 @pytest.mark.parametrize('n', [1, 2])
 def test_no_hardcoded_queue_coordinates(n):
-    """로봇 코드에는 대기 좌표가 없다: POINTS 에 RED*IN/OUT 외의 RED/WAIT/QUEUE 항목이 없어야 한다."""
+    """로봇 코드에는 슬롯 좌표가 없다: POINTS 에 RED*/WAIT*/QUEUE* 항목이 없어야 한다 (슬롯은 매니저가 줌)."""
     pts = importlib.import_module(MODS[n]).PinkyPatrolNode.POINTS
-    extra = [k for k in pts if k.startswith(('RED', 'WAIT', 'QUEUE')) and not k.endswith(('IN', 'OUT'))]
+    extra = [k for k in pts if k.startswith(('RED', 'WAIT', 'QUEUE'))]
     assert extra == []
     src = Path(importlib.import_module(MODS[n]).__file__).read_text(encoding='utf-8')
     assert 'zone_gate_client import' not in src.replace('zone_gate_client_v3', '')
+
+
+@pytest.mark.parametrize('n', [1, 2])
+def test_zone_entry_matches_yaml_anchor(n):
+    """로봇의 ZONE_ENTRY 는 매니저 yaml 의 queue_anchor 와 같아야 한다 (앵커를 바꾸면 여기서 실패)."""
+    import yaml
+    prm = yaml.safe_load((ZONE_PKG / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
+    anchor = tuple(prm['zone_manager_node_v3']['ros__parameters']['queue_anchor'])
+    entry = importlib.import_module(MODS[n]).PinkyPatrolNode.POINTS['ZONE_ENTRY']
+    assert entry == pytest.approx(anchor)
+
+
+@pytest.mark.parametrize('n', [1, 2])
+def test_zone_exit_is_shared_and_red_points_removed(n):
+    """출구 좌표는 두 로봇 공통 (0.8, -0.5, 3.14), 기존 RED* 좌표는 POINTS 에 없다."""
+    cls = importlib.import_module(MODS[n]).PinkyPatrolNode
+    assert cls.POINTS['ZONE_EXIT'] == (0.8, -0.5, 3.14)
+    assert not [k for k in cls.POINTS if k.startswith('RED')]
+    assert cls.ZONE_ENTRY_NAME == 'ZONE_ENTRY' and cls.ZONE_EXIT_NAME == 'ZONE_EXIT'
 
 
 # ==============================================================================
@@ -208,7 +227,8 @@ def states(r):
     return [s for s, _ in r.statuses]
 
 
-DOOR1 = (0.6, -0.5, 0.0)
+DOOR1 = (0.8, -0.7, 0.0)       # ZONE_ENTRY (앵커). 이름은 기존 테스트와의 호환용
+EXIT = (0.8, -0.5, 3.14)       # ZONE_EXIT (락 반납 출구)
 def _slot(k):
     """zone_params_v3.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 를 계산 (매니저가 발행하는 값과 같은 규칙)."""
     import yaml
@@ -326,15 +346,15 @@ def test_door_unreachable_after_grant_releases_lock(env):
 
 
 def test_pinky2_start_path_uses_corrected_indexes(env):
-    """pinky2_v3 start 경로: RED2IN(0번) 에서 진입 절차 -> P3 -> P6 -> RED2OUT 에서 락 반납 -> P7."""
+    """pinky2_v3 start 경로: ZONE_ENTRY(0번) 에서 진입 절차 -> P3 -> P6 -> ZONE_EXIT 에서 락 반납 -> P7."""
     r = make_robot(env, 2, 'pinky2')
     t, out = run_in_thread(r._run_patrol)
     assert env.pump(lambda: not t.is_alive(), 15)
     g = r.navigator.goals
     assert len(g) == 5, g
-    assert g[0] == (0.55, -0.6, 0.0) and g[3][2] == pytest.approx(3.14, abs=0.01)
+    assert g[0] == DOOR1 and g[3] == EXIT and g[3][2] == pytest.approx(3.14, abs=0.01)
     assert states(r)[-1] == 'DONE'
-    assert env.pump(lambda: env.status['v'] == 'free', 4)   # RED2OUT(3번) 도착 때 notify_exit
+    assert env.pump(lambda: env.status['v'] == 'free', 4)   # ZONE_EXIT(3번) 도착 때 notify_exit
 
 
 def test_pinky1_start_path_waits_in_queue(env):
