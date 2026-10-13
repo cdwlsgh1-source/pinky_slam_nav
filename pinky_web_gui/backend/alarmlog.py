@@ -10,12 +10,15 @@
   - 쓰기에 실패(디스크 가득 참, 권한 등)해도 알람 자체는 계속 동작한다 (경고 로그만 남긴다). 파일은 자동으로 지우지 않는다.
 rclpy 와 무관하며 시계는 주입한다 (CommandTracker, AlarmManager 와 같은 `now=` 관례).
 """
+import itertools
 import json
 import logging
 import re
 import time
 from datetime import datetime
 from pathlib import Path
+
+from . import alarmquery
 
 log = logging.getLogger('backend.alarmlog')
 
@@ -36,6 +39,7 @@ class AlarmHistory:
         self.chunk = max(1, int(chunk))
         self._now = now
         self._cur = None     # (날짜, 파일 이름, 지금까지 쓴 줄 수)
+        self._counts = {}     # summary() 용 캐시: (파일 이름, 크기, 수정 시각) -> (이벤트 줄 수, 알람(raised) 수)
         self._failed = False  # 쓰기 실패를 로그에 한 번만 남기려고 (복구되면 다시 알린다)
 
     # ---- 쓰기 ----
@@ -121,6 +125,100 @@ class AlarmHistory:
         for r in rows:
             del r['_key']
         return rows
+
+    def _listing(self):
+        """(날짜 'YYYY-MM-DD', 파일 이름) 목록, 최신이 앞. 줄 수를 세지 않아 files() 보다 가볍다."""
+        if not self.dir.is_dir():
+            return []
+        rows = []
+        for p in self.dir.iterdir():
+            parsed = self._parse(p.name)
+            if parsed:
+                rows.append((parsed['date'], parsed['key'], p.name))
+        rows.sort(reverse=True)
+        return [(d, n) for d, _, n in rows]
+
+    def _events(self, name):
+        """파일 하나의 이벤트 줄 (파일 안의 순서). 깨진 줄(쓰다 끊긴 줄, 알람 모양이 아닌 줄)은 건너뛰고, 줄마다 읽은 파일 이름을 `file` 로 붙인다."""
+        out = []
+        with open(self.dir / name, encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if alarmquery.valid_event(row):
+                    row['file'] = name
+                    out.append(row)
+        return out
+
+    def iter_alarms(self, flt, before=None, live=None):
+        """조건에 맞는 알람을 **발생 시각이 최신인 것부터** 한 건씩 돌려준다 (알람 한 건 = (id, t_raised) 로 묶은 이벤트 줄 전부).
+        파일을 최신부터 한 개씩 읽고(파일 하나는 chunk 줄 이하) 필요한 만큼에서 멈춘다. 이력 전체를 메모리에 올리지 않는다.
+        알람은 발생 줄이 있는 파일에서 완성되는데, 그 뒤 이벤트(repeated/acked/cleared)는 더 최신 파일에 있을 수 있어 `pending` 에 모아 두었다가 합친다.
+        기간의 시작일보다 이른 날짜의 파일은 읽지 않는다 (파일은 그날 쓴 줄만 담고, 줄은 알람이 발생한 뒤에 쓰므로 그 파일의 알람은 모두 시작일 이전에 발생했다).
+        before: (t_raised, id) 보다 앞선(더 오래된) 알람만. live: {(id, t_raised): {'acked_by'}} 서버 메모리의 active 알람 (Active 와 Uncleared 를 가른다)."""
+        pending = {}
+        for date, name in self._listing():
+            if flt['day_from'] is not None and date < flt['day_from']:
+                break
+            groups = {}
+            for ev in self._events(name):
+                groups.setdefault(alarmquery.key_of(ev), []).append(ev)
+            done = []
+            for key, evs in groups.items():
+                full = evs + pending.pop(key, [])   # 이 파일의 줄이 더 오래됐으니 앞에 둔다
+                if any(e['event'] == 'raised' for e in evs):
+                    done.append((key, full))
+                else:
+                    pending[key] = full             # 발생 줄은 더 오래된 파일에 있다
+            done.sort(key=lambda kv: (kv[0][1], kv[0][0]), reverse=True)
+            for key, full in done:
+                if before is not None and (key[1], key[0]) >= before:
+                    continue
+                row = alarmquery.build(full, live)
+                if alarmquery.match(row, flt):
+                    yield row
+
+    def alarms(self, flt, limit=alarmquery.PAGE_MAX, before=None, live=None):
+        """알람 목록 한 쪽: {'alarms': [최대 limit 행], 'next': 다음 쪽 표지(없으면 None)}. 표지는 마지막 행의 '발생시각:id' 이고 다음 요청의 before 로 쓴다."""
+        rows = list(itertools.islice(self.iter_alarms(flt, before, live), limit + 1))
+        more = len(rows) > limit
+        rows = rows[:limit]
+        return {'alarms': rows, 'next': alarmquery.cursor_of(rows[-1]) if more and rows else None}
+
+    def export_rows(self, flt, live=None, limit=alarmquery.EXPORT_MAX):
+        """내려받기용: (행 목록(최대 limit), 상한에 걸려 잘렸는가)."""
+        rows = list(itertools.islice(self.iter_alarms(flt, None, live), limit + 1))
+        return rows[:limit], len(rows) > limit
+
+    def events_of(self, alarm_id, t_raised):
+        """알람 한 건의 모든 이벤트 줄 (일어난 순서, 줄마다 `file`). 발생 날짜의 파일부터 최신 파일까지 훑는다 (뒤 이벤트가 더 최신 파일에 있을 수 있다)."""
+        day = datetime.fromtimestamp(t_raised).strftime('%Y-%m-%d')
+        out = []
+        for date, name in reversed(self._listing()):
+            if date < day:
+                continue
+            out += [e for e in self._events(name) if e['id'] == alarm_id and abs(e['t_raised'] - t_raised) < 1e-6]
+        return out
+
+    def summary(self):
+        """화면 위 한 줄 요약용: 폴더, 파일 목록(최신이 앞, 파일마다 이벤트 줄 수·알람 수), 합계. 닫힌 파일은 다시 세지 않는다 (크기·수정 시각이 같으면 캐시)."""
+        files = []
+        for date, name in self._listing():
+            p = self.dir / name
+            st = p.stat()
+            sig = (name, st.st_size, st.st_mtime_ns)
+            if sig not in self._counts:
+                self._counts = {k: v for k, v in self._counts.items() if k[0] != name}   # 같은 파일의 낡은 값은 버린다
+                with open(p, 'rb') as f:
+                    lines = [ln for ln in f if ln.strip()]
+                self._counts[sig] = (len(lines), sum(1 for ln in lines if b'"event":"raised"' in ln))
+            records, raised = self._counts[sig]
+            parsed = self._parse(name)
+            files.append({'name': name, 'date': date, 'started': parsed['started'], 'seq': parsed['seq'], 'records': records, 'alarms': raised, 'size': st.st_size})
+        return {'dir': str(self.dir), 'chunk': self.chunk, 'files': files, 'total_files': len(files),
+                'total_events': sum(f['records'] for f in files), 'total_alarms': sum(f['alarms'] for f in files)}
 
     def read(self, date=None, limit=100):
         """저장된 레코드를 최신이 앞인 순서로 돌려준다. date('YYYY-MM-DD')를 주면 그날 것만. 읽다가 깨진 줄은 건너뛴다."""

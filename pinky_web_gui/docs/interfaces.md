@@ -262,7 +262,7 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 
 프로세스 상태 `state`: `stopped | starting | running | stopping | failed | exited`. WS 에는 `{"type":"procs", ...}` (snapshot 의 `procs` 와 같은 모양)가 변경될 때 0.1초 단위로 모아서 온다. 프로세스 제어 API 는 `procs_allowed`(인증이 켜져 있을 때만 true, `--no-auth` 면 false)가 아니면 403. 허용 코드: 알 수 없는 id 404, 명령 미설정·이미 실행 중·외부에서 실행 중·확인 필요 409, 시작/정지 실패 502.
 
-## 6-7. 웹 GUI 알람 (알람바 Step A1, A2, A3, A4, A5)
+## 6-7. 웹 GUI 알람 (알람바 Step A1, A2, A3, A4, A5, A7)
 
 알람바(화면 위)에 보이는 사건은 **서버가 만든다** (`backend/alarms.py` 의 `AlarmManager`). 접속한 모든 화면이 같은 알람을 보고, 하단 명령 이력 패널은 알람바에 통합돼 없어졌다. 서버가 알 수 없는 사건(WS 끊김, 지도·설정 불러오기 실패, 화면 안내, 요청이 서버에 닿지 못함)은 브라우저가 같은 목록에 직접 추가한다 (id 가 `local-N`, 시각은 브라우저 시계).
 
@@ -293,6 +293,10 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | `POST /api/alarms/ack` | **operator 이상** (로그인 안 하면 401, 출처·Content-Type 검사는 다른 POST 와 같음). 본문 `{"id": 정수 \| [정수…] \| null}` (`id` 없음/`null` 이면 전체). 대상은 `info` 가 아니고 아직 ACK 안 된 알람(활성·해소). 응답 `{ok:true, acked:[id…]}` (이미 ACK 했거나 없는 id 는 빠진다). 형식이 틀리면 400 `{ok:false, error}`. 바뀐 알람마다 WS `alarm` 을 모든 화면에 보내고 이력 파일에 `acked` 줄을 남긴다 |
 | `GET /api/alarms/history?date=YYYY-MM-DD&limit=N` | operator 이상. 저장된 이력 레코드(아래 "알람 이력 파일"), 최신이 앞. `date` 를 주면 그날 것만, `limit` 기본 100 최대 1000. 날짜 형식이 틀리면 400, 저장이 꺼져 있으면 404 |
 | `GET /api/alarms/history/files` | operator 이상. `{dir, chunk, files:[{name, date, started, seq, records, size}]}` (최신이 앞). `started` 는 시각 이름 파일의 `HH:MM:SS`, `seq` 는 예전 번호 이름 파일의 번호이고 해당 없으면 `null` |
+| `GET /api/alarms/history?view=alarms&from=&to=&robot=&level=&state=&code=&q=&limit=&before=` | **Alarm 화면 History 탭 (Step A7)**, operator 이상. 이벤트 줄을 `(id, t_raised)` 로 묶어 **알람 한 건당 한 행**으로, 발생이 최신인 것부터 `{alarms:[…], next}`. `from`/`to`: `YYYY-MM-DD`(서버 PC 현지, 발생 날짜, 둘 다 포함, 최대 366일), `robot`, `level`(쉼표로 여러 개: `HH,H,L,LL,info`), `state`(쉼표로 여러 개: `active`·`acknowledged`·`cleared`·`uncleared`), `code`, `q`(`text`·`detail` 부분 일치, 대소문자 무시, 100글자), `limit` 1~200(기본 200), `before`(이전 응답의 `next` = `발생시각:id`). 값이 틀리면 400 `{error}`, 저장이 꺼져 있으면 404. `view` 가 없거나 `events` 면 위의 이벤트 단위 응답 그대로다. 행: `{id, t_raised, code, level, robot, text, detail, state, count, acked_by, acked_at, t_last, t_cleared, duration(해소된 비-info 만 초, 아니면 null), events(줄 수), file(발생 줄이 있는 파일)}` |
+| `GET /api/alarms/history/{id}/events?t_raised=…` | operator 이상. 한 알람의 모든 이벤트 줄(일어난 순서, 줄마다 `file`)과 묶은 행 `{alarm, events}`. `id` 는 서버를 다시 켜면 겹치므로 행의 `t_raised` 를 함께 보낸다. 없으면 404 |
+| `GET /api/alarms/history/export?from=&to=&robot=&level=&state=&code=&q=` | operator 이상. 같은 조건의 CSV(UTF-8 **BOM**, `alarms_<from>_<to>.csv`). 열: 발생, 로봇, 레벨, 코드, 메시지, 상태, 횟수, 확인 계정, 확인 시각, 해소, 지속 시간(초). 최대 10000행이고 넘으면 잘라서 주며 응답 헤더 `X-Export-Truncated: 1`(`X-Export-Rows` 는 행 수) |
+| `GET /api/alarms/history/summary` | operator 이상. `{enabled, dir, chunk, files:[{name, date, started, seq, records(이벤트 줄), alarms(raised 줄), size}], total_files, total_events, total_alarms}`. 저장이 꺼져 있으면 404 가 아니라 `{enabled:false}` |
 | (mock 전용) `POST /api/mock/robot/{id}/silent` `{on}` | 그 로봇이 신호를 끊어 online 타임아웃 뒤 오프라인이 된다 |
 | (mock 전용) `POST /api/mock/no-subscriber` `{on}` | patrol_cmd/cmd_vel 구독자가 없는 것처럼 명령 전송이 실패한다 |
 | (mock 전용) `POST /api/mock/robot/{id}/patrol` `{state, detail}` | 임의 patrol 상태를 주입한다 (GUI 로는 못 만드는 FAILED/RETRY 시험용) |
@@ -310,8 +314,10 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | `CMD_REJECTED` | L | 백엔드 검증이 명령을 거절 (HTTP 400). 로봇 응답이 오거나 새 명령이 나가면 해소 |
 | `CMD_NO_RESPONSE` | L | 명령 뒤 `no_response_sec` 안에 `patrol_status` 가 안 바뀜. 응답이 오거나 새 명령이 나가면 해소. 비상정지는 무응답이어도 만들지 않는다 |
 | `PATROL_STOPPED` | LL | `patrol_status` 가 `STOPPED`. 다른 상태로 바뀌면 해소 |
-| `CMD_SENT`, `ROBOT_ONLINE` | info | 기록용 행 (명령 전송 성공 · 비상정지 성공은 `cmd` 가 `estop` · 로봇이 온라인이 됨). 소리·확인 대상이 아니고 알람바 `기록 숨김` 로 숨길 수 있다 |
+| `CMD_SENT`, `ROBOT_ONLINE` | info | 기록용 행 (명령 전송 성공 · 비상정지 성공은 `cmd` 가 `estop` · 로봇이 온라인이 됨). 소리·확인 대상이 아니고 알람바 `Hide Info` 로 숨길 수 있다 |
 | `SERVER_DISCONNECTED`, `LOAD_FAILED` | H, LL | **브라우저 전용** (서버는 만들지 않는다). 연결 끊김은 재접속하면 해소하고 `서버에 다시 연결됨`(info) 를 남긴다 |
+
+**Alarm 화면 History 의 상태** (Step A7): 이력 파일에는 해소되지 못하고 서버가 꺼진 알람의 종료 줄이 없다(형식 불변). 그래서 행의 `state` 는 서버 메모리와 맞춰 정한다 — `active`/`acknowledged`: 지금 서버 메모리의 active 알람과 `(id, t_raised)` 가 같다(ACK 여부로 갈린다). `cleared`: 마지막 줄의 `state` 가 `cleared`(해소된 알람을 나중에 ACK 해도 마찬가지). `uncleared`: 그 밖의 모두 — 해소 기록이 없고 지금은 메모리에도 없는 알람(서버가 꺼졌다). 추정하지 않는다. 화면(`frontend/alarmview.js`, `app.js` 의 History)은 서버 메모리의 active 알람을 WS 로 받아 조회 결과 맨 위에 고정하고(기간 조건은 걸지 않는다) 같은 알람은 `(id, t_raised)` 로 한 번만 보인다. 읽기 비용: 파일을 최신부터 필요한 만큼만 읽고, 기간 시작일보다 이른 파일은 열지 않는다.
 
 **알람 이력 파일** (`backend/alarmlog.py`): 알람바(모니터링)에는 최근 **100건**만 있지만(서버도 100건으로 자른다), 일어난 알람 이벤트는 모두 파일로 남는다.
 
@@ -353,7 +359,7 @@ GUI는 로봇별 `WAYPOINTS`(지점 이름과 개수)를 설정으로 가지고 
 | 정책 방송 | `snapshot.alarm_policy` 와 WS `{type: 'alarm_policy', policy}`: `{code: {enabled, level, sound, sound_file, repeat}}`. 접속한 모든 화면이 브라우저 알람의 Enable·레벨과 알람별 소리를 같게 적용한다 |
 | 알람별 소리 (결정 11 확장) | 소리 우선순위: **알람의 `sound_file` > 소리 설정 화면에서 레벨마다 고른 파일 > 합성 비프**. 알람 파일이 없거나 재생에 실패하면 레벨 파일로, 그것도 안 되면 비프. 반복 주기는 이기는 알람(가장 높은 레벨, 같으면 가장 최근)의 `repeat`, 없으면 소리 설정의 주기. 음량, 전체 켜기/끄기, 레벨별 켜기/끄기는 계속 브라우저(localStorage)가 정한다. `sound: false` 인 알람은 소리 대상도 SIL 대상도 아니다(알람바에는 보인다) |
 | 감사 기록 (FRA5-5) | 저장·되돌리기·거절은 GUI 서버 로그로 남아 **로그 화면(`GUI 서버`)**에서 보인다: `알람 카탈로그 변경 (mngr): CMD_REJECTED level 'L'→'H'`, `알람 카탈로그 되돌리기 (mngr): ...`, `알람 카탈로그 변경 거절 (mngr, CMD_REJECTED): <사유>`. 끄기는 WARN. 계정은 `mngr`(인증이 꺼져 있으면 `no-auth`). 별도 이력 파일은 없다 |
-| 화면 | 왼쪽 메뉴 `알람` → `카탈로그` 탭 (`이력` 탭은 Step A7 이 채우므로 비활성). 열 `ID / 이름 / 발생 조건 / 메시지 / 레벨 / 소리 / 사용 / 최근 발생 / 횟수`, manager 에게만 `편집` 열(버튼 → 대화상자: 사용, 레벨, 메시지, 소리, 사운드 파일, 반복 주기(초), 저장 / 취소 / 기본값으로 되돌리기). 바꾼 알람은 ID 옆에 `•`. 열 머리글 경계를 끌어 열 너비 조절(더블클릭: 자동, 브라우저 localStorage `pinky.avColWidths`), 탭 줄의 `알람소리` 버튼은 소리 설정 창을 연다. 필터 레벨·출처·검색, 열려 있는 동안 5초마다와 정책 방송 때 갱신. 고정 문구는 한국어 |
+| 화면 | 왼쪽 메뉴 `Alarm` → `Catalog` 탭 (`History` 탭은 전체 알람 이력, Step A7). 열 `ID / 이름 / 발생 조건 / 메시지 / 레벨 / 소리 / 사용 / 최근 발생 / 횟수`, manager 에게만 `편집` 열(버튼 → 대화상자: 사용, 레벨, 메시지, 소리, 사운드 파일, 반복 주기(초), 저장 / 취소 / 기본값으로 되돌리기). 바꾼 알람은 ID 옆에 `•`. 열 머리글 경계를 끌어 열 너비 조절(더블클릭: 자동, 브라우저 localStorage `pinky.avColWidths`), 탭 줄의 `알람소리` 버튼은 소리 설정 창을 연다. 필터 레벨·출처·검색, 열려 있는 동안 5초마다와 정책 방송 때 갱신. 고정 문구는 한국어 |
 | 누락 검사 | `tests/test_alarmcatalog.py`: `raise_(...)`·`PATROL_CODES`·`addAlarm(.., {code})` 가 내는 모든 코드가 카탈로그에 있고, `code` 없는 `addAlarm` 호출이 없고, 어디에서도 내지 않는 항목이 없고, `origin` 이 실제로 내는 쪽과 맞는지 코드를 읽어 확인한다. 새 알람을 추가할 때 카탈로그를 빠뜨리면 이 테스트가 실패한다 |
 
 **`command` 이벤트** (기존, 이력 패널이 없어진 뒤에도 서버는 계속 보낸다): WS `{"type":"command","entry":{id, time, robot, cmd, points, sent, result, detail}}`, `snapshot.commands`(오래된 것이 앞). `result` 는 `sent` \| `acknowledged` \| `no_response` \| `rejected` \| `failed`. 화면은 그리지 않고 브라우저의 `app.history` 와 카드의 진행 문구(`last_command`/`last_task`)가 쓴다.

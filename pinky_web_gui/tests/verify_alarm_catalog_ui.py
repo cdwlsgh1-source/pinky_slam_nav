@@ -85,10 +85,11 @@ async def run(shot, narrow_shot):
             # 알람 몇 개: 거절 두 번(같은 알람이 ACK 전이라 묶임, 발생은 2회)
             for _ in range(2):
                 api('POST', '/api/robots/pinky1/command', {'cmd': 'bogus'})
-            check('메뉴에 알람 버튼', await pg.js("document.getElementById('alarmMenu').textContent.trim()") == '알람')
+            check('메뉴에 알람 버튼', await pg.js("document.getElementById('alarmMenu').firstChild.textContent.trim()") == 'Alarm')
             check('처음에는 Alarm 화면이 숨겨져 있다', await pg.js("document.getElementById('alarmView').hidden === true"))
 
             await pg.click_sel('#alarmMenu')
+            await pg.click_sel('#avTabCatalog')   # 기본 탭은 History (Step A7)
             check('Alarm 클릭: 화면이 바뀐다 (메인 작업 영역 숨김)', await pg.wait("!document.getElementById('alarmView').hidden && document.getElementById('workspace').hidden", 3))
             check('알람바와 비상 정지는 그대로 보인다', await pg.js("(() => { const v = (id) => { const e = document.getElementById(id); return !!e && e.getClientRects().length > 0; }; return v('alarmBody') && document.querySelector('.estop').getClientRects().length > 0; })()"))
             check('Alarm 메뉴가 선택 표시', await pg.js("document.getElementById('alarmMenu').classList.contains('active')"))
@@ -98,7 +99,7 @@ async def run(shot, narrow_shot):
             check('열 제목이 한국어 (PRD FRA4-6, manager 는 편집 열 포함)', await got_h() == want_h, await got_h())
             st, cat = api('GET', '/api/alarms/catalog')
             check('표 행 수가 API 와 같다', await pg.wait(f"document.querySelectorAll('#avBody tr').length === {len(cat['alarms'])}", 4), str(len(cat['alarms'])))
-            check('History 탭은 비활성, Catalog 탭이 선택', await pg.js("document.getElementById('avTabHistory').disabled && document.getElementById('avTabCatalog').getAttribute('aria-selected') === 'true'"))
+            check('탭 이름은 영문 History / Catalog, Catalog 가 선택 (History 는 verify_alarm_history_ui.py)', await pg.js("(() => { const h = document.getElementById('avTabHistory'), c = document.getElementById('avTabCatalog'); return h.textContent === 'History' && c.textContent === 'Catalog' && !h.disabled && c.getAttribute('aria-selected') === 'true'; })()"))
             check('서버 알람 CMD_REJECTED: 레벨 L, 횟수 2', await pg.js(cell('CMD_REJECTED', 'lvl')) == 'L' and await pg.js(cell('CMD_REJECTED', 'cnt')) == '2')
             check('발생 시각이 채워져 있다', bool(re.match(r'\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$', await pg.js(cell('CMD_REJECTED', 'last')))))
             check('아직 안 난 알람은 0회, 시각 -', await pg.js(cell('ROBOT_OFFLINE', 'cnt')) == '0' and await pg.js(cell('ROBOT_OFFLINE', 'last')) == '-')
@@ -130,7 +131,7 @@ async def run(shot, narrow_shot):
             await pg.click_sel('#avReset')
 
             # 열 너비 조절: 머리글 경계를 끌면 그 열만 넓어지고 새로 고침해도 유지, 더블클릭은 자동 배치로
-            check('알람소리 버튼이 카탈로그 탭 옆에 있다', await pg.js("(() => { const t = document.getElementById('avTabCatalog'); const b = document.getElementById('alarmSoundBtn'); return t.nextElementSibling === b && b.textContent.trim() === '알람소리' && b.closest('#alarmView') !== null; })()"))
+            check('Alarm Sound 버튼이 Catalog 탭 옆에 있다', await pg.js("(() => { const t = document.getElementById('avTabCatalog'); const b = document.getElementById('alarmSoundBtn'); return t.nextElementSibling === b && b.textContent.trim() === 'Alarm Sound' && b.closest('#alarmView') !== null; })()"))
             check('왼쪽 메뉴에는 소리 버튼이 없다', await pg.js("![...document.querySelectorAll('.menubar .menu-item')].some(b => b.textContent.trim() === '소리' || b.id === 'alarmSoundBtn')"))
             w_of = lambda i: pg.js(f"Math.round(document.querySelectorAll('#avTable th')[{i}].getBoundingClientRect().width)")  # noqa: E731
             w0, w1 = await w_of(3), await w_of(4)
@@ -147,6 +148,7 @@ async def run(shot, narrow_shot):
             await pg.call('Page.reload')
             await pg.wait("app.cfg && app.wsUp", 8)
             await pg.click_sel('#alarmMenu')
+            await pg.click_sel('#avTabCatalog')
             await pg.wait("document.querySelectorAll('#avBody tr').length > 0", 4)
             check('새로 고침 후에도 너비 유지', abs(await w_of(3) - w2) <= 1, await w_of(3))
             await pg.js("document.querySelectorAll('#avTable th .av-rz')[3].dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
@@ -157,7 +159,7 @@ async def run(shot, narrow_shot):
             check('안내 문구', 'alarms.yaml' in await pg.js("document.getElementById('avFoot').textContent"))
 
             # 고정 문구는 한국어 (알람 이름·조건·메시지 칸 제외)
-            fixed = await pg.js("JSON.stringify([...document.querySelectorAll('#alarmView th, #alarmView button, #alarmView label, #alarmView option, #avNote, #avFoot, #avEmpty')].map(e => e.textContent).concat([document.getElementById('avSearch').placeholder, document.getElementById('alarmMenu').textContent]))")
+            fixed = await pg.js("JSON.stringify([...document.querySelectorAll('#avCatalogPane th, #avCatalogPane button, #avCatalogPane label, #avCatalogPane option, #avNote, #avFoot, #avEmpty')].map(e => e.textContent).concat([document.getElementById('avSearch').placeholder]))")
             check('Alarm 화면 고정 문구에 영문 문장 없음 (한국어)', not english_left(fixed), english_left(fixed))
             if shot:
                 await screenshot(pg, shot)

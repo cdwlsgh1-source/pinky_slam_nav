@@ -13,43 +13,43 @@
   <!-- 왼쪽: 메뉴바 -->
   <nav class="menubar" aria-label="메뉴">
     <div class="brand">Pinky</div>
-    <button class="menu-item active" data-view="main">메인</button>
-    <button class="menu-item" data-view="log" id="logMenu" title="GUI 가 켠 프로세스의 출력과 GUI 서버 로그">로그</button>
-    <button class="menu-item" data-view="alarm" id="alarmMenu" title="알람 카탈로그: 시스템이 낼 수 있는 모든 알람">알람</button>
-    <button class="menu-item" disabled title="준비 중">포인트</button>
+    <button class="menu-item active" data-view="main">Main</button>
+    <button class="menu-item" data-view="log" id="logMenu" title="GUI 가 켠 프로세스의 출력과 GUI 서버 로그">Log</button>
+    <button class="menu-item" data-view="alarm" id="alarmMenu" title="알람 화면: 지난 알람 전체 이력과 알람 카탈로그">Alarm<span class="menu-badge" id="alarmBadge" hidden aria-label="지금 활성인 알람 수"></span></button>
+    <button class="menu-item" disabled title="준비 중">Points</button>
     <div class="layout-tools" id="layoutTools" data-only-view="main">
-      <button type="button" class="menu-item" id="layoutEditBtn" aria-pressed="false" title="지도와 사이드바 패널을 끌어서 옮기고 크기를 조절합니다">레이아웃 편집</button>
+      <button type="button" class="menu-item" id="layoutEditBtn" aria-pressed="false" title="지도와 사이드바 패널을 끌어서 옮기고 크기를 조절합니다">Edit Layout</button>
       <div class="layout-edit-actions" id="layoutEditActions" hidden>
-        <button type="button" id="layoutDone" class="primary">완료</button>
-        <button type="button" id="layoutReset" title="기본 배치로 되돌립니다">초기화</button>
-        <button type="button" id="layoutCancel" title="Esc">취소</button>
+        <button type="button" id="layoutDone" class="primary">Done</button>
+        <button type="button" id="layoutReset" title="기본 배치로 되돌립니다">Reset</button>
+        <button type="button" id="layoutCancel" title="Esc">Cancel</button>
       </div>
     </div>
-    <button type="button" class="menu-item" id="addRobotBtn" style="margin-top:auto" title="새 로봇을 추가할 때 필요한 설정과 절차를 보여 줍니다">로봇
-추가</button>
-    <button type="button" class="menu-item" id="themeBtn">다크</button>
+    <button type="button" class="menu-item" id="addRobotBtn" style="margin-top:auto" title="새 로봇을 추가할 때 필요한 설정과 절차를 보여 줍니다">Add
+Robot</button>
+    <button type="button" class="menu-item" id="themeBtn">Dark</button>
     <div class="authbox" id="authBox" hidden>
       <span id="authRole" class="dim"></span>
-      <button type="button" id="switchBtn" title="로그아웃하지 않고 다른 계정(manager / operator)의 비밀번호로 전환합니다">계정 전환</button>
-      <button type="button" id="logoutBtn" title="로그아웃">로그아웃</button>
+      <button type="button" id="switchBtn" title="로그아웃하지 않고 다른 계정(manager / operator)의 비밀번호로 전환합니다">Switch Account</button>
+      <button type="button" id="logoutBtn" title="로그아웃">Logout</button>
     </div>
   </nav>
 
   <!-- 위: 시스템 알람 -->
   <header class="alarmbar" aria-label="시스템 알람">
-    <span class="chip" id="connChip" data-level="warn">연결 중...</span>
-    <span class="chip" id="zoneChip" data-level="dim">구역: -</span>
+    <span class="chip" id="connChip" data-level="warn">Connecting...</span>
+    <span class="chip" id="zoneChip" data-level="dim">Zone: -</span>
     <!-- ACK / SIL / info 표시: 비상 정지와 같은 크기·서식의 버튼을 칩 줄에 나열한다 (알람 표가 그만큼 넓어진다) -->
     <div class="alarm-tools" role="group" aria-label="알람 조작">
       <button type="button" id="alarmAckBtn" title="알람을 확인(ACK)합니다: 해소된 알람은 목록에서 숨기고 활성 알람은 확인됨으로 표시" disabled>ACK</button>
       <button type="button" id="alarmSilBtn" aria-pressed="false" title="지금 울리는 알람 소리를 끕니다 (이 브라우저만)" disabled>SIL</button>
-      <button type="button" id="alarmInfoBtn" aria-pressed="true" title="안내 행(명령 전송 기록, 로봇 온라인)을 보이거나 숨깁니다">기록 숨김</button>
+      <button type="button" id="alarmInfoBtn" aria-pressed="true" title="안내 행(명령 전송 기록, 로봇 온라인)을 보이거나 숨깁니다">Hide Info</button>
     </div>
     <!-- 브라우저가 첫 클릭 전에는 소리를 막는다. 막힌 동안만 보이고, 화면 아무 곳이나 누르면 사라진다 (FRA3-8). 칩 줄에 둬서 알람 표가 밀리지 않는다 -->
-    <button type="button" class="sound-hint" id="soundHint" hidden>클릭하면 알람 소리가 켜집니다</button>
+    <button type="button" class="sound-hint" id="soundHint" hidden>Click to enable alarm sound</button>
     <!-- 비상정지: 항상 보이고, 확인 팝업 없이 한 번 누르면 동작한다 (FR4-7). 로봇별 비상 정지는 로봇 카드 안에 있다 -->
     <div class="estop" id="estopBar" role="group" aria-label="비상정지">
-      <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">비상 정지</button>
+      <button type="button" id="estopAll" class="danger" title="모든 로봇에 stop 과 cmd_vel 0 속도를 보냅니다">Emergency Stop</button>
     </div>
     <!-- 알람 목록: 서버가 만든 알람과 브라우저 전용 알람을 한 표로 (app.js renderAlarms). 비상정지 명령 이력도 여기 통합됐다 -->
     <div class="alarm-list" id="alarmList">
@@ -76,9 +76,9 @@
       <canvas id="mapCanvas"></canvas>
       <div class="stage-note" id="stageNote">지도 불러오는 중...</div>
       <div class="map-tools">
-        <button id="routeLinesBtn" type="button" aria-pressed="false" title="로봇 경로 선과 현재 목표 표시 켜기/끄기 (기본 꺼짐)">경로</button>
-        <button id="gridBtn" type="button" aria-pressed="true" title="x, y 좌표 그리드 켜기/끄기">그리드</button>
-        <button id="fitBtn" type="button" title="지도를 화면에 맞춤">맞춤</button>
+        <button id="routeLinesBtn" type="button" aria-pressed="false" title="로봇 경로 선과 현재 목표 표시 켜기/끄기 (기본 꺼짐)">Route</button>
+        <button id="gridBtn" type="button" aria-pressed="true" title="x, y 좌표 그리드 켜기/끄기">Grid</button>
+        <button id="fitBtn" type="button" title="지도를 화면에 맞춤">Fit</button>
       </div>
     </div>
     <div class="readout">
@@ -91,14 +91,14 @@
   <!-- 오른쪽: 로봇 카드 / 명령어 / 클릭 좌표 -->
   <aside class="sidebar panel" id="panelSide" data-panel="side" data-title="사이드바" aria-label="로봇과 명령">
     <div class="tabs" id="sideTabs" role="tablist" aria-label="사이드바 탭"></div>
-    <section id="robotsPanel" data-tab="robots" data-tab-label="로봇">
+    <section id="robotsPanel" data-tab="robots" data-tab-label="Robots">
       <div id="robotCards"></div>
     </section>
 
-    <section id="procPanel" data-tab="system" data-tab-label="시스템">
+    <section id="procPanel" data-tab="system" data-tab-label="System">
       <div class="row-actions">
-        <button type="button" id="procStartAll" class="primary">전체 시작</button>
-        <button type="button" id="procStopAll">전체 정지</button>
+        <button type="button" id="procStartAll" class="primary">Start All</button>
+        <button type="button" id="procStopAll">Stop All</button>
       </div>
       <p class="hint" id="procSeq"></p>
       <p class="hint" id="procNote"></p>
@@ -106,17 +106,17 @@
       <p class="hint">브릿지와 zone_manager 는 이 PC 에서, bringup 과 map 은 SSH 로 로봇에서 실행합니다. 터미널에서 직접 켠 프로세스는 여기서 끌 수 없습니다. 로그인(manager)이 필요합니다.</p>
     </section>
 
-    <section id="routePanel" data-tab="route" data-tab-label="경로">
+    <section id="routePanel" data-tab="route" data-tab-label="Route">
       <h2>경로 이동 <small>(goto)</small></h2>
       <label class="field">대상 로봇 <select id="routeRobot"></select></label>
       <p class="hint">지도의 포인트(P1~P7)를 클릭하면 경로 끝에 추가됩니다. 구역 문(RED*)과 락은 로봇이 알아서 처리합니다. 지도의 <b>경로</b> 버튼을 켜면 로봇의 경로 선을 그리며(기본 꺼짐), 이 선은 지도의 벽을 피하는 최단 경로를 계산한 <b>추정</b>이라 Nav2 의 실제 경로와 조금 다를 수 있습니다.</p>
       <ol class="route" id="routeList"></ol>
       <p class="hint" id="routeEmpty">경로가 비어 있습니다.</p>
-      <div class="row-actions"><button type="button" id="routeClearBtn">경로 비우기</button></div>
+      <div class="row-actions"><button type="button" id="routeClearBtn">Clear Route</button></div>
       <p class="hint" id="routeMeta"></p>
     </section>
 
-    <section id="controlPanel" data-tab="control" data-tab-label="조작">
+    <section id="controlPanel" data-tab="control" data-tab-label="Control">
       <h2>오버레이 <small>(LiDAR)</small></h2>
       <div id="scanToggles"></div>
       <p class="hint">켠 로봇만 서버가 <code>/scan</code> 을 구독합니다 (5Hz, 점 3개당 1개). 점은 로봇의 tf(map → 센서)로 지도에 그립니다. tf 를 못 구하면 AMCL 위치와 설정의 보정 각도(<code>scan.yaw_offset_deg</code>)로 대신 그리며, 이때는 센서 방향이 어긋날 수 있습니다. 어느 쪽인지는 로봇 이름 옆에 표시됩니다.</p>
@@ -135,11 +135,11 @@
       </div>
     </section>
 
-    <section id="pointsPanel" data-tab="points" data-tab-label="좌표">
+    <section id="pointsPanel" data-tab="points" data-tab-label="Coordinates">
       <h2>클릭 좌표 <small>(waypoint 지정용)</small></h2>
       <div class="row-actions">
-        <button type="button" id="copyAllBtn">전체 복사</button>
-        <button type="button" id="clearBtn">지우기</button>
+        <button type="button" id="copyAllBtn">Copy All</button>
+        <button type="button" id="clearBtn">Clear</button>
       </div>
       <p class="hint" id="pointsEmpty">지도를 클릭하면 좌표가 기록됩니다.</p>
       <ul class="points" id="pointsList"></ul>
@@ -148,13 +148,52 @@
 
   </div><!-- /workspace -->
 
-  <!-- Alarm 화면 (Step A4: Catalog 탭. History 탭은 Step A7 이 채운다) -->
+  <!-- Alarm 화면: History 탭(Step A7, 저장된 전체 알람 이력)과 Catalog 탭(Step A4 표시, A5 편집). 버튼 이름은 영문이고 나머지 고정 문구는 한국어(alarmview.js 의 TEXT) -->
   <section class="alarmview" id="alarmView" hidden aria-label="알람">
     <div class="log-tabs" role="tablist" aria-label="알람 화면 종류">
-      <button type="button" class="tab" role="tab" id="avTabHistory" aria-selected="false" disabled title="다음 단계에서 제공됩니다">이력</button>
-      <button type="button" class="tab" role="tab" id="avTabCatalog" aria-selected="true">카탈로그</button>
-      <button type="button" class="tab" id="alarmSoundBtn" title="알람 소리 설정 (음량, 사운드 파일, 반복 주기, 시험 재생)">알람소리</button>
+      <button type="button" class="tab" role="tab" id="avTabHistory" aria-selected="true">History</button>
+      <button type="button" class="tab" role="tab" id="avTabCatalog" aria-selected="false">Catalog</button>
+      <button type="button" class="tab" id="alarmSoundBtn" title="알람 소리 설정 (음량, 사운드 파일, 반복 주기, 시험 재생)">Alarm Sound</button>
     </div>
+
+    <!-- History 탭 -->
+    <div class="av-pane" id="avHistoryPane">
+      <div class="ah-summary"><span class="dim" id="ahSummary"></span> <button type="button" id="ahFilesBtn" aria-expanded="false">Show files</button></div>
+      <div class="ah-files" id="ahFiles" hidden></div>
+      <p class="notice-bad" id="ahOff" hidden data-t="off"></p>
+      <div id="ahMain">
+        <form class="log-tools ah-filters" id="ahForm" autocomplete="off">
+          <label class="field"><span data-t="from"></span> <input type="date" id="ahFrom"></label>
+          <label class="field"><span data-t="to"></span> <input type="date" id="ahTo"></label>
+          <label class="field"><span data-t="robot"></span> <select id="ahRobot"></select></label>
+          <span class="field ah-levels" role="group" aria-label="레벨"><span data-t="level"></span>
+            <label class="check"><input type="checkbox" name="ahLevel" value="HH">HH</label>
+            <label class="check"><input type="checkbox" name="ahLevel" value="H">H</label>
+            <label class="check"><input type="checkbox" name="ahLevel" value="L">L</label>
+            <label class="check"><input type="checkbox" name="ahLevel" value="LL">LL</label>
+            <label class="check"><input type="checkbox" name="ahLevel" value="info">info</label>
+          </span>
+          <label class="field"><span data-t="state"></span> <select id="ahState"></select></label>
+          <label class="field"><span data-t="code"></span> <input type="text" id="ahCode" list="ahCodes" maxlength="40" spellcheck="false" size="16"></label>
+          <datalist id="ahCodes"></datalist>
+          <input type="search" id="ahSearch" maxlength="100" data-tp="search" aria-label="메시지 검색">
+          <button type="submit" class="primary" id="ahApply">Apply</button>
+          <button type="button" id="ahReset">Reset</button>
+          <button type="button" id="ahExport" title="지금 조건에 맞는 알람을 CSV 파일로 내려받습니다">Export CSV</button>
+        </form>
+        <div class="av-scroll" id="ahScroll">
+          <table class="av-table ah-table" id="ahTable">
+            <thead><tr id="ahHead"></tr></thead>
+            <tbody id="ahBody"></tbody>
+          </table>
+          <p class="dim" id="ahEmpty" hidden data-t="empty"></p>
+        </div>
+        <div class="ah-foot"><span class="dim" id="ahNote"></span> <button type="button" id="ahMore" hidden>Load more</button></div>
+      </div>
+    </div>
+
+    <!-- Catalog 탭 -->
+    <div class="av-pane" id="avCatalogPane" hidden>
     <div class="log-tools">
       <label class="field">레벨
         <select id="avLevel"><option value="all">전체</option></select>
@@ -163,8 +202,8 @@
         <select id="avOrigin"><option value="all">전체</option><option value="server">서버</option><option value="browser">브라우저 전용</option></select>
       </label>
       <input type="search" id="avSearch" placeholder="검색" aria-label="카탈로그 검색">
-      <button type="button" id="avRefresh">새로고침</button>
-      <button type="button" id="avReset">초기화</button>
+      <button type="button" id="avRefresh">Refresh</button>
+      <button type="button" id="avReset">Reset</button>
       <span class="dim" id="avNote"></span>
     </div>
     <div class="av-scroll">
@@ -176,6 +215,7 @@
     </div>
     <p class="notice-bad" id="avLocalErr" hidden></p>
     <p class="dim" id="avFoot"></p>
+    </div>
   </section>
 
   <!-- 알람 카탈로그 편집 (Step A5, manager 만): 서버가 최종 검증한다 -->
@@ -194,9 +234,9 @@
       <p class="dim" id="avEdNote"></p>
       <p class="notice-bad" id="avEdErr" role="alert"></p>
       <div class="row-actions">
-        <button type="button" class="primary" id="avEdSave">저장</button>
-        <button type="button" id="avEdCancel">취소</button>
-        <button type="button" id="avEdReset" title="이 알람의 저장된 변경을 지우고 기본값으로 되돌립니다">기본값으로 되돌리기</button>
+        <button type="button" class="primary" id="avEdSave">Save</button>
+        <button type="button" id="avEdCancel">Cancel</button>
+        <button type="button" id="avEdReset" title="이 알람의 저장된 변경을 지우고 기본값으로 되돌립니다">Reset to Default</button>
       </div>
     </form>
   </dialog>
@@ -214,9 +254,9 @@
       </label>
       <input type="search" id="logSearch" placeholder="검색 (대소문자 무시)" aria-label="로그 검색">
       <label class="check"><input type="checkbox" id="logFollow" checked> 맨 아래 따라가기</label>
-      <button type="button" id="logPause" aria-pressed="false" title="새 줄을 받아도 화면을 멈춥니다">일시정지</button>
-      <button type="button" id="logCopy">복사</button>
-      <button type="button" id="logClear" title="이 화면에서만 지웁니다 (서버에 저장된 로그는 그대로)">화면 지우기</button>
+      <button type="button" id="logPause" aria-pressed="false" title="새 줄을 받아도 화면을 멈춥니다">Pause</button>
+      <button type="button" id="logCopy">Copy</button>
+      <button type="button" id="logClear" title="이 화면에서만 지웁니다 (서버에 저장된 로그는 그대로)">Clear View</button>
       <span class="dim" id="logInfo"></span>
     </div>
     <pre class="log-body" id="logBody" tabindex="0" aria-live="off"></pre>
@@ -231,7 +271,7 @@
     <label class="field">ID <input type="text" id="loginId" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
     <label class="field">비밀번호 <input type="password" id="loginPw" autocomplete="current-password" required></label>
     <p class="notice-bad" id="loginErr"></p>
-    <div class="row-actions"><button type="submit" class="primary" id="loginBtn">로그인</button><button type="button" id="loginCancel" hidden>취소</button></div>
+    <div class="row-actions"><button type="submit" class="primary" id="loginBtn">Login</button><button type="button" id="loginCancel" hidden>Cancel</button></div>
   </form>
 </dialog>
 
@@ -246,7 +286,7 @@
   </div>
   <p class="notice-bad" id="arErr"></p>
   <div id="arOut"></div>
-  <div class="row-actions"><button type="button" id="arClose" class="primary">닫기</button></div>
+  <div class="row-actions"><button type="button" id="arClose" class="primary">Close</button></div>
 </dialog>
 
 <dialog id="soundDlg" class="wide" aria-label="알람 소리">
@@ -263,15 +303,15 @@
   </table>
   <p class="hint" id="sndFilesNote"></p>
   <p class="hint" id="sndStatus" aria-live="polite"></p>
-  <div class="row-actions"><button type="button" id="sndClose" class="primary">닫기</button></div>
+  <div class="row-actions"><button type="button" id="sndClose" class="primary">Close</button></div>
 </dialog>
 
 <dialog id="confirmDlg">
   <form method="dialog">
     <p id="confirmText"></p>
     <div class="row-actions">
-      <button value="ok" id="confirmOk" class="primary">보내기</button>
-      <button value="cancel">취소</button>
+      <button value="ok" id="confirmOk" class="primary">Send</button>
+      <button value="cancel">Cancel</button>
     </div>
   </form>
 </dialog>

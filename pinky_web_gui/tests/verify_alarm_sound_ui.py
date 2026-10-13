@@ -128,8 +128,8 @@ async def run(shot, hint_shot):
                 await pg.js(f"(() => {{ const e = document.querySelector({json.dumps(sel)}); e.value = {json.dumps(value)}; e.dispatchEvent(new Event('change')); }})()")
 
             # ---- 자동재생 차단 안내 (FRA3-8) ----
-            check('첫 클릭 전에는 소리가 막혀 "클릭하면 알람 소리가 켜집니다" 가 보임',
-                  await pg.wait("!document.getElementById('soundHint').hidden && document.getElementById('soundHint').textContent === '클릭하면 알람 소리가 켜집니다'", 4))
+            check('첫 클릭 전에는 소리가 막혀 "Click to enable alarm sound" 가 보임',
+                  await pg.wait("!document.getElementById('soundHint').hidden && document.getElementById('soundHint').textContent === 'Click to enable alarm sound'", 4))
             if hint_shot:
                 await screenshot(pg, hint_shot)
             await pg.mouse(40, 30)
@@ -137,9 +137,9 @@ async def run(shot, hint_shot):
 
             # ---- 소리 설정 화면의 고정 문구 (FRA3-10) ----
             check('소리 설정 열기', await open_dialog())
-            txt = await pg.js("(() => { const d = document.getElementById('soundDlg'); return d.textContent + ' ' + [...d.querySelectorAll('[aria-label],[title]')].map(e => (e.getAttribute('aria-label') || '') + ' ' + (e.title || '')).join(' ') + ' ' + [...d.querySelectorAll('option')].map(o => o.textContent).join(' '); })()")
+            txt = await pg.js("(() => { const d = document.getElementById('soundDlg'); return d.textContent.replace(/(\S)(?=[A-Z])/g, '$1 ') + ' ' + [...d.querySelectorAll('[aria-label],[title]')].map(e => (e.getAttribute('aria-label') || '') + ' ' + (e.title || '')).join(' ') + ' ' + [...d.querySelectorAll('option')].map(o => o.textContent).join(' '); })()")
             check('소리 설정 화면에 영문 문장이 없음 (한국어)', not english_left(txt), english_left(txt))
-            for word in ('알람 소리', '음량', '반복 주기(초)', '사운드 파일', '합성 비프음', '시험', '정지'):
+            for word in ('알람 소리', '음량', '반복 주기(초)', '사운드 파일', '합성 비프음', 'Test', 'Stop'):
                 check(f'소리 설정 문구: {word}', word in txt)
             check('레벨 4개 행 (info 없음)', await pg.js("[...document.querySelectorAll('#sndRows tr td:first-child')].map(e => e.textContent).join()") == 'HH,H,L,LL')
             check('사운드 폴더의 허용 파일만 목록에 나옴 (txt 제외)',

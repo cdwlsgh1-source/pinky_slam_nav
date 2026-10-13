@@ -150,6 +150,10 @@ class AlarmManager:
         """코드별 {count, last} (이번 서버 실행 중). 서버를 다시 켜면 0 부터 센다 (이력 파일에는 모든 발생이 남아 있다)."""
         return {c: dict(v) for c, v in self._stats.items()}
 
+    def live(self):
+        """지금 서버 메모리에서 active 인 알람 {(id, t_raised): {'acked_by'}}. Alarm 화면의 이력이 Active 와 Uncleared 를 가르는 유일한 근거다 (PRD FRA7-12)."""
+        return {(a['id'], a['t_raised']): {'acked_by': a['acked_by']} for a in list(self._alarms) if a['state'] == ACTIVE}
+
     def snapshot(self):
         """새 화면에 보낼 알람 (최신이 앞). ACK 로 숨긴 알람은 뺀다."""
         return [dict(a) for a in reversed(self._alarms) if not is_hidden(a)]

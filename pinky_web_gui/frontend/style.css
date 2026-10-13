@@ -39,16 +39,47 @@ h2 small { font-weight: 400; }
 .alarmview .log-tabs .tab[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
 .alarmview .log-tabs .tab:disabled { opacity: .45; }
 .alarmview .dim.bad { color: var(--bad); }
+.av-pane { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.av-pane[hidden], #ahMain[hidden] { display: none; }
+#ahMain { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.ah-summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ah-files { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--dim); max-height: 160px; overflow: auto; }
+.ah-filters { gap: 8px 12px; }
+.ah-filters .field { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; font-size: 13px; }
+.ah-filters input[type="date"], .ah-filters input[type="text"], .ah-filters select { font: inherit; font-size: 13px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+.ah-levels .check { margin: 0 2px; font-size: 13px; }
+.ah-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ah-table td.time, .ah-table td.cnt, .ah-table td.clr, .ah-table td.dur, .ah-table td.acked, .ah-table td.robot { white-space: nowrap; }
+.ah-table td.msg { color: var(--text); min-width: 220px; }
+.ah-table td.cnt { text-align: right; }
+.ah-table tbody tr[data-key] { cursor: pointer; }
+.ah-table tbody tr[data-key]:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.ah-table tr.pin td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.ah-table tr.pin td.time { box-shadow: inset 3px 0 0 var(--accent); }
+.ah-table tr.lvl-HH td.lvl, .ah-table tr.lvl-H td.lvl { color: var(--bad); font-weight: 700; }
+.ah-table tr.lvl-L td.lvl { color: var(--warn); font-weight: 700; }
+.ah-table tr.lvl-LL td.lvl { color: var(--caution); font-weight: 700; }
+.ah-table tr.lvl-info td.lvl { color: var(--dim); }
+.ah-table tr.st-cleared td.state, .ah-table tr.st-acknowledged td.state { color: var(--dim); }
+.ah-table tr.st-active td.state { color: var(--bad); font-weight: 700; }
+.ah-table tr.st-uncleared td.state { color: var(--warn); }
+.ah-detail td { background: var(--bg); }
+.ah-detail-box { display: flex; flex-direction: column; gap: 6px; font-size: 13px; padding: 4px 2px; }
+.ah-detail-box ul { margin: 2px 0 0; padding-left: 18px; }
+.ah-detail-box li { white-space: pre-wrap; word-break: keep-all; overflow-wrap: break-word; }
+.ah-detail-box pre { margin: 2px 0 0; white-space: pre-wrap; word-break: keep-all; overflow-wrap: break-word; font: inherit; color: var(--dim); }
+.ah-detail-box .ah-file, .ah-detail-box .ah-code { color: var(--dim); word-break: break-all; }
 .av-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
 .av-table { border-collapse: collapse; width: 100%; font-size: 14px; }
 .av-table th { text-align: left; color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.av-table td { word-break: keep-all; overflow-wrap: break-word; }   /* 단어(띄어쓰기) 단위로 줄을 바꾸고, 한 단어가 칸보다 길 때만 그 단어를 끊는다 */
 .av-table td, .av-table th { padding: 4px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .av-table.fixed { table-layout: fixed; width: auto; }
-.av-table.fixed td { overflow-wrap: anywhere; }
+.av-table.fixed td { overflow-wrap: break-word; }
 .av-table th .av-rz { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; touch-action: none; z-index: 2; }
 .av-table th .av-rz:hover, .av-table th .av-rz.drag { background: var(--accent); opacity: .5; }
 .av-table td.code { font-weight: 700; white-space: nowrap; }
-.av-table td.msg { color: var(--dim); word-break: break-word; }
+.av-table td.msg { color: var(--dim); }
 .av-table td.last, .av-table td.cnt { white-space: nowrap; }
 .av-table td.cnt { text-align: right; }
 .av-table tr.lvl-HH td.lvl, .av-table tr.lvl-H td.lvl { color: var(--bad); font-weight: 700; }
@@ -76,6 +107,9 @@ h2 small { font-weight: 400; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .brand { font-weight: 700; text-align: center; padding: 4px 0 8px; color: var(--accent); }
 .menu-item { width: 100%; text-align: center; }
+.menu-item { position: relative; }
+.menu-badge { display: inline-block; margin-left: 6px; vertical-align: middle; min-width: 18px; padding: 0 5px; text-align: center; border-radius: 999px; background: var(--warn); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; }
+.menu-badge.hot { background: var(--bad); }
 #themeBtn, #addRobotBtn { white-space: pre-line; }  /* theme.js 의 \n 으로 두 줄 표시 */
 .menu-item.active { border-color: var(--accent); color: var(--accent); }
 .alarmbar { grid-area: alarm; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -119,7 +153,7 @@ h2 small { font-weight: 400; }
 .alarm-scroll td, .alarm-scroll th { padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .alarm-scroll td.time, .alarm-scroll td.state { white-space: nowrap; }
 .alarm-scroll td.time { color: var(--dim); }
-.alarm-scroll td.msg { word-break: break-word; }
+.alarm-scroll td.msg { word-break: keep-all; overflow-wrap: break-word; }   /* 단어(띄어쓰기) 단위로 줄바꿈, 한 단어가 칸보다 길 때만 끊는다 */
 .alarm-scroll tr.lvl-HH td.msg, .alarm-scroll tr.lvl-H td.msg { color: var(--bad); }
 .alarm-scroll tr.lvl-HH td.msg { font-weight: 700; }
 .alarm-scroll tr.lvl-L td.msg { color: var(--warn); }

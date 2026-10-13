@@ -13,7 +13,7 @@
     root.style.colorScheme = theme;
     const btn = document.getElementById('themeBtn');
     if (btn) {
-      btn.textContent = theme === 'dark' ? '라이트\n모드' : '다크\n모드';
+      btn.textContent = theme === 'dark' ? 'Light\nMode' : 'Dark\nMode';
       btn.title = theme === 'dark' ? '밝은 화면으로 전환합니다' : '어두운 화면으로 전환합니다';
     }
     document.dispatchEvent(new CustomEvent('themechange', { detail: theme }));

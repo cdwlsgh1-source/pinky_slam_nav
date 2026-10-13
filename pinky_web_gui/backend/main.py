@@ -10,11 +10,13 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .alarmcatalog import CatalogError, CatalogStore
+from . import alarmquery
 from .alarmlog import AlarmHistory
 from .alarms import LEVELS, AlarmManager
 from .auth import COOKIE, MANAGER, SESSION_SEC, OPERATOR, Auth
@@ -665,18 +667,82 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
             return denied
         return catalog_apply(request, code, lambda: catalog_store.reset(code), '되돌리기')
 
-    @app.get('/api/alarms/history')
-    async def api_alarm_history(request: Request, date: str = None, limit: int = 100):
-        """저장된 알람 이력 (최신이 앞, operator 이상). date=YYYY-MM-DD 로 그날 것만, limit 은 최대 1000. 모니터링 화면의 100건 제한과 무관하다."""
+    def history_denied(request):
+        """이력 조회 공통 검사: operator 이상, 이력 저장이 켜져 있어야 한다."""
         denied = require(request, OPERATOR)
         if denied:
             return denied
         if alarm_history is None:
             return JSONResponse({'error': '알람 이력 저장이 꺼져 있습니다 (alarm_history_dir)'}, status_code=404)
+        return None
+
+    @app.get('/api/alarms/history')
+    async def api_alarm_history(request: Request, date: str = None, limit: int = None, view: str = None, robot: str = None, level: str = None,
+                                state: str = None, code: str = None, q: str = None, before: str = None, frm: str = Query(None, alias='from'), to: str = None):
+        """저장된 알람 이력 (최신이 앞, operator 이상).
+        기본(view 없음, view=events): 이벤트 줄 단위. date=YYYY-MM-DD 로 그날 것만, limit 은 최대 1000 (기본 100). 모니터링 화면의 100건 제한과 무관하다.
+        view=alarms (Alarm 화면, Step A7): 알람 한 건당 한 행으로 묶은 결과 {alarms, next}. from/to(YYYY-MM-DD, 발생 날짜), robot, level(쉼표로 여러 개), state(active|acknowledged|cleared|uncleared),
+          code, q(메시지·detail 검색), limit(1~200, 기본 200), before(이전 응답의 next). 잘못된 값은 400."""
+        denied = history_denied(request)
+        if denied:
+            return denied
+        if view in (None, 'events'):
+            try:
+                return {'records': alarm_history.read(date, 100 if limit is None else limit)}
+            except ValueError as e:
+                return JSONResponse({'error': str(e)}, status_code=400)
+        if view != 'alarms':
+            return JSONResponse({'error': 'view 는 events 또는 alarms 여야 합니다'}, status_code=400)
         try:
-            return {'records': alarm_history.read(date, limit)}
-        except ValueError as e:
+            flt = alarmquery.parse_filter(frm, to, robot, level, state, code, q)
+            n = alarmquery.parse_limit(limit)
+            cursor = alarmquery.parse_cursor(before)
+        except alarmquery.QueryError as e:
             return JSONResponse({'error': str(e)}, status_code=400)
+        return await run_in_threadpool(alarm_history.alarms, flt, n, cursor, alarms.live())
+
+    @app.get('/api/alarms/history/export')
+    async def api_alarm_history_export(request: Request, robot: str = None, level: str = None, state: str = None, code: str = None, q: str = None,
+                                       frm: str = Query(None, alias='from'), to: str = None):
+        """지금 조건에 맞는 알람을 CSV 로 내려받는다 (operator 이상). 조건은 view=alarms 와 같고 limit/before 는 없다. UTF-8 BOM 이 붙어 스프레드시트에서 한글이 깨지지 않는다.
+        최대 alarmquery.EXPORT_MAX 행이고 넘으면 잘라서 주며 헤더 X-Export-Truncated: 1 로 알린다 (X-Export-Rows 는 실제 행 수)."""
+        denied = history_denied(request)
+        if denied:
+            return denied
+        try:
+            flt = alarmquery.parse_filter(frm, to, robot, level, state, code, q)
+        except alarmquery.QueryError as e:
+            return JSONResponse({'error': str(e)}, status_code=400)
+        rows, truncated = await run_in_threadpool(alarm_history.export_rows, flt, alarms.live(), alarmquery.EXPORT_MAX)
+        span = (frm or 'all') + ('_' + to if to and to != frm else '')
+        headers = {'Content-Disposition': 'attachment; filename="alarms_%s.csv"' % span, 'X-Export-Rows': str(len(rows)), 'X-Export-Truncated': '1' if truncated else '0',
+                   'Access-Control-Expose-Headers': 'X-Export-Rows, X-Export-Truncated'}
+        return Response(alarmquery.to_csv(rows).encode('utf-8'), media_type='text/csv; charset=utf-8', headers=headers)
+
+    @app.get('/api/alarms/history/summary')
+    async def api_alarm_history_summary(request: Request):
+        """이력 파일 요약 (operator 이상): {enabled, dir, chunk, files:[{name, date, started, seq, records, alarms, size}], total_files, total_events, total_alarms}.
+        이력 저장이 꺼져 있어도 404 가 아니라 {enabled: false} 를 돌려준다 (Alarm 화면이 안내만 보이려고 부른다)."""
+        denied = require(request, OPERATOR)
+        if denied:
+            return denied
+        if alarm_history is None:
+            return {'enabled': False}
+        return {'enabled': True, **await run_in_threadpool(alarm_history.summary)}
+
+    @app.get('/api/alarms/history/{alarm_id}/events')
+    async def api_alarm_history_events(request: Request, alarm_id: int, t_raised: float):
+        """알람 한 건의 모든 이벤트 줄 (타임라인, operator 이상). id 는 서버를 다시 켜면 겹치므로 발생 시각 t_raised 도 함께 받는다 (행의 값 그대로).
+        {alarm: 묶은 행, events: [일어난 순서의 줄, 줄마다 file]}. 없으면 404."""
+        denied = history_denied(request)
+        if denied:
+            return denied
+        if not math.isfinite(t_raised):
+            return JSONResponse({'error': 't_raised 가 올바르지 않습니다'}, status_code=400)
+        events = await run_in_threadpool(alarm_history.events_of, alarm_id, t_raised)
+        if not events:
+            return JSONResponse({'error': '이력에서 그 알람을 찾을 수 없습니다'}, status_code=404)
+        return {'alarm': alarmquery.build(events, alarms.live()), 'events': events}
 
     @app.get('/api/alarms/history/files')
     async def api_alarm_history_files(request: Request):

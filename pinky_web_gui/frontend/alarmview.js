@@ -1,5 +1,5 @@
 // Alarm 화면의 순수 함수들 (DOM 없음). app.js 가 쓰고 테스트에서도 불러 쓴다.
-// Catalog 탭(A4 표시, A5 편집)만이다. History 탭(A7)이 같은 파일에 순수 함수를 더한다.
+// Catalog 탭(A4 표시, A5 편집)과 History 탭(A7, 저장된 전체 알람 이력)의 순수 함수.
 // 편집 검증은 서버(backend/alarmcatalog.py)와 같은 규칙·같은 한국어 문구다. 화면의 검사는 빨리 알려 주려는 것이고 최종 판단은 서버가 한다.
 // 고정 문구는 한국어이고 한 곳(TEXT)에 모은다 (PRD 공통 원칙 7). 알람 이름·조건·메시지는 서버가 주는 값이다.
 const AlarmView = (() => {
@@ -19,6 +19,23 @@ const AlarmView = (() => {
     localError: (why) => '저장된 변경을 읽지 못해 기본값을 쓰는 중입니다 (' + why + ')',
     oldServer: '서버가 알람 카탈로그를 지원하지 않습니다. 서버가 이전 버전으로 떠 있으니 GUI 서버를 다시 시작하세요',
     loadFailed: (why) => '카탈로그를 받지 못했습니다 (' + why + ')',
+  };
+  // History 탭의 고정 문구 (PRD 8-5절). 버튼 이름(Apply, Reset, Load more, Export CSV, Show files, Hide files)만 영문이다. 알람 문구는 서버가 만든 값이다.
+  const H = {
+    from: '시작', to: '끝', robot: '로봇', level: '레벨', state: '상태', code: '코드', search: '검색', allRobots: '전체', allStates: '전체',
+    head: ['발생', '로봇', '레벨', '메시지', '상태', '횟수', '확인', '해소', '지속 시간'],
+    states: { active: '활성', acknowledged: '확인됨', cleared: '해소', uncleared: '해소 기록 없음' },
+    empty: '알람이 없습니다', off: '이력 저장이 꺼져 있습니다',
+    note: (n, total) => '최신 ' + n + '건' + (total == null ? '' : ' (전체 ' + total + '건)'),
+    exportCap: (n) => '내보내기는 ' + n + '행까지입니다',
+    exported: (n) => n + '행을 내려받았습니다',
+    summary: (s) => '저장 폴더 ' + s.dir + ' · 파일 ' + s.total_files + '개 · 알람 ' + s.total_alarms + '건',
+    fileLine: (f) => f.name + ' · 알람 ' + f.alarms + '건 · 이벤트 ' + f.records + '줄',
+    showFiles: 'Show files', hideFiles: 'Hide files',
+    timeline: '타임라인', raised: '발생', repeated: '반복', acked: '확인', cleared: '해소', detail: '상세', file: '파일', code2: '코드',
+    loading: '불러오는 중입니다', failed: (why) => '이력을 받지 못했습니다 (' + why + ')', detailFailed: (why) => '상세를 받지 못했습니다 (' + why + ')',
+    pinTip: '지금 활성인 알람 (맨 위에 고정)', unclearedTip: '서버가 꺼져 해소 기록이 남지 않았습니다. 지금은 서버 메모리에 없는 알람입니다',
+    ongoing: '진행 중',
   };
   const LEVEL_RANK = { HH: 0, H: 1, L: 2, LL: 3, info: 4 };
 
@@ -115,6 +132,59 @@ const AlarmView = (() => {
   // 소리 낼 알람인가 (정책이 sound:false 이면 소리 대상이 아니다)
   const soundOn = (policy, code) => !(policy && policy[code] && policy[code].sound === false);
 
-  return { TEXT, match, filter, sort, stamp, clock, cells, validateMessage, parseRepeat, soundText, diffPatch, applyPolicy, soundOn, REPEAT_MIN, REPEAT_MAX, MESSAGE_MAX };
+  // ---- History 탭 ----
+  const keyOf = (a) => a.id + '@' + a.t_raised;   // 서버를 다시 켜면 id 가 겹치므로 (id, t_raised) 쌍이 알람의 이름이다
+  // 서버 메모리의 알람(app.alarms 의 서버 알람)을 이력 행의 상태 이름으로
+  const liveState = (a) => (a.state === 'active' ? (a.acked_by != null ? 'acknowledged' : 'active') : 'cleared');
+  // 메모리 알람 -> 이력 표의 행 모양 (이력 쪽 값은 서버가 만든다: events 와 file 은 모른다)
+  function liveRow(a) {
+    return { id: a.id, t_raised: a.t_raised, code: a.code, level: a.level, robot: a.robot, text: a.text, detail: a.detail || '', state: liveState(a), count: a.count || 1,
+      acked_by: a.acked_by, acked_at: a.acked_at, t_last: a.t_last, t_cleared: a.t_cleared, duration: a.state === 'cleared' && a.level !== 'info' && a.t_cleared != null ? Math.round((a.t_cleared - a.t_raised) * 10) / 10 : null, live: true };
+  }
+  // 고정해 보일 알람인가: 서버 알람이고 (브라우저 전용 알람은 서버가 모른다) info 가 아닌 active. info 는 해소 개념이 없는 기록이다
+  const pinnable = (a) => !a.local && a.state === 'active';
+  // 필터 f: {robot, levels:[], state, code, q}. 기간은 서버가 이력에 건다. 고정 알람에는 기간을 걸지 않는다 (아직 살아 있는 알람은 며칠 전 것이어도 보여야 한다)
+  function matchRow(r, f) {
+    if (f.robot && r.robot !== f.robot) return false;
+    if (f.levels && f.levels.length && !f.levels.includes(r.level)) return false;
+    if (f.state && r.state !== f.state) return false;
+    if (f.code && r.code !== f.code) return false;
+    const q = (f.q || '').trim().toLowerCase();
+    if (q && !((r.text || '') + '\n' + (r.detail || '')).toLowerCase().includes(q)) return false;
+    return true;
+  }
+  // 고정 알람 + 이력 -> 표에 보일 행. 같은 알람은 한 번만 (고정 쪽이 실시간이라 우선). 고정 알람은 최신 발생이 위
+  function mergeRows(pinned, rows) {
+    const seen = new Set(pinned.map(keyOf));
+    return { pinned: pinned.slice().sort((a, b) => b.t_raised - a.t_raised), rows: rows.filter((r) => !seen.has(keyOf(r))) };
+  }
+  // 서버 조회 쿼리 문자열. f: {from, to, robot, levels:[], state, code, q}, extra: {limit, before}
+  function historyQuery(f, extra) {
+    const p = new URLSearchParams();
+    for (const [k, v] of [['from', f.from], ['to', f.to], ['robot', f.robot], ['state', f.state], ['code', (f.code || '').trim().toUpperCase()], ['q', (f.q || '').trim()]]) if (v) p.set(k, v);
+    if (f.levels && f.levels.length) p.set('level', f.levels.join(','));
+    for (const [k, v] of Object.entries(extra || {})) if (v != null && v !== '') p.set(k, String(v));
+    return p.toString();
+  }
+  const today = (d) => { d = d || new Date(); return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()); };
+  function durationText(sec) {
+    if (sec == null) return TEXT.never;
+    const s = Math.round(sec);
+    if (s < 60) return (Math.round(sec * 10) / 10) + '초';
+    const m = Math.floor(s / 60), h = Math.floor(m / 60);
+    return h ? h + '시간 ' + two(m % 60) + '분' : m + '분 ' + two(s % 60) + '초';
+  }
+  // 표 한 줄의 텍스트 (열 순서: H.head). 해소 기록이 없으면 해소·지속 시간은 비워 둔다
+  function historyCells(r) {
+    return [stamp(r.t_raised), r.robot || TEXT.never, r.level, r.text, H.states[r.state] || r.state, String(r.count),
+      r.acked_by ? r.acked_by + ' ' + clock(r.acked_at) : TEXT.never, r.state === 'cleared' ? clock(r.t_cleared) : TEXT.never,
+      r.state === 'cleared' ? durationText(r.duration) : (r.state === 'active' || r.state === 'acknowledged' ? H.ongoing : TEXT.never)];
+  }
+  // 상세 타임라인 한 줄: '10:01:02  반복  (oper)  문구'
+  function timelineLine(e) {
+    return [stamp(e.t), H[e.event] || e.event, e.acked_by && e.event === 'acked' ? '(' + e.acked_by + ')' : '', e.event === 'acked' ? '' : (e.count > 1 && e.event === 'repeated' ? '×' + e.count : '')].filter(Boolean).join('  ');
+  }
+
+  return { TEXT, H, keyOf, liveState, liveRow, pinnable, matchRow, mergeRows, historyQuery, today, durationText, historyCells, timelineLine, match, filter, sort, stamp, clock, cells, validateMessage, parseRepeat, soundText, diffPatch, applyPolicy, soundOn, REPEAT_MIN, REPEAT_MAX, MESSAGE_MAX };
 })();
 if (typeof module !== 'undefined') module.exports = AlarmView;

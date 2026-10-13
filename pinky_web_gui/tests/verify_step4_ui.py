@@ -119,7 +119,7 @@ async def run(shot, zone_shot, scan_shot):
 
             # ---- 구역 영역 (FR4-1) 과 배지 (FR4-2): 비어 있음 ----
             chip = lambda: pg.js("document.getElementById('zoneChip').textContent")  # noqa: E731
-            check('배지: 구역 비어 있음', await chip() == '구역: 비어 있음', await chip())
+            check('배지: 구역 비어 있음', await chip() == 'Zone: Free', await chip())
             check('구역 영역이 초안임을 배지 툴팁으로 알림', await pg.js("document.getElementById('zoneChip').title.includes('초안')"))
             rect = await pg.js("app.zoneCfg.rect")
             check('구역 사각형 = 구역 지점 경계 + 여유', abs(rect['x_min'] - 0.85) < 1e-9 and abs(rect['y_max'] - 0.25) < 1e-9, rect)
@@ -136,15 +136,15 @@ async def run(shot, zone_shot, scan_shot):
             api('POST', '/api/robots/pinky1/command', {'cmd': 'goto', 'points': ['P3', 'P6']})
             api('POST', '/api/robots/pinky2/command', {'cmd': 'goto', 'points': ['P4', 'P2']})
             check('구역 점유 시 배지가 점유자와 시간을 표시',
-                  await pg.wait("/^구역: pinky[12] 점유 중 \\(\\d+초\\)$/.test(document.getElementById('zoneChip').textContent)", 25), await chip())
+                  await pg.wait("/^Zone: pinky[12] held \\(\\d+s\\)$/.test(document.getElementById('zoneChip').textContent)", 25), await chip())
             await asyncio.sleep(0.4)
             occ_px = await px()
             redness = lambda c: c[0] - (c[1] + c[2]) / 2  # noqa: E731
             check('점유 중 구역 영역이 빨갛게 칠해짐', redness(occ_px) - redness(free_px) >= 20, (free_px, occ_px))
             check('배지 level=bad', await pg.js("document.getElementById('zoneChip').dataset.level") == 'bad')
-            t1 = await pg.js("(() => { const m = document.getElementById('zoneChip').textContent.match(/\\((\\d+)초\\)/); return +m[1]; })()")
+            t1 = await pg.js("(() => { const m = document.getElementById('zoneChip').textContent.match(/\\((\\d+)s\\)/); return +m[1]; })()")
             await asyncio.sleep(2.2)
-            t2 = await pg.js("(() => { const m = document.getElementById('zoneChip').textContent.match(/\\((\\d+)초\\)/); return m ? +m[1] : -1; })()")
+            t2 = await pg.js("(() => { const m = document.getElementById('zoneChip').textContent.match(/\\((\\d+)s\\)/); return m ? +m[1] : -1; })()")
             check('점유 시간이 계속 늘어남', t2 > t1 or t2 == -1, (t1, t2))
 
             check('한 대가 WAITING_ZONE 이 됨', await pg.wait("Object.keys(__seen).some(k => k.endsWith(':WAITING_ZONE'))", 25), await pg.js('JSON.stringify(__seen)'))
@@ -158,8 +158,8 @@ async def run(shot, zone_shot, scan_shot):
                 shot = None
             await pg.js("window.__keepWaiting = 1")
             check('모든 작업이 끝나면 구역이 비어 있음으로 돌아옴',
-                  await pg.wait("document.getElementById('zoneChip').textContent === '구역: 비어 있음' && Object.keys(__seen).filter(k => k.endsWith(':DONE')).length === 0 ? false : "
-                                "(app.robots.pinky1.patrol.state === 'DONE' && app.robots.pinky2.patrol.state === 'DONE' && document.getElementById('zoneChip').textContent === '구역: 비어 있음')", 90))
+                  await pg.wait("document.getElementById('zoneChip').textContent === 'Zone: Free' && Object.keys(__seen).filter(k => k.endsWith(':DONE')).length === 0 ? false : "
+                                "(app.robots.pinky1.patrol.state === 'DONE' && app.robots.pinky2.patrol.state === 'DONE' && document.getElementById('zoneChip').textContent === 'Zone: Free')", 90))
             await asyncio.sleep(0.6)
             back_px = await px()
             check('구역 영역 색이 원래대로', abs(back_px[0] - free_px[0]) <= 3 and abs(back_px[1] - free_px[1]) <= 3, (free_px, back_px))
@@ -262,7 +262,7 @@ async def run(shot, zone_shot, scan_shot):
             # ---- 비상정지 (FR4-7, FR4-8) ----
             EST = lambda rid: f'#robotCards button.danger[data-robot="{rid}"]'  # noqa: E731
             check('상단은 "비상 정지" 하나, 로봇별 정지 버튼은 상단에 없음',
-                  await pg.js("document.getElementById('estopAll').textContent") == '비상 정지'
+                  await pg.js("document.getElementById('estopAll').textContent") == 'Emergency Stop'
                   and await pg.js("document.querySelectorAll('#estopBar button').length") == 1
                   and await pg.js("document.getElementById('estopAll').getBoundingClientRect().top < 60"))
             check('로봇 카드마다 비상 정지 버튼', await pg.js("document.querySelectorAll('#robotCards .card button.danger').length") == 2)
@@ -288,7 +288,7 @@ async def run(shot, zone_shot, scan_shot):
 
             # ---- 사이드바 탭 ----
             vis = lambda: pg.js("[...document.querySelectorAll('.sidebar > section')].filter(s => !s.hidden).map(s => s.dataset.tab)")  # noqa: E731
-            check('탭 5개: 로봇, 시스템, 경로, 조작, 좌표', await pg.js("[...document.querySelectorAll('#sideTabs .tab')].map(b => b.textContent)") == ['로봇', '시스템', '경로', '조작', '좌표'])
+            check('탭 5개: Robots, System, Route, Control, Coordinates', await pg.js("[...document.querySelectorAll('#sideTabs .tab')].map(b => b.textContent)") == ['Robots', 'System', 'Route', 'Control', 'Coordinates'])
             check('기본은 로봇 탭만 보임', await vis() == ['robots'])
             await pg.click_sel('#tab-route')
             check('경로 탭을 누르면 그 패널만 보임', await vis() == ['route'] and await pg.js("document.getElementById('tab-route').getAttribute('aria-selected')") == 'true')

@@ -1,5 +1,5 @@
 # Pinky 알람바 개선 — 단계별 PRD
-2026-10-12 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1~A5 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`, `alarm_a2_...`, `alarm_a3_...`, `alarm_a4_...`, `alarm_a5_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
+2026-10-12 · 초안 v6 (Step A7: 왼쪽 메뉴 Alarm 화면 추가, 6절 확정 결정 반영) · **Step A1~A5, A7 구현 완료(사용자 확인 대기)** (실물 확인: `../checklists/alarm_a1_real_robot_checklist.md`, `alarm_a2_...`, `alarm_a3_...`, `alarm_a4_...`, `alarm_a5_...`, `alarm_a7_real_robot_checklist.md`) (알람 레벨 5단계, 사운드 파일 업로드·시험 재생, GUI 전체 영문(EN) 표시, 알람 문구는 한영 혼용 허용. 결정이 필요한 항목은 6절)
 
 ## 0. 공통 개요
 ### 0-1 배경과 문제
@@ -271,14 +271,16 @@ CLAUDE.md, backend/auth.py, backend/alarms.py, backend/logstore 계열(로그 �
 | FRA7-15 | `docs/interfaces.md` 6-7절에 새 API 를 기록하고, `README.md` 의 화면 구성에 Alarm 화면을 추가한다 |
 
 ### 완료 기준
-- [ ] 단위 테스트: 이벤트 줄 묶기(raised/repeated/acked/cleared → 한 행, 시도마다 한 줄), 필터(기간·로봇·레벨·상태·코드·검색), 페이지 표지, 해소 줄이 없는 알람이 `Uncleared` 로 나오고 서버 메모리에 살아 있는 알람만 `Active` 로 나옴, 서버를 재시작해 `id` 가 겹쳐도 `(id, t_raised)` 로 서로 다른 알람으로 묶임, 깨진 줄 건너뛰기, 잘못된 파라미터 400
-- [ ] mock 으로 알람 수백 건을 만들어(100건 제한을 넘기고 이력 파일이 여러 개) Alarm 화면에서 오래된 알람까지 보이고 `Load more` 가 동작
-- [ ] 필터·검색 결과가 서버 응답과 일치, 새로고침 뒤에도 선택한 화면 유지
-- [ ] active 알람이 맨 위에 고정되고 실시간으로 Cleared 로 바뀜. 메뉴 배지가 active 수를 따라감
-- [ ] 상세에서 이벤트 타임라인이 이력 파일과 같음, CSV 가 스프레드시트로 열림(한글 깨짐 없음)
-- [ ] 메인 화면의 알람바와 비상 정지가 이 화면에서도 보이고 눌림, 좁은 화면(860px 이하)에서 가로 스크롤 없음 (headless Chrome 스크린샷)
-- [ ] 화면 고정 문구가 8-5절의 한국어 문구와 같음 (영문 잔존 없음)
+- [x] 단위 테스트: 이벤트 줄 묶기(raised/repeated/acked/cleared → 한 행, 시도마다 한 줄), 필터(기간·로봇·레벨·상태·코드·검색), 페이지 표지, 해소 줄이 없는 알람이 `Uncleared` 로 나오고 서버 메모리에 살아 있는 알람만 `Active` 로 나옴, 서버를 재시작해 `id` 가 겹쳐도 `(id, t_raised)` 로 서로 다른 알람으로 묶임, 깨진 줄 건너뛰기, 잘못된 파라미터 400
+- [x] mock 으로 알람 수백 건을 만들어(100건 제한을 넘기고 이력 파일이 여러 개) Alarm 화면에서 오래된 알람까지 보이고 `Load more` 가 동작
+- [x] 필터·검색 결과가 서버 응답과 일치, 새로고침 뒤에도 선택한 화면 유지
+- [x] active 알람이 맨 위에 고정되고 실시간으로 Cleared 로 바뀜. 메뉴 배지가 active 수를 따라감
+- [x] 상세에서 이벤트 타임라인이 이력 파일과 같음, CSV 가 스프레드시트로 열림(한글 깨짐 없음)
+- [x] 메인 화면의 알람바와 비상 정지가 이 화면에서도 보이고 눌림, 좁은 화면(860px 이하)에서 가로 스크롤 없음 (headless Chrome 스크린샷)
+- [x] 화면 고정 문구가 8-5절 (사용자 결정으로 버튼 이름은 영문, 결정 22)의 한국어 문구와 같음 (영문 잔존 없음)
 - [ ] 실제 로봇 확인은 사용자가 수행 (체크리스트에 항목 추가)
+
+**구현 메모 (A7)**: 서버는 `backend/alarmquery.py`(순수 함수: 조건 해석·검사, 이벤트 줄 묶기, 상태 판정, 필터, CSV)와 `AlarmHistory.alarms/export_rows/events_of/summary`(`backend/alarmlog.py`)로 이력을 알람 한 건당 한 행으로 묶는다. 파일을 **최신부터 한 개씩**(파일 하나는 1000줄 이하) 읽고 필요한 만큼에서 멈춘다. 알람의 뒤 이벤트가 더 최신 파일에 있어도 `(id, t_raised)` 로 이어 붙이고, 기간 시작일보다 이른 날짜의 파일은 열지 않는다. 다음 쪽(`before`)은 새 파일의 뒤 이벤트를 다시 읽는 비용이 든다(파일 수에 비례). 설계 결정 — (1) **State 4가지**: `active`(서버 메모리의 `(id, t_raised)` 와 일치하고 ACK 안 됨), `acknowledged`(일치하고 ACK 됨), `cleared`, `uncleared`(해소 기록 없음, 메모리에도 없음). 해소 여부는 마지막 줄의 `state`/`t_cleared` 로 본다(해소된 알람을 나중에 ACK 하면 마지막 줄의 `event` 가 `acked` 라서 `event` 로 보면 `uncleared` 로 잘못 읽힌다). (2) **API**: `GET /api/alarms/history?view=alarms&from=&to=&robot=&level=&state=&code=&q=&limit=&before=`(`from`/`to` 는 `YYYY-MM-DD`, 발생 날짜, 서버 PC 현지, 1~366일), `level`/`state` 는 쉼표로 여러 개, `limit` 1~200 기본 200, `q` 100글자까지, 잘못된 값은 400. `view` 가 없으면 기존 이벤트 단위 응답 그대로. `GET /api/alarms/history/{id}/events?t_raised=`(타임라인), `GET /api/alarms/history/export`(CSV, UTF-8 BOM, 최대 10000행, 넘으면 헤더 `X-Export-Truncated: 1`), `GET /api/alarms/history/summary`(파일별 이벤트·알람 수, 저장이 꺼져 있으면 `{enabled:false}`). 모두 operator 이상, 무거운 읽기는 스레드 풀에서 돈다. (3) **고정 알람**: 서버 메모리의 active 알람은 기간 조건과 무관하게 맨 위에 두고(며칠 전 알람도 살아 있으면 보인다) 로봇·레벨·상태·코드·검색 조건은 건다. 해소되어도 그 자리에서 `해소` 로 바뀌고, 다시 조회하면 이력으로 내려간다. 이력과 같은 알람은 `(id, t_raised)` 로 한 번만 보인다. (4) **배지**: 메뉴 `Alarm` 옆에 지금 `active` 인 서버 알람 수(ACK 했어도 해소 전이면 센다). HH/H 가 있으면 빨강, 그 밖에는 주황, 하나도 없으면 숨긴다. (5) **화면 유지**: 보던 화면과 탭을 `localStorage`(`pinky.view`, `pinky.alarmTab`)에 둔다(try/catch). 기본 탭은 History. (6) CSV 열은 FRA7-4 에서 `확인` 을 계정·시각 둘로 나누고 `코드` 를 더했다. 수식으로 읽힐 수 있는 칸(`=`, `+`, `-`, `@` 로 시작)은 앞에 `'` 를 붙인다. (7) 요약의 알람 수는 `raised` 줄 수다(닫힌 파일은 캐시). (8) 기간의 기본값(오늘)은 화면이 채우고 API 는 조건이 없으면 전체를 본다. 화면의 오늘은 브라우저 시계, 서버의 기간은 서버 PC 시계다. 검증: `tests/test_alarmquery.py`(55건), `tests/alarmview_cases.js`, `tests/verify_alarm_history_ui.py`(알람 330건 이상·파일 14개, 스크린샷 `docs/alarm_a7.png`, `docs/alarm_a7_narrow.png`).
 
 ### Claude Code 프롬프트
 
@@ -332,6 +334,7 @@ G1→A1, G2→A2, G3→A3, G4→A4·A5, G5→A1, G6→A6, G7→A7(알람 화면�
 19. 반복되는 알람의 정의 → **확정(사용자 결정, A2 재작업): 묶되 ACK 이후는 새 행.** 같은 `code`+`robot` 이 active 이고 ACK 안 됐으면 새 행 없이 `×N`(`count`)으로 묶고, ACK 했거나 해소된 뒤에 또 생기면 새 행(새 `id`)이다. 이력 파일은 시간 순서로 줄을 추가만 한다. **이력에는 시도 하나하나를 시간 순서로 모두 남긴다(사용자 결정: 언제 어떤 조작을 했는지 트러블슈팅에 필요)**: 화면은 `×N` 으로 묶어도 반복마다 `repeated` 줄이 한 줄씩 쌓이며 조작·수신 이벤트 구분은 없다. 연타 때 파일이 빨리 차는 것은 감수한다
 20. ACK 한 알람과 SIL 대상 → **A2 구현**: ACK 는 `state` 를 바꾸지 않고 `acked_by/acked_at` 만 채운다. 해소된 알람이 ACK 되어 있으면 알람바에서 숨기고(메모리·이력 파일에는 남음), 활성 알람은 `Acknowledged <계정> <시각>` 으로 계속 보인다. SIL 은 ACK 안 된 활성 알람(소리가 나는 알람)이 있을 때만 켜지고, 새 서버 알람 행이 생기거나 같은 알람이 또 일어나면(`count` 증가) 풀린다
 21. 이력 파일 크기와 이름 → **확정(사용자 결정, A2 후속)**: 알람바는 100건 유지, 이력 파일은 **파일당 1000줄**, 가득 차면 **그 시점의 시각**으로 새 파일(`alarms_YYYY-MM-DD_HHMMSS.jsonl`). 기록은 이벤트마다 즉시 추가(넘칠 때 몰아 저장하지 않음). 예전 번호 이름 파일도 읽는다
+22. **버튼 이름은 영문 (사용자 결정, A7)**: Alarm 화면과 그 메뉴·탭의 버튼 이름은 영문이다 — 메뉴 `Alarm`, 탭 `History`/`Catalog`, `Apply`, `Reset`, `Export CSV`, `Load more`, `Show files`/`Hide files`. 열 제목·상태·필터 라벨·안내 문구는 한국어(8-5절)다. **후속 지시로 범위 확대**: 왼쪽 메뉴 전체(`Main`, `Log`, `Alarm`, `Points`, `Edit Layout`(편집 중 `Done`/`Reset`/`Cancel`), `Add Robot`, `Dark Mode`/`Light Mode`, `Switch Account`, `Logout`)와 `알람소리` → `Alarm Sound` 도 영문이다. 카탈로그 탭의 `새로고침`/`초기화`/`편집`, 편집창·소리 설정창·로봇 카드 등 화면 안의 버튼은 지시가 없어 한국어 그대로다. 또 History·Catalog 표는 열 너비 조절(`pinky.ahColWidths`/`pinky.avColWidths`)과 단어 단위 줄바꿈(`word-break: keep-all`)을 갖는다 **(추가 확대)** 이후 화면 전체의 버튼·탭·상태 칩 이름도 영문으로 맞췄다 — 사이드바 탭 `Robots`/`System`/`Route`/`Control`/`Coordinates`, `Emergency Stop`, `Start Patrol`/`Stop Patrol`/`Go to Route`, `Start All`/`Stop All`, 알람바 `Hide Info`/`Show Info`, 칩 `Connected`/`Zone: Free` 등. 설명 문장·안내문·메시지는 계속 한국어다.
 
 ## 7. 권장 진행 순서
 A1 → A7(Alarm 화면, 결정 17) → A2 → A3 → A4 → A5. (A6 영문화는 철회.) A1 은 데이터 구조가 이후 모두의 기반이므로 먼저 검토·확정.
@@ -379,11 +382,11 @@ A1 → A7(Alarm 화면, 결정 17) → A2 → A3 → A4 → A5. (A6 영문화는
 ### 8-5 Alarm 화면 (Step A7)
 | 요소 | 문구 |
 |---|---|
-| 메뉴 버튼 | 알람 |
-| 탭 | 이력 / 카탈로그 |
+| 메뉴 버튼 | Alarm (결정 22: 버튼 이름은 영문) |
+| 탭 | History / Catalog |
 | 열 제목 | 발생 / 로봇 / 레벨 / 메시지 / 상태 / 횟수 / 해소 / 지속 시간 |
 | 상태 | 활성 / 해소 / 확인됨 / 해소 기록 없음 |
-| 필터 | 시작 / 끝 / 로봇 / 레벨 / 상태 / 코드 / 검색 / 적용 / 초기화 |
-| 버튼 | 더 보기 / CSV 내보내기 / 파일 보기 / 파일 숨기기 |
+| 필터 | 시작 / 끝 / 로봇 / 레벨 / 상태 / 코드 / 검색 (버튼은 Apply / Reset) |
+| 버튼 | Load more / Export CSV / Show files / Hide files / Apply / Reset (결정 22) |
 | 상세 | 타임라인 / 발생 / 반복 / 해소 / 상세 / 파일 |
 | 안내 | 알람이 없습니다 / 이력 저장이 꺼져 있습니다 / 최신 N건 (전체 M건) / 내보내기는 N행까지입니다 |

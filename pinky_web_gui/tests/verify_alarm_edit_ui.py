@@ -107,6 +107,7 @@ async def run(shot, narrow_shot):
 
             async def open_alarm_screen():
                 await pg.click_sel('#alarmMenu')
+                await pg.click_sel('#avTabCatalog')   # 기본 탭은 History (Step A7)
                 return await pg.wait("!document.getElementById('alarmView').hidden && document.querySelectorAll('#avBody tr').length > 0", 5)
 
             async def edit(code):

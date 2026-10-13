@@ -8,10 +8,10 @@
   // FR4-2: 상단 구역 배지. info 는 서버의 zone_info/zone 메시지({state, holder, held_sec}), recvMs 는 그것을 받은 시각(클라이언트 시계).
   // 점유 시간은 서버가 센 held_sec 에 '받은 뒤 지난 시간' 을 더한다 (클라이언트와 서버 시계가 달라도 맞다).
   function chip(info, nowMs, recvMs) {
-    if (!info || info.state === 'unknown' || !info.state) return { level: 'dim', text: '구역: 상태 수신 전' };
-    if (info.state === 'free') return { level: 'ok', text: '구역: 비어 있음' };
+    if (!info || info.state === 'unknown' || !info.state) return { level: 'dim', text: 'Zone: Waiting' };
+    if (info.state === 'free') return { level: 'ok', text: 'Zone: Free' };
     const held = info.held_sec == null ? null : Math.max(0, Math.floor(info.held_sec + (nowMs - recvMs) / 1000));
-    return { level: 'bad', text: '구역: ' + info.holder + ' 점유 중' + (held == null ? '' : ' (' + held + '초)') };
+    return { level: 'bad', text: 'Zone: ' + info.holder + ' held' + (held == null ? '' : ' (' + held + 's)') };
   }
 
   // FR4-3: WAITING_ZONE 로봇이 가려는 구역 안 지점. goto 는 detail 이 곧 그 지점, start 는 waypoint 가 진입 문 인덱스라서

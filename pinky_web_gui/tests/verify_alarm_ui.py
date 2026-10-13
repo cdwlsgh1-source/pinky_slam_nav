@@ -182,15 +182,15 @@ async def run(shot, narrow_shot):
 
             # ---- info 필터와 저장 ----
             info_rows = lambda: pg.js("[...document.querySelectorAll('#alarmBody tr.lvl-info')].length")  # noqa: E731
-            check('기본은 info 행이 보임', await info_rows() > 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == '기록 숨김')
+            check('기본은 info 행이 보임', await info_rows() > 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == 'Hide Info')
             await pg.click_sel('#alarmInfoBtn')
-            check('기록 숨김 을 누르면 info 행이 사라지고 버튼이 기록 표시', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == '기록 표시')
+            check('Hide Info 를 누르면 info 행이 사라지고 버튼이 Show Info', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == 'Show Info')
             check('info 가 아닌 알람은 그대로 보임', await pg.js(ROW_COUNT('ESTOP_FAILED') + ' === 1'))
             await pg.call('Page.navigate', url=BASE + '/')
             check('새로고침 뒤 다시 로드', await pg.wait("app.cfg && app.wsUp && document.querySelectorAll('#alarmBody tr').length > 0", 10))
-            check('info 숨김이 새로고침 뒤에도 유지', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == '기록 표시')
+            check('info 숨김이 새로고침 뒤에도 유지', await info_rows() == 0 and await pg.js("document.getElementById('alarmInfoBtn').textContent") == 'Show Info')
             await pg.click_sel('#alarmInfoBtn')
-            check('기록 표시 를 누르면 다시 보임', await info_rows() > 0)
+            check('Show Info 를 누르면 다시 보임', await info_rows() > 0)
 
             # ---- 브라우저 전용 알람: 서버 연결 끊김과 재연결 ----
             await pg.js("sock.close()")

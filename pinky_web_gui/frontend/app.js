@@ -107,7 +107,7 @@ function updateAlarmButtons() {
 function setAlarmPolicy(policy) {
   app.alarmPolicy = policy || {};
   updateAlarmButtons();                         // 소리 대상(SIL)이 바뀔 수 있다
-  if (!el('alarmView').hidden) loadCatalog();   // 다른 화면에서 고친 내용을 열려 있는 카탈로그에도
+  if (!el('alarmView').hidden && !el('avCatalogPane').hidden) loadCatalog();   // 다른 화면에서 고친 내용을 열려 있는 카탈로그에도
 }
 
 function renderAlarms() {
@@ -127,9 +127,10 @@ function renderAlarms() {
     body.appendChild(tr);
   }
   const btn = el('alarmInfoBtn');
-  btn.textContent = app.showInfo ? '기록 숨김' : '기록 표시';
+  btn.textContent = app.showInfo ? 'Hide Info' : 'Show Info';
   btn.setAttribute('aria-pressed', String(app.showInfo));
   updateAlarmButtons();
+  updateAlarmBadge();
 }
 
 function sortAlarms() {
@@ -145,7 +146,7 @@ function upsertAlarm(a) {
   else if (i >= 0) app.alarms[i] = a; else app.alarms.unshift(a);
   sortAlarms();
   renderAlarms();
-  if (a.local) saveLocalAlarms();
+  if (a.local) saveLocalAlarms(); else histOnAlarm(a);
 }
 
 // 브라우저 전용 알람. level 은 옛 호출처의 ok/warn/bad. extra 로 code/state 를 바꿀 수 있다.
@@ -282,10 +283,10 @@ function renderSoundDialog() {
       if (sound.info().preview === lv) sound.startPreview(lv); else sound.refresh();   // 시험 중이면 바꾼 소리로 바로 다시 들려 준다
     };
     cell(sel);
-    const test = document.createElement('button'); test.type = 'button'; test.textContent = '시험'; test.dataset.test = lv;
+    const test = document.createElement('button'); test.type = 'button'; test.textContent = 'Test'; test.dataset.test = lv;
     test.title = lv + ' 소리를 반복해서 들려 줍니다 (알람은 만들지 않습니다)';
     test.onclick = () => sound.startPreview(lv);
-    const stop = document.createElement('button'); stop.type = 'button'; stop.textContent = '정지'; stop.dataset.stop = lv; stop.disabled = true;
+    const stop = document.createElement('button'); stop.type = 'button'; stop.textContent = 'Stop'; stop.dataset.stop = lv; stop.disabled = true;
     stop.onclick = () => sound.stopPreview();
     const td = cell(test); td.appendChild(document.createTextNode(' ')); td.appendChild(stop);
     rows.appendChild(tr);
@@ -666,7 +667,7 @@ function ensureCard(id) {
   const noResp = document.createElement('p'); noResp.className = 'notice';
   const row = document.createElement('div'); row.className = 'cmd-row';
   const btns = {};
-  for (const [cmd, label] of [['start', '순찰 시작'], ['stop', '순찰 정지'], ['goto', '경로 이동']]) {
+  for (const [cmd, label] of [['start', 'Start Patrol'], ['stop', 'Stop Patrol'], ['goto', 'Go to Route']]) {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
     b.addEventListener('click', (e) => { e.stopPropagation(); onCommandClick(id, cmd); });
     btns[cmd] = b; row.appendChild(b);
@@ -674,7 +675,7 @@ function ensureCard(id) {
   // 비상 정지: 권한, online 여부, 연타 잠금과 상관없이 항상 누를 수 있다 (FR4-7). 카드 클릭(경로 대상 선택)은 막는다
   const estopRow = document.createElement('div'); estopRow.className = 'cmd-row estop-row';
   const estopBtn = document.createElement('button'); estopBtn.type = 'button'; estopBtn.className = 'danger';
-  estopBtn.textContent = '비상 정지'; estopBtn.dataset.robot = id;
+  estopBtn.textContent = 'Emergency Stop'; estopBtn.dataset.robot = id;
   estopBtn.title = id + ' 에 stop 과 cmd_vel 0 속도를 보냅니다';
   estopBtn.addEventListener('click', (e) => { e.stopPropagation(); estop(id); });
   estopRow.appendChild(estopBtn);
@@ -723,7 +724,7 @@ function renderCards() {
     c.btns.start.disabled = !ready || !PatrolView.canStart(state, r.online) || locked(id, 'start');
     c.btns.stop.disabled = !ready || !PatrolView.canStop(state, r.online) || locked(id, 'stop');
     c.btns.goto.disabled = !ready || !PatrolView.canStart(state, r.online) || !route.length || locked(id, 'goto');
-    c.btns.goto.textContent = '경로 이동' + (route.length ? ' (' + route.length + ')' : '');
+    c.btns.goto.textContent = 'Go to Route' + (route.length ? ' (' + route.length + ')' : '');
   }
   renderDrivePanel();
   renderScanInfo();
@@ -867,6 +868,7 @@ function applySnapshot(msg) {
   app.alarms = (msg.alarms || []).concat(app.alarms.filter((a) => a.local));   // 서버 알람은 접속할 때마다 통째로 바꾼다 (서버를 다시 켜면 id 가 처음부터 다시 매겨진다)
   sortAlarms();
   renderAlarms();
+  histPinReset();
   setupRoutePanel();
   setupScanToggles(); setupDrive();
   app.dirtyCards = true;
@@ -932,7 +934,7 @@ function connect() {
   sock = ws;
   ws.onopen = () => {
     if (attempt > 0) { clearLocalAlarms('SERVER_DISCONNECTED'); addAlarm('ok', '서버에 다시 연결됨', { code: 'SERVER_RECONNECTED' }); }
-    attempt = 0; app.wsUp = true; setChip('connChip', 'ok', '연결됨');
+    attempt = 0; app.wsUp = true; setChip('connChip', 'ok', 'Connected');
     // 서버는 연결이 끊기면 이 화면의 LiDAR 구독을 지운다. 켜 둔 토글은 다시 요청한다
     for (const [rid, s] of Object.entries(app.scan)) if (s.on) sendWs({ type: 'scan', robot: rid, on: true });
   };
@@ -940,7 +942,7 @@ function connect() {
   ws.onclose = () => {
     driveHalt();  // 연결이 끊기면 서버도 0 속도를 보내지만, 화면에서도 즉시 조작을 멈춘다
     if (app.wsUp || attempt === 0) addAlarm('bad', '서버 연결 끊김', { code: 'SERVER_DISCONNECTED', state: 'active' });
-    app.wsUp = false; setChip('connChip', 'bad', '연결 끊김');
+    app.wsUp = false; setChip('connChip', 'bad', 'Disconnected');
     attempt += 1;
     checkSession();  // 인증이 켜져 있고 세션이 사라졌다면(만료, 서버 재시작) 로그인 화면을 띄운다
     setTimeout(connect, Math.min(5000, 1000 * attempt)); // 1초 -> 5초까지 1초씩 늘려가며 재연결
@@ -1017,7 +1019,7 @@ async function copyText(text, btn) {
     try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
     ta.remove();
   }
-  if (btn) { const old = btn.textContent; btn.textContent = ok ? '복사됨' : '실패'; setTimeout(() => (btn.textContent = old), 900); }
+  if (btn) { const old = btn.textContent; btn.textContent = ok ? 'Copied' : 'Failed'; setTimeout(() => (btn.textContent = old), 900); }
 }
 
 function renderClicks() {
@@ -1028,9 +1030,9 @@ function renderClicks() {
     const li = document.createElement('li');
     const label = document.createElement('span'); label.textContent = 'C' + (i + 1) + '  ' + fmt(c);
     const box = document.createElement('span');
-    const cp = document.createElement('button'); cp.type = 'button'; cp.textContent = '복사';
+    const cp = document.createElement('button'); cp.type = 'button'; cp.textContent = 'Copy';
     cp.onclick = () => copyText(fmt(c), cp);
-    const del = document.createElement('button'); del.type = 'button'; del.textContent = '삭제';
+    const del = document.createElement('button'); del.type = 'button'; del.textContent = 'Delete';
     del.onclick = () => { app.clicks.splice(i, 1); renderClicks(); };
     box.append(cp, ' ', del);
     li.append(label, box);
@@ -1341,7 +1343,7 @@ function renderProcs() {
     if (!li) {
       li = document.createElement('li'); li.dataset.id = p.id;
       li.innerHTML = '<div class="proc-head"><span class="proc-name"></span><span class="proc-state"></span><span class="proc-sub"></span>' +
-        '<span class="proc-actions"><button type="button" data-act="start">시작</button><button type="button" data-act="stop">정지</button><button type="button" data-act="log">로그</button></span></div>' +
+        '<span class="proc-actions"><button type="button" data-act="start">Start</button><button type="button" data-act="stop">Stop</button><button type="button" data-act="log">Log</button></span></div>' +
         '<p class="proc-msg"></p><pre class="proc-log" hidden></pre>';
       li.querySelector('[data-act="start"]').onclick = () => procStart(app.procs.procs.find((x) => x.id === li.dataset.id));
       li.querySelector('[data-act="stop"]').onclick = () => procStop(app.procs.procs.find((x) => x.id === li.dataset.id));
@@ -1596,51 +1598,52 @@ function setupSplits() {
 }
 setupSplits();
 
-// ---------- 카탈로그 표 열 너비 조절: 머리글 경계를 끌면 그 열만 넓어지고 표는 가로로 스크롤된다 ----------
-const AV_WIDTH_KEY = 'pinky.avColWidths';
-const avCols = { w: null };   // null 이면 자동 배치, 배열이면 열 번호별 px (고정 배치)
-function avTable() { return el('avTable'); }
-function avHeads() { return Array.from(avTable().querySelectorAll('thead th')); }
-function avApplyWidths() {
-  const t = avTable();
-  if (!avCols.w) { t.classList.remove('fixed'); t.style.width = ''; avHeads().forEach((h) => { h.style.width = ''; }); return; }
-  let sum = 0;
-  avHeads().forEach((h, i) => {
-    if (h.hidden) return;
-    const w = avCols.w[i] || 70;
-    h.style.width = w + 'px'; sum += w;
-  });
-  t.classList.add('fixed'); t.style.width = sum + 'px';
-}
-function avSaveWidths() { try { localStorage.setItem(AV_WIDTH_KEY, JSON.stringify(avCols.w)); } catch (e) { /* 저장 안 돼도 화면은 동작 */ } }
-function avFreeze() {   // 처음 끌 때 현재 자동 배치 너비를 그대로 고정값으로 옮긴다
-  if (avCols.w) return;
-  avCols.w = avHeads().map((h) => (h.hidden ? 70 : Math.max(40, Math.round(h.getBoundingClientRect().width))));
-  avApplyWidths();
-}
-function setupAvResize() {
-  try { const v = JSON.parse(localStorage.getItem(AV_WIDTH_KEY) || 'null'); if (Array.isArray(v) && v.length === avHeads().length && v.every((n) => Number.isFinite(n) && n >= 40 && n <= 2000)) avCols.w = v; } catch (e) { /* 무시 */ }
-  avHeads().forEach((h, i) => {
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };   // 저장소를 못 써도 화면은 동작한다 (비공개 창 등)
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 무시 */ } };
+// ---------- 표 열 너비 조절 (Alarm 화면의 History·Catalog 표): 머리글 경계를 끌면 그 열만 넓어지고 표는 가로로 스크롤된다 ----------
+const AV_WIDTH_KEY = 'pinky.avColWidths', AH_WIDTH_KEY = 'pinky.ahColWidths';
+function makeResizable(table, key) {
+  const st = { w: null };   // null 이면 자동 배치, 배열이면 열 번호별 px (고정 배치)
+  const heads = () => Array.from(table.querySelectorAll('thead th'));
+  function apply() {
+    if (!st.w) { table.classList.remove('fixed'); table.style.width = ''; heads().forEach((h) => { h.style.width = ''; }); return; }
+    let sum = 0;
+    heads().forEach((h, i) => {
+      if (h.hidden) return;
+      const w = st.w[i] || 70;
+      h.style.width = w + 'px'; sum += w;
+    });
+    table.classList.add('fixed'); table.style.width = sum + 'px';
+  }
+  const save = () => lsSet(key, JSON.stringify(st.w));
+  function freeze() {   // 처음 끌 때 현재 자동 배치 너비를 그대로 고정값으로 옮긴다
+    if (st.w) return;
+    st.w = heads().map((h) => (h.hidden ? 70 : Math.max(40, Math.round(h.getBoundingClientRect().width))));
+    apply();
+  }
+  try { const v = JSON.parse(lsGet(key) || 'null'); if (Array.isArray(v) && v.length === heads().length && v.every((n) => Number.isFinite(n) && n >= 40 && n <= 2000)) st.w = v; } catch (e) { /* 무시 */ }
+  heads().forEach((h, i) => {
     const g = document.createElement('span');
     g.className = 'av-rz'; g.title = '끌어서 열 너비 조절 (더블클릭: 자동)';
     g.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); avFreeze();
+      e.preventDefault(); freeze();
       g.classList.add('drag');
-      const x0 = e.clientX, w0 = avCols.w[i];
-      const move = (m) => { avCols.w[i] = Math.max(40, Math.min(2000, Math.round(w0 + m.clientX - x0))); avApplyWidths(); };
+      const x0 = e.clientX, w0 = st.w[i];
+      const move = (m) => { st.w[i] = Math.max(40, Math.min(2000, Math.round(w0 + m.clientX - x0))); apply(); };
       const done = () => {   // 놓았을 때(창 밖 포함) 리스너를 걷고 저장한다
         g.classList.remove('drag');
         window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', done); window.removeEventListener('pointercancel', done);
-        avSaveWidths();
+        save();
       };
       window.addEventListener('pointermove', move); window.addEventListener('pointerup', done); window.addEventListener('pointercancel', done);
     });
-    g.addEventListener('dblclick', () => { avCols.w = null; avApplyWidths(); try { localStorage.removeItem(AV_WIDTH_KEY); } catch (e) { /* 무시 */ } });
+    g.addEventListener('dblclick', () => { st.w = null; apply(); try { localStorage.removeItem(key); } catch (e) { /* 무시 */ } });
     h.appendChild(g);
   });
-  avApplyWidths();
+  apply();
+  return { st, apply };
 }
-setupAvResize();
+const avResize = makeResizable(el('avTable'), AV_WIDTH_KEY);
 
 // ---------- 화면 전환 (메인 / 로그 / Alarm) ----------
 function setView(name) {
@@ -1652,8 +1655,9 @@ function setView(name) {
   document.querySelectorAll('.menu-item[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   document.querySelectorAll('[data-only-view]').forEach((n) => { n.hidden = n.dataset.onlyView !== name; });
   if (log) startLogs(); else stopLogs();
-  if (alarm) startCatalog(); else stopCatalog();
+  if (alarm) setAlarmTab(lsGet(AV_TAB_KEY) === 'catalog' ? 'catalog' : 'history'); else stopCatalog();
   if (!log && !alarm) resizeCanvas();
+  lsSet(VIEW_KEY, name);   // 새로고침해도 보던 화면으로 돌아온다
 }
 document.querySelectorAll('.menu-item[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
 
@@ -1680,14 +1684,14 @@ function renderCatalog() {
     });
     if (catalog.canEdit) {   // 편집 버튼은 manager 에게만 보인다 (서버가 can_edit 로 알려 준다. 눌러도 서버가 다시 권한을 확인한다)
       const td = document.createElement('td'), b = document.createElement('button');
-      td.className = 'edit'; b.type = 'button'; b.textContent = '편집'; b.dataset.code = r.code;
+      td.className = 'edit'; b.type = 'button'; b.textContent = 'Edit'; b.dataset.code = r.code;
       b.onclick = () => openCatalogEdit(r.code);
       td.appendChild(b); tr.appendChild(td);
     }
     body.appendChild(tr);
   }
   el('avEditTh').hidden = !catalog.canEdit;
-  avApplyWidths();
+  avResize.apply();
   el('avLocalErr').hidden = !catalog.localErr;
   el('avLocalErr').textContent = catalog.localErr ? AlarmView.TEXT.localError(catalog.localErr) : '';
   el('avEmpty').hidden = rows.length > 0;
@@ -1796,6 +1800,236 @@ function stopCatalog() { clearInterval(catalog.timer); catalog.timer = null; }
 el('avSearch').oninput = renderCatalog;
 el('avRefresh').onclick = loadCatalog;
 el('avReset').onclick = () => { el('avLevel').value = 'all'; el('avOrigin').value = 'all'; el('avSearch').value = ''; renderCatalog(); };
+
+// ---------- Alarm 화면: History 탭 (Step A7) ----------
+// 저장된 이력(data/alarms/)에서 알람 한 건당 한 행을 서버가 묶어 주는 대로 보여 준다. 필터는 서버가 적용하고, 지금 활성인 알람은 WS 로 받는 메모리 알람을 맨 위에 고정한다.
+const AV_TAB_KEY = 'pinky.alarmTab', VIEW_KEY = 'pinky.view';
+const hist = { rows: [], next: null, pinned: new Map(), filter: null, summary: null, err: '', busy: false, gen: 0, open: new Set(), details: new Map(), filesOpen: false, codesLoaded: false };
+
+function histFilter() {
+  return { from: el('ahFrom').value, to: el('ahTo').value, robot: el('ahRobot').value, levels: Array.from(document.querySelectorAll('input[name="ahLevel"]:checked')).map((i) => i.value),
+    state: el('ahState').value, code: el('ahCode').value, q: el('ahSearch').value };
+}
+function histSetDefaults() {
+  const t = AlarmView.today();
+  el('ahFrom').value = t; el('ahTo').value = t; el('ahRobot').value = ''; el('ahState').value = ''; el('ahCode').value = ''; el('ahSearch').value = '';
+  document.querySelectorAll('input[name="ahLevel"]').forEach((i) => { i.checked = false; });
+}
+function histFillRobots(extra) {
+  const sel = el('ahRobot'), keep = sel.value;
+  const ids = Array.from(new Set(app.order.concat(extra || [], keep ? [keep] : [])));
+  sel.replaceChildren(new Option(AlarmView.H.allRobots, ''), ...ids.map((r) => new Option(r, r)));
+  sel.value = keep;
+}
+function setupHistory() {
+  const H = AlarmView.H;
+  document.querySelectorAll('#avHistoryPane [data-t]').forEach((n) => { n.textContent = H[n.dataset.t]; });
+  el('ahSearch').placeholder = H.search;
+  el('ahHead').replaceChildren(...H.head.map((t) => { const th = document.createElement('th'); th.textContent = t; return th; }));
+  makeResizable(el('ahTable'), AH_WIDTH_KEY);   // 머리글을 만든 뒤에 손잡이를 붙인다
+  el('ahState').replaceChildren(new Option(H.allStates, ''), ...Object.entries(H.states).map(([k, v]) => new Option(v, k)));
+  histSetDefaults(); histFillRobots();
+  el('ahForm').onsubmit = (e) => { e.preventDefault(); loadHistory(true); };
+  el('ahReset').onclick = () => { histSetDefaults(); loadHistory(true); };
+  el('ahMore').onclick = () => loadHistory(false);
+  el('ahExport').onclick = exportHistory;
+  el('ahFilesBtn').onclick = () => { hist.filesOpen = !hist.filesOpen; renderHistorySummary(); };
+  el('ahBody').addEventListener('click', (e) => {   // 행을 누르면 상세(타임라인)를 펼치고, 다시 누르면 접는다
+    const tr = e.target.closest('tr[data-key]');
+    if (!tr) return;
+    if (hist.open.has(tr.dataset.key)) hist.open.delete(tr.dataset.key); else hist.open.add(tr.dataset.key);
+    renderHistory();
+  });
+}
+
+// 고정 알람 (메모리의 서버 알람). 해소되어도 이번 조회 동안은 그 자리에서 해소로 바뀌어 보인다 (다시 조회하면 이력으로 내려간다)
+function histPinReset() {
+  hist.pinned.clear();
+  for (const a of app.alarms) if (AlarmView.pinnable(a)) hist.pinned.set(AlarmView.keyOf(a), a);
+  if (histVisible()) renderHistory();
+}
+function histOnAlarm(a) {   // upsertAlarm 이 서버 알람마다 부른다
+  const k = AlarmView.keyOf(a);
+  if (AlarmView.pinnable(a) || hist.pinned.has(k)) { hist.pinned.set(k, a); hist.details.delete(k); }
+  if (histVisible()) renderHistory();
+}
+const histVisible = () => !el('alarmView').hidden && !el('avHistoryPane').hidden;
+
+function histRows() {
+  const f = hist.filter || histFilter();
+  const pinned = Array.from(hist.pinned.values()).map(AlarmView.liveRow).filter((r) => AlarmView.matchRow(r, f));
+  return AlarmView.mergeRows(pinned, hist.rows);
+}
+
+function renderHistorySummary() {
+  const s = hist.summary, H = AlarmView.H;
+  el('ahOff').hidden = !(s && s.enabled === false);
+  el('ahMain').hidden = !!(s && s.enabled === false);
+  el('ahSummary').textContent = s && s.enabled ? H.summary(s) : '';
+  el('ahFilesBtn').hidden = !(s && s.enabled);
+  el('ahFilesBtn').textContent = hist.filesOpen ? H.hideFiles : H.showFiles;
+  el('ahFilesBtn').setAttribute('aria-expanded', String(hist.filesOpen));
+  const box = el('ahFiles');
+  box.hidden = !(hist.filesOpen && s && s.enabled);   // 읽기 전용 목록: 삭제는 GUI 에 두지 않는다
+  box.replaceChildren(...((s && s.files) || []).map((f) => { const d = document.createElement('div'); d.textContent = H.fileLine(f); return d; }));
+}
+
+function renderHistory() {
+  const H = AlarmView.H, { pinned, rows } = histRows();
+  const body = el('ahBody');
+  body.replaceChildren();
+  const all = pinned.map((r) => [r, true]).concat(rows.map((r) => [r, false]));
+  for (const [r, pin] of all) {
+    const key = AlarmView.keyOf(r);
+    const tr = document.createElement('tr');
+    tr.className = 'lvl-' + r.level + ' st-' + r.state + (pin ? ' pin' : '') + (hist.open.has(key) ? ' open' : '');
+    tr.dataset.key = key; tr.dataset.id = r.id; tr.dataset.state = r.state; tr.dataset.code = r.code;
+    if (pin) tr.title = H.pinTip; else if (r.state === 'uncleared') tr.title = H.unclearedTip;
+    AlarmView.historyCells(r).forEach((text, i) => {
+      const td = document.createElement('td'); td.textContent = text;
+      td.className = ['time', 'robot', 'lvl', 'msg', 'state', 'cnt', 'acked', 'clr', 'dur'][i];
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+    if (hist.open.has(key)) body.appendChild(detailRow(r, key));
+  }
+  const n = all.length;
+  el('ahEmpty').hidden = n > 0 || hist.busy || !!hist.err;
+  el('ahMore').hidden = !hist.next;
+  el('ahMore').disabled = hist.busy;
+  const note = el('ahNote');
+  note.textContent = hist.err ? H.failed(hist.err) : (hist.busy && !n ? H.loading : H.note(n, hist.summary && hist.summary.enabled ? hist.summary.total_alarms : null));
+  note.classList.toggle('bad', !!hist.err);
+}
+
+// 상세 행: 타임라인(이벤트 줄 전부), 전체 문구, detail 원문, 코드, 파일. 서버 이력 파일의 줄을 그대로 보여 준다
+function detailRow(r, key) {
+  const H = AlarmView.H, ver = r.count + '|' + r.state + '|' + r.acked_by;
+  const tr = document.createElement('tr'); tr.className = 'ah-detail'; tr.dataset.for = key;
+  const td = document.createElement('td'); td.colSpan = H.head.length; tr.appendChild(td);
+  const box = document.createElement('div'); box.className = 'ah-detail-box'; td.appendChild(box);
+  const cached = hist.details.get(key);
+  if (cached && cached.ver === ver) { fillDetail(box, r, cached.data); return tr; }
+  box.textContent = H.loading;
+  fetch('/api/alarms/history/' + encodeURIComponent(r.id) + '/events?t_raised=' + encodeURIComponent(String(r.t_raised)))
+    .then(async (res) => { const d = await res.json().catch(() => ({})); if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status); return d; })
+    .then((d) => { hist.details.set(key, { ver, data: d }); if (box.isConnected) fillDetail(box, r, d); })
+    .catch((e) => { if (box.isConnected) box.textContent = H.detailFailed(String(e.message || e)); });
+  return tr;
+}
+function fillDetail(box, r, data) {
+  const H = AlarmView.H;
+  box.replaceChildren();
+  const add = (cls, label, text) => {
+    const row = document.createElement('div'); row.className = cls;
+    const l = document.createElement('b'); l.textContent = label; row.appendChild(l);
+    row.appendChild(document.createTextNode(' ' + text));
+    box.appendChild(row);
+  };
+  const tl = document.createElement('div'); tl.className = 'ah-tl'; tl.appendChild(Object.assign(document.createElement('b'), { textContent: H.timeline }));
+  const ul = document.createElement('ul');
+  for (const e of data.events) {
+    const li = document.createElement('li'); li.dataset.event = e.event; li.textContent = AlarmView.timelineLine(e) + (e.event === 'raised' || e.event === 'repeated' ? '  ' + e.text : '');
+    ul.appendChild(li);
+  }
+  tl.appendChild(ul); box.appendChild(tl);
+  add('ah-msg', H.head[3], r.text);
+  const last = data.events[data.events.length - 1];
+  const dt = document.createElement('div'); dt.className = 'ah-dt';
+  dt.appendChild(Object.assign(document.createElement('b'), { textContent: H.detail })); dt.appendChild(document.createElement('pre')).textContent = (last && last.detail) || AlarmView.TEXT.never;   // 긴 사유는 줄바꿈
+  box.appendChild(dt);
+  add('ah-code', H.code2, r.code);
+  add('ah-file', H.file, Array.from(new Set(data.events.map((e) => e.file))).join(', '));
+}
+
+async function loadHistorySummary() {
+  try {
+    const res = await fetch('/api/alarms/history/summary');
+    if (res.status === 401) return;
+    hist.summary = await res.json();
+  } catch (e) { /* 요약을 못 받아도 목록은 본다 */ }
+  renderHistorySummary();
+}
+async function loadHistoryCodes() {   // 코드 입력의 자동 완성 목록 (서버 알람 코드)
+  if (hist.codesLoaded) return;
+  try {
+    const res = await fetch('/api/alarms/catalog');
+    if (!res.ok) return;
+    const d = await res.json();
+    el('ahCodes').replaceChildren(...d.alarms.filter((a) => a.origin === 'server').map((a) => new Option(a.code, a.code)));
+    hist.codesLoaded = true;
+  } catch (e) { /* 자동 완성만 없다 */ }
+}
+
+async function loadHistory(reset) {
+  if (!reset && (hist.busy || !hist.next)) return;
+  if (reset) { hist.gen++; hist.rows = []; hist.next = null; hist.filter = histFilter(); hist.details.clear(); loadHistorySummary(); }
+  const gen = hist.gen;
+  hist.busy = true; hist.err = '';
+  renderHistory();
+  try {
+    const res = await fetch('/api/alarms/history?' + AlarmView.historyQuery(hist.filter, { view: 'alarms', limit: 200, before: reset ? null : hist.next }));
+    const data = await res.json().catch(() => ({}));
+    if (gen !== hist.gen) return;   // 그사이 조건이 바뀌었다: 낡은 응답은 버린다
+    if (res.status === 401) { showLogin('세션이 만료됐습니다. 다시 로그인하세요'); return; }
+    if (res.status === 404 && hist.summary && hist.summary.enabled === false) return;
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    hist.rows = hist.rows.concat(data.alarms); hist.next = data.next;
+    histFillRobots(data.alarms.map((a) => a.robot).filter(Boolean));
+  } catch (err) {
+    if (gen === hist.gen) hist.err = String(err.message || err);
+  } finally {
+    if (gen === hist.gen) { hist.busy = false; renderHistory(); }
+  }
+}
+
+// CSV: 지금 적용된 조건 그대로. 상한을 넘으면 서버가 잘라서 주고 헤더로 알린다
+async function exportHistory() {
+  const H = AlarmView.H, note = el('ahNote');
+  try {
+    const f = hist.filter || histFilter();
+    const res = await fetch('/api/alarms/history/export?' + AlarmView.historyQuery(f));
+    if (res.status === 401) { showLogin('세션이 만료됐습니다. 다시 로그인하세요'); return; }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'HTTP ' + res.status); }
+    const blob = await res.blob();
+    const name = ((res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/) || [])[1] || 'alarms.csv';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    const rows = Number(res.headers.get('X-Export-Rows') || 0);
+    note.textContent = res.headers.get('X-Export-Truncated') === '1' ? H.exportCap(rows) : H.exported(rows);
+    note.classList.remove('bad'); note.dataset.export = res.headers.get('X-Export-Truncated') === '1' ? 'cut' : 'ok';
+  } catch (err) {
+    note.textContent = H.failed(String(err.message || err)); note.classList.add('bad');
+  }
+}
+
+function openHistory() {
+  histFillRobots();
+  histPinReset();
+  loadHistoryCodes();
+  loadHistory(true);
+}
+
+// 탭 전환 (History / Catalog): 마지막으로 본 탭을 기억한다. Catalog 는 열려 있는 동안만 5초마다 다시 받는다
+function setAlarmTab(name) {
+  const cat = name === 'catalog';
+  el('avHistoryPane').hidden = cat; el('avCatalogPane').hidden = !cat;
+  el('avTabHistory').setAttribute('aria-selected', String(!cat)); el('avTabCatalog').setAttribute('aria-selected', String(cat));
+  lsSet(AV_TAB_KEY, cat ? 'catalog' : 'history');
+  if (cat) startCatalog(); else { stopCatalog(); openHistory(); }
+}
+el('avTabHistory').onclick = () => setAlarmTab('history');
+el('avTabCatalog').onclick = () => setAlarmTab('catalog');
+setupHistory();
+
+// 메뉴의 Alarm 버튼 배지: 지금 활성인 서버 알람 수. HH/H 가 있으면 빨강, 그 밖에는 주황. 활성이 없으면 숨긴다 (다른 화면에서도 알람을 놓치지 않게)
+function updateAlarmBadge() {
+  const act = app.alarms.filter((a) => !a.local && a.state === 'active'), b = el('alarmBadge');
+  b.hidden = act.length === 0;
+  b.textContent = String(act.length);
+  b.classList.toggle('hot', act.some((a) => a.level === 'HH' || a.level === 'H'));
+}
 
 // ---------- 로그 화면 ----------
 // 서버가 모아 둔 로그(프로세스 출력, GUI 서버)를 1초마다 '마지막 번호 이후' 만 받아 소스 탭, 레벨, 검색으로 거른다.
@@ -1909,7 +2143,7 @@ el('logSearch').oninput = renderLogAll;
 el('logPause').onclick = () => {
   logs.paused = !logs.paused;
   el('logPause').setAttribute('aria-pressed', String(logs.paused));
-  el('logPause').textContent = logs.paused ? '재개' : '일시정지';
+  el('logPause').textContent = logs.paused ? 'Resume' : 'Pause';
   if (!logs.paused) renderLogAll();
 };
 el('logCopy').onclick = () => copyText(LogView.copyText(LogView.filter(logs.entries, logFilter()), logs.labels), el('logCopy'));
@@ -1952,6 +2186,8 @@ fetch('/api/motion/config').then((r) => { if (!r.ok) throw new Error('모션 설
   .then((m) => { app.motion = m; app.dirtyCards = true; })
   .catch((err) => addAlarm('LL', String(err.message || err), { code: 'LOAD_FAILED' }));
 loadMap().catch((err) => { el('stageNote').textContent = String(err.message || err); addAlarm('LL', String(err.message || err), { code: 'LOAD_FAILED' }); });
+const saved = lsGet(VIEW_KEY);   // 새로고침 전에 보던 화면으로 (로그인 뒤에 불러오므로 API 가 401 이 아니다)
+if (saved === 'log' || saved === 'alarm') setView(saved);
 }
 setInterval(() => { app.dirtyCards = true; renderZoneChip(); tickProcUptimes(); }, 500); // STARTING 5초 안내처럼 시간이 지나야 바뀌는 표시용
 requestAnimationFrame(frame);
