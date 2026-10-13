@@ -172,7 +172,7 @@ ros2 topic echo /zone_manager/status
 
 ```bash
 # 터미널 1: 도메인 브릿지 (pinky1 + pinky2)
-ros2 launch launch/bridges.launch.xml                 # pinky2:=false 로 한 대만 가능
+ros2 launch domain_bridge bridges.launch.xml                 # pinky2:=false 로 한 대만 가능
 
 # 터미널 2: zone_manager_node
 ros2 launch zone_traffic_control zone_manager.launch.xml

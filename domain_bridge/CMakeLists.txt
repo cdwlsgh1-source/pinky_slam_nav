@@ -123,7 +123,7 @@ install(TARGETS ${PROJECT_NAME}_lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY examples launch
+install(DIRECTORY config examples launch
   DESTINATION share/${PROJECT_NAME}
 )
 
