@@ -7,12 +7,13 @@ zone_manager_node_v3:
 
     # ---- 대기열 (map 좌표계) ----
     # queue_anchor 는 실측값(2026-10-13). 앵커는 점유자의 이탈 경로(RED*OUT)와 겹치지 않아야 함
-    # TODO: queue_back_dir, queue_spacing 은 아직 미확정(임시값). T3/T5 실측 후 확정 (PRD 7절)
-    #   슬롯 k = 앵커 + k * spacing * back_dir.  현재값이면 슬롯 2 = (-0.10, -0.70) 이라
-    #   pinky2 홈 P7(0.0, -0.6)과 가깝다 -> 필요하면 queue_max 를 2 로 낮출 것
+    # 슬롯 k = 앵커 + k * spacing * back_dir  ->  0:(0.60,-0.70)  1:(0.40,-0.70)  2:(0.20,-0.70)
+    # 간격 d = 0.20 m: 로봇 지름 약 0.10 m + 여유 0.10 m (사용자 지정, 2026-10-13)
+    # 주의: Nav2 xy_goal_tolerance 가 0.25 m 이면 도착 판정 오차가 간격보다 크다 (PRD 4절 11번).
+    #       back_dir 은 -x 방향(홈 쪽) 그대로이며 T3 에서 확인 후 확정.
     queue_anchor: [0.6, -0.7, 0.0]      # slot 0 위치 [x, y, yaw(rad)]  (실측)
-    queue_back_dir: [-1.0, 0.0]         # 줄이 늘어나는 방향 (자동으로 단위벡터로 정규화) (임시)
-    queue_spacing: 0.35                 # 슬롯 간격 d (m) (임시)
+    queue_back_dir: [-1.0, 0.0]         # 줄이 늘어나는 방향 (자동으로 단위벡터로 정규화)
+    queue_spacing: 0.20                 # 슬롯 간격 d (m)
     queue_max: 3                        # 최대 대기자 수 (넘으면 k=-1 거부)
     queue_stale_sec: 5.0                # request_entry 재전송이 이 시간 끊기면 큐에서 제거
     queue_advance_delay_sec: 1.5        # 앞 로봇이 앵커를 떠날 시간을 준 뒤 뒤 로봇을 전진 (0이면 즉시)

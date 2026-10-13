@@ -48,23 +48,30 @@ from std_msgs.msg import String
 # ==============================================================================
 # 순수 로직 (ROS 없이 테스트 가능)
 # ==============================================================================
+
+# [기능] 후방 벡터(대기열이 뻗어 나가는 방향)를 길이 1의 단위 벡터로 정규화한다.
+#        길이가 0이거나 숫자가 아니거나 원소가 부족하면 default 를 돌려줘 노드가 죽지 않게 한다.
 def normalize_dir(back_dir, default=(-1.0, 0.0)):
     """후방 벡터를 단위 벡터로. 길이가 0이거나 형식이 틀리면 default."""
     try:
         dx, dy = float(back_dir[0]), float(back_dir[1])
     except (TypeError, ValueError, IndexError):
         return default
-    norm = math.hypot(dx, dy)
-    if norm < 1e-9:
+    norm = math.hypot(dx, dy)        # 벡터 길이 = √(dx²+dy²)
+    if norm < 1e-9:                  # 길이가 거의 0이면 방향이 없는 것 → default
         return default
-    return (dx / norm, dy / norm)
+    return (dx / norm, dy / norm)    # 길이를 1로 맞춤 (단위 벡터)
 
 
+# [기능] 대기 슬롯 k 번의 목표 자세 (x, y, yaw) 를 계산한다.
+#        k=0 은 앵커 그 자체, k 가 1 늘 때마다 후방 벡터 방향으로 spacing(m)만큼 멀어진다.
+#        yaw 는 모든 슬롯이 앵커와 동일(줄 서는 로봇들이 같은 방향을 봄).
 def slot_pose(k, anchor, back_dir, spacing):
     """슬롯 k 의 (x, y, yaw). k=0 이 앵커, k 가 커질수록 후방 벡터 쪽으로 spacing 씩 멀어짐."""
     ax, ay, ayaw = anchor
     dx, dy = back_dir
     return (ax + k * spacing * dx, ay + k * spacing * dy, ayaw)
+    # anchor: 고정위치 / back_dir: 후방 증분 / spacing: 간격
 
 
 class ZoneQueue:
@@ -78,6 +85,8 @@ class ZoneQueue:
       queue          : 대기자 목록. 인덱스가 곧 슬롯 번호 k (0 = 앵커 = 줄의 맨 앞)
     """
 
+    # [기능] 큐 상태를 초기화한다. 점유자 없음, 대기열 비어 있음,
+    #        대기 인원 상한(queue_max)과 대기자 생존 판정 시간(stale_sec)을 저장한다.
     def __init__(self, queue_max=3, stale_sec=5.0):
         self.queue_max = queue_max
         self.stale_sec = stale_sec
@@ -86,15 +95,21 @@ class ZoneQueue:
         # [[robot_id, token, last_seen], ...]  last_seen = 마지막 request_entry 수신 시각
         self.queue = []
 
+    # [기능] 현재 대기자의 robot_id 목록을 순서대로 반환한다. (리스트 인덱스 = 슬롯 번호 k)
     def order(self):
         """대기자 robot_id 목록 (인덱스 = 슬롯 번호 k)."""
         return [e[0] for e in self.queue]
 
+    # [기능] (내부용) 점유자를 지정하고 점유 시작 시각을 기록한다.
+    #        시작 시각은 hold_exceeded() 의 강제 해제 판단에 쓰인다.
     def _set_occupant(self, robot_id, now):
         """점유자를 지정하고 점유 시작 시각을 기록 (내부용)."""
         self.occupant = robot_id
         self.occupant_since = now
 
+    # [기능] 로봇의 진입 요청을 규칙에 따라 판단한다. (핵심 로직)
+    #        점유자 재요청 -> 재허가 / 빈 구역 -> 즉시 점유 / 이미 대기 중 -> 순번 유지 /
+    #        대기열 가득 -> 거부 / 그 외 -> 맨 뒤 등록.
     def request(self, robot_id, token, now):
         """
         request_entry 처리의 핵심 규칙. 규칙 적용 순서가 중요하다:
@@ -123,6 +138,8 @@ class ZoneQueue:
         self.queue.append([robot_id, token, now])
         return ('queued',)
 
+    # [기능] 현재 점유를 해제하고, 대기자가 있으면 선두를 새 점유자로 승격시킨다.
+    #        승격된 경우 ('grant', id, token) 을, 대기자가 없으면 None 을 반환한다.
     def release_and_advance(self, now):
         """점유 해제. 대기자가 있으면 선두를 점유자로 올리고 ('grant', id, token), 없으면 None."""
         self.occupant = None
@@ -133,12 +150,16 @@ class ZoneQueue:
             return ('grant', robot_id, token)
         return None
 
+    # [기능] 로봇의 구역 이탈 통보(notify_exit)를 처리한다.
+    #        통보한 로봇이 실제 점유자일 때만 해제하고 다음 대기자를 승격한다. (남의 락 해제 방지)
     def exit(self, robot_id, now):
         """notify_exit. 점유자가 아니면 (False, None), 맞으면 (True, 다음 grant 또는 None)."""
         if self.occupant != robot_id:
             return False, None
         return True, self.release_and_advance(now)
 
+    # [기능] 대기 중인 로봇을 큐에서 제거한다. (대기 포기)
+    #        점유자의 락은 건드리지 않으며, 제거에 성공하면 True 를 반환한다.
     def cancel(self, robot_id):
         """대기 포기(cancel_entry). 큐에서 제거했으면 True (점유자 락은 건드리지 않음)."""
         for i, e in enumerate(self.queue):
@@ -147,6 +168,8 @@ class ZoneQueue:
                 return True
         return False
 
+    # [기능] request_entry 재전송이 stale_sec 넘게 끊긴 대기자를 큐에서 제거하고 그 id 목록을 반환한다.
+    #        죽은/통신 두절 로봇이 슬롯을 계속 차지하는 "유령 대기자" 문제를 막는다.
     def expire_stale(self, now):
         """
         request_entry 재전송이 stale_sec 넘게 없는 대기자를 제거하고 id 목록을 반환.
@@ -157,6 +180,8 @@ class ZoneQueue:
             self.queue = [e for e in self.queue if e[0] not in gone]
         return gone
 
+    # [기능] 점유자가 max_hold_sec 보다 오래 점유 중인지 검사한다.
+    #        초과 시 경과 초를, 아니면 None 을 반환한다. (notify_exit 유실 시 강제 해제용)
     def hold_exceeded(self, now, max_hold_sec):
         """점유 시간이 max_hold_sec 를 넘었으면 경과 초, 아니면 None. (notify_exit 유실 대비 안전장치)"""
         if self.occupant is None or self.occupant_since is None:
@@ -176,6 +201,11 @@ class ZoneManagerNodeV3(Node):
     모든 상태 접근은 self._lock 아래에서 한다 (콜백/타이머가 서로 다른 스레드에서 돌 수 있음).
     """
 
+    # [기능] 노드 초기화.
+    #        (1) 파라미터 선언/로드 (앵커·후방벡터는 잘못되면 로그 후 기본값 대체)
+    #        (2) ZoneQueue·락·슬롯 발행 기록 생성
+    #        (3) 구독자 3개(request/exit/cancel), 발행자 3개(grant/status/slot) 생성
+    #        (4) 주기 타이머 3개(감시 1초 / 전진 반영 0.2초 / 재발행 1초) 등록
     def __init__(self):
         super().__init__('zone_manager_node_v3')
 
@@ -246,6 +276,11 @@ class ZoneManagerNodeV3(Node):
 
     # ---------------- 콜백 ----------------
 
+    # [기능] /request_entry ("<robot_id>:<token>") 수신 콜백.
+    #        메시지를 파싱해 ZoneQueue.request() 로 판단하고 결과에 따라 동작한다.
+    #        grant  -> status 방송 + grant_entry 발행
+    #        queued -> (신규면 로그) 슬롯 번호 동기화
+    #        full   -> 경고 로그 + k=-1 슬롯 발행으로 거부 통보
     def _on_request(self, msg: String):
         """request_entry 수신: ZoneQueue 판단 결과(grant/queued/full)에 따라 알맞은 토픽 발행."""
         try:
@@ -272,6 +307,9 @@ class ZoneManagerNodeV3(Node):
                     f'[{robot_id}] 대기열 가득 참 (queue_max={self.zq.queue_max}) -> 거부')
                 self.slot_pub.publish(String(data=f'{robot_id}:-1:0.0,0.0,0.0'))
 
+    # [기능] /notify_exit ("<robot_id>") 수신 콜백.
+    #        현재 점유자가 보낸 통보일 때만 락을 해제하고(_after_release) 다음 선두 허가 + 나머지 전진을 처리한다.
+    #        점유자가 아닌 로봇의 통보는 경고 로그만 남기고 무시한다.
     def _on_exit(self, msg: String):
         """notify_exit 수신: 점유자일 때만 락 해제 -> 다음 선두 허가 + 나머지 전진."""
         robot_id = msg.data.strip()
@@ -285,6 +323,9 @@ class ZoneManagerNodeV3(Node):
             self.get_logger().info(f'[{robot_id}] zone 이탈 통보 -> 락 해제')
             self._after_release(nxt)
 
+    # [기능] /cancel_entry ("<robot_id>") 수신 콜백.
+    #        대기자를 큐에서 빼고 슬롯 기록을 지운 뒤, 뒤 로봇들이 앞으로 당겨지도록
+    #        지연 타이머를 걸고 슬롯을 다시 맞춘다. 점유자의 락은 유지된다.
     def _on_cancel(self, msg: String):
         """cancel_entry 수신: 대기자를 큐에서 빼고 뒤 로봇을 전진시킨다 (점유자 락은 유지)."""
         robot_id = msg.data.strip()
@@ -300,6 +341,9 @@ class ZoneManagerNodeV3(Node):
 
     # ---------------- 주기 로직 ----------------
 
+    # [기능] 1초 주기 감시 타이머.
+    #        (1) request_entry 재전송이 끊긴 stale 대기자를 제거하고 뒤 로봇을 전진시킨다.
+    #        (2) 점유 시간이 max_hold_sec 를 넘으면 notify_exit 유실로 보고 강제 해제한다.
     def _check_timeout(self):
         """1초 주기 감시: (1) stale 대기자 제거 (2) 점유 시간 초과 시 강제 해제."""
         with self._lock:
@@ -322,11 +366,15 @@ class ZoneManagerNodeV3(Node):
                     f'-> 강제 해제 (max_hold_sec={self.max_hold_sec})')
                 self._after_release(self.zq.release_and_advance(now))
 
+    # [기능] 0.2초 주기 타이머. advance_delay 때문에 보류해 둔 "전진" 슬롯을
+    #        지연 시간이 지난 뒤 실제로 발행하도록 락을 잡고 동기화를 호출한다.
     def _sync_slots(self):
         """0.2초 주기: 지연(advance_delay) 때문에 보류해 둔 "전진" 슬롯을 시간이 되면 발행."""
         with self._lock:
             self._sync_slots_locked()
 
+    # [기능] 1초 주기 타이머. 메시지 유실에 대비해 현재 점유 상태(status)와
+    #        이미 알려 준 모든 대기자의 슬롯 좌표를 그대로 다시 발행한다.
     def _republish_slots(self):
         """유실 대비: 이미 알려 준 슬롯을 그대로 다시 발행."""
         with self._lock:
@@ -336,6 +384,9 @@ class ZoneManagerNodeV3(Node):
 
     # ---------------- 상태 전이 (lock 보유 상태에서 호출) ----------------
 
+    # [기능] 점유 해제 직후의 공통 후처리 (락 보유 상태에서 호출).
+    #        status 방송 -> 승격된 선두에게 grant_entry 발행(슬롯 기록 삭제) ->
+    #        나머지 대기자는 advance_delay 후에 앞 슬롯으로 전진하도록 예약.
     def _after_release(self, nxt):
         """해제 직후 처리: 상태 방송, 다음 선두 허가, 나머지는 지연 후 전진."""
         self._publish_status()
@@ -346,6 +397,10 @@ class ZoneManagerNodeV3(Node):
         self._advance_after = time.time() + self.advance_delay
         self._sync_slots_locked()
 
+    # [기능] 현재 대기열 순번(k)과 마지막으로 발행한 슬롯 번호를 비교해 "바뀐 것만" 발행한다. (락 보유 상태에서 호출)
+    #        - 새 대기자 / 뒤로 밀리는 경우(k 증가) : 즉시 발행
+    #        - 앞으로 당겨지는 경우(k 감소)         : _advance_after 이후에 발행
+    #          (앞 로봇이 앵커를 떠날 시간을 줘서 충돌 방지)
     def _sync_slots_locked(self):
         """
         대기열 순번과 마지막 발행 슬롯을 맞춘다.
@@ -364,19 +419,27 @@ class ZoneManagerNodeV3(Node):
 
     # ---------------- 발행 ----------------
 
+    # [기능] 슬롯 번호 k 를 map 좌표 (x, y, yaw) 로 변환해
+    #        "<robot_id>:<k>:<x>,<y>,<yaw>" 형식으로 /queue_slot 에 발행한다.
     def _publish_slot(self, robot_id, k):
         x, y, yaw = slot_pose(k, self.anchor, self.back_dir, self.spacing)
         self.slot_pub.publish(String(data=f'{robot_id}:{k}:{x:.3f},{y:.3f},{yaw:.3f}'))
 
+    # [기능] 해당 로봇에게 진입 허가를 내린다.
+    #        "<robot_id>:<token>" 을 /grant_entry 로 발행하고 로그를 남긴다.
     def _grant(self, robot_id, token):
         self.grant_pub.publish(String(data=f'{robot_id}:{token}'))
         self.get_logger().info(f'[{robot_id}] 진입 허가 (token={token})')
 
+    # [기능] 구역 점유 상태를 /status 로 방송한다.
+    #        점유자가 있으면 "occupied_by:<robot_id>", 없으면 "free".
     def _publish_status(self):
         data = f'occupied_by:{self.zq.occupant}' if self.zq.occupant else 'free'
         self.status_pub.publish(String(data=data))
 
 
+# [기능] 프로그램 진입점. rclpy 초기화 -> 노드 생성 -> spin(콜백/타이머 처리) ->
+#        Ctrl+C 또는 종료 시 노드 정리 및 rclpy shutdown.
 def main():
     rclpy.init()
     node = ZoneManagerNodeV3()

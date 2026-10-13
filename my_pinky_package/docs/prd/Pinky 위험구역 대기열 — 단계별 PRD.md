@@ -145,12 +145,12 @@ P2 도착 → request_entry
 | `max_hold_sec` | `120.0` | 기존과 동일 |
 | `queue_anchor` | `[x, y, yaw]` | slot 0 위치와 방향. **실측 필요** |
 | `queue_back_dir` | `[dx, dy]` | 단위 벡터. 줄이 늘어나는 방향. **실측 필요** |
-| `queue_spacing` | `0.35` | 슬롯 간격 d(m). 로봇 폭 약 0.13 m + 정지 오차·Nav2 tolerance 여유 |
+| `queue_spacing` | `0.20` | 슬롯 간격 d(m). 로봇 지름 약 0.10 m + 여유 0.10 m (사용자 지정). Nav2 `xy_goal_tolerance`(0.25 m)보다 작으므로 4절 11번 참고 |
 | `queue_max` | `3` | 최대 대기자 수 |
 | `queue_stale_sec` | `5.0` | 이 시간 동안 `request_entry` 재전송이 없으면 큐에서 제거 |
 | `queue_advance_delay_sec` | `1.5` | **(Q1에서 추가)** 앞 슬롯이 비워질 때 뒤 로봇의 전진(k 감소)을 이 시간만큼 늦춘다. 허가받은 선두가 앵커를 떠나기 전에 뒤 로봇이 앵커로 들어와 겹치는 것을 막는다. 0이면 즉시 전진 |
 
-> 현재 `zone_params_v3.yaml`의 `queue_anchor`는 **실측값 `[0.6, -0.7, 0.0]`** (2026-10-13)이다. `queue_back_dir`(`[-1, 0]`)와 `queue_spacing`(0.35)은 아직 **임시값**이다 (T3/T5 실측 후 확정). 현재 값이면 슬롯은 0 = `(0.60, -0.70)`, 1 = `(0.25, -0.70)`, 2 = `(-0.10, -0.70)`이고, 슬롯 2는 `pinky2` 홈 `P7`(0.0, -0.6)과 약 0.14 m라 가깝다(4절 10번).
+> 현재 `zone_params_v3.yaml`: `queue_anchor`는 **실측값 `[0.6, -0.7, 0.0]`**(2026-10-13), `queue_spacing`은 **`0.20` m**(로봇 지름 약 0.10 m + 여유 0.10 m, 사용자 지정), `queue_back_dir`은 `[-1, 0]`(−x, 홈 쪽)이며 T3에서 확인 후 확정한다. 슬롯은 0 = `(0.60, -0.70)`, 1 = `(0.40, -0.70)`, 2 = `(0.20, -0.70)`이고 슬롯 2는 `pinky2` 홈 `P7`(0.0, -0.6)에서 약 0.22 m다.
 
 ### 0-8. 인터페이스 (v3 전용 이름공간 `/zone_manager_v3/*`)
 
@@ -202,7 +202,7 @@ PRD "my_pinky_package/docs/prd/Pinky 위험구역 대기열 — 단계별 PRD.md
 - 기존 파일은 절대 수정하지 말고 전부 신규 파일로 만들 것 (setup.py 의 entry_points 줄 추가만 예외)
 - zone_traffic_control/zone_traffic_control/zone_manager_node.py 를 복사해 zone_manager_node_v3.py 를 만들고, 노드 이름은 zone_manager_node_v3, 토픽은 전부 /zone_manager_v3/* (request_entry, grant_entry, notify_exit, status) 로 변경
 - 추가: slot_pose(k) 순수 함수(앵커 + k·d·후방벡터), /zone_manager_v3/queue_slot 발행(변경 시 즉시 + 1초 재발행), /zone_manager_v3/cancel_entry 구독, queue_stale_sec 초과 시 큐 제거, queue_max 초과 시 k=-1 거부
-- zone_params_v3.yaml(신규): robot_ids, max_hold_sec, queue_anchor, queue_back_dir, queue_spacing(0.35), queue_max(3), queue_stale_sec(5.0) (앵커/방향은 임시값 + TODO 주석)
+- zone_params_v3.yaml(신규): robot_ids, max_hold_sec, queue_anchor, queue_back_dir, queue_spacing(0.20), queue_max(3), queue_stale_sec(5.0) (앵커/방향은 임시값 + TODO 주석)
 - zone_manager_v3.launch.xml(신규): 기존 zone_manager.launch.xml 형식을 따라 작성
 - slot_pose 단위 테스트(pytest)를 작성하고 실행해서 결과 보여줘
 - ROS 시뮬 테스트는 ROS_DOMAIN_ID=77 + localhost 전용으로만 해줘
@@ -389,7 +389,7 @@ PRD의 Step Q6을 구현해줘.
 ## 4. 열린 질문 (TBD)
 
 1. ~~앵커 실측 좌표~~ → **완료: `(0.6, -0.7, 0)`**. 후방 벡터는 미확정 (맵에서 `RED1OUT` 이탈 경로와 겹치지 않는 방향).
-2. 간격 d 최종값 (0.35 m는 초기 추정).
+2. ~~간격 d~~ → **0.20 m로 지정** (2026-10-13). 실기(T3·T5)에서 정지 오차를 보고 조정한다. 11번 참고.
 3. ~~pinky2 v3 시점~~ → **결정: pinky1_v3와 pinky2_v3를 함께 만든다** (혼용 금지 규칙 때문에 한 구역의 로봇은 같은 계열이어야 함).
 4. 관제 GUI에서 큐 상태(누가 몇 번째인지)를 보일지 (현재는 `QUEUEING` 상태만, Q6에서 다룸).
 5. 기존 `zone_gate_client.py`와 v3의 공통 코드가 중복되는데, 안정화 후 공통 모듈로 합칠지 (이번 범위 아님).
@@ -397,7 +397,8 @@ PRD의 Step Q6을 구현해줘.
 7. ~~문 좌표(`RED*IN/OUT`) 위치~~ → **결정: A안, 로봇 코드에 유지** (0-3절 (d)).
 8. 요청 전 구간(예: `P2` 도달 전)의 로봇 간 충돌은 Nav2 회피에만 의존한다. 이 구간까지 제어하려면 위치 기반 방식이 필요한데 이번 범위 밖이다 (0-3절 (c)).
 9. (결정 완료) 브릿지는 새 launch 대신 기존 yaml에 추가 (판단 기준: 새로 중계할 토픽 5개, 0-3절 (e)).
-10. 슬롯 2 `(-0.10, -0.70)`이 `pinky2` 홈 `P7`(0.0, -0.6)과 약 0.14 m로 가깝다. 후방 벡터 확정 전까지 `queue_max`를 2로 낮출지 (현재 3, 실로봇이 2대라 슬롯 1까지만 쓰이고 슬롯 2는 가짜 대기자 테스트에서만 쓰임).
+10. (해소) 간격을 0.20 m로 바꾸면서 슬롯 2가 `(0.20, -0.70)`이 되어 `P7`(0.0, -0.6)과 약 0.22 m로 멀어졌다. 슬롯 1 `(0.40, -0.70)`은 `RED2IN`(0.55, -0.6)에서 약 0.18 m다.
+11. **Nav2 `xy_goal_tolerance`가 0.25 m**(`pinky_pro/pinky_navigation/params/nav2_params.yaml`)라 "목표 반경 25 cm 안이면 도착"으로 처리된다. 간격 0.20 m보다 크므로 로봇이 슬롯에서 최대 25 cm 벗어나 멈출 수 있고, 인접 슬롯의 로봇과 가까워지거나 겹칠 수 있다. 성공 기준(`d ± 0.1 m`)도 이 설정으로는 보장되지 않는다. T3에서 실제 정지 오차를 측정한 뒤, (a) tolerance를 줄이거나 (b) 간격을 키우거나 (c) 슬롯 도착 판정을 순찰 노드에서 따로 엄격히 할지 정한다. 이번에는 Nav2 설정과 코드를 바꾸지 않았다.
 
 ## 5. 참조
 
