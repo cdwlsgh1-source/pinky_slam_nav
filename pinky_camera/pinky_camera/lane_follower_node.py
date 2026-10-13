@@ -110,6 +110,9 @@ class LaneFollowerNode(Node):
         self.declare_parameter('corner_scan_time', 3.0)         # 실패 시 반대쪽으로 스캔하는 시간(s)
         self.declare_parameter('corner_creep_speed', 0.0)       # 코너 모드 중 전진 속도 (m/s, 0이면 제자리 회전)
         self.declare_parameter('corner_slow_scale', 0.7)        # 수평선이 보이지만 차선이 아직 검출될 때 속도 배율
+        self.declare_parameter('side_flip_confirm_time', 0.3)   # 좌/우 검출 조합이 바뀌거나 offset이 급변하면 이 시간(s) 지속될 때만 반영 (0이면 즉시 반영)
+        self.declare_parameter('offset_jump_max', 0.4)          # 필터된 offset 대비 이 값(정규화) 넘게 튀면 의심 샘플 (0이면 점프 검사 안 함)
+        self.declare_parameter('post_corner_guard_time', 3.0)   # 코너 회전 종료 후 이 시간(s) 동안 회전 반대 방향 조향 금지 (0이면 미사용)
         self.declare_parameter('control_rate', 20.0)            # 제어 루프 주기 (Hz)
         self.declare_parameter('stop_on_crossline', False)      # Crossline 검출 시 정지할지 여부
         self.declare_parameter('crossline_stop_duration', 2.0)  # 정지 유지 시간(s)
@@ -157,6 +160,9 @@ class LaneFollowerNode(Node):
         self.corner_angle_timeout = self.get_parameter('corner_angle_timeout').value
         self.corner_creep_speed = self.get_parameter('corner_creep_speed').value
         self.corner_slow_scale = self.get_parameter('corner_slow_scale').value
+        self.post_corner_guard_time = self.get_parameter('post_corner_guard_time').value
+        self.side_flip_confirm_time = self.get_parameter('side_flip_confirm_time').value
+        self.offset_jump_max = self.get_parameter('offset_jump_max').value
         self.dt_ctrl = 1.0 / self.get_parameter('control_rate').value
         self.stop_on_crossline = self.get_parameter('stop_on_crossline').value
         self.crossline_stop_duration = self.get_parameter('crossline_stop_duration').value
@@ -199,6 +205,10 @@ class LaneFollowerNode(Node):
         self._turned = 0.0                 # 코너 모드 시작 후 누적 회전각(rad, 왼쪽이 +)
         self._corner_armed = True          # 각도 회전 완료 후 차선이 다시 검출되기 전에는 코너 모드 재진입 금지
         self._corner_dir = 0.0             # 1단계 회전 방향 (+1 = 왼쪽, -1 = 오른쪽)
+        self._stable_cfg = (False, False)  # 디바운스를 통과해 수용한 (left, right) 검출 조합
+        self._suspect_since = None         # 조합 변경/offset 급변이 시작된 시각 (의심 샘플 지속 판정용)
+        self._guard_dir = 0.0              # 코너 종료 후 가드: 직전 코너 회전 방향과 가드 종료 시각
+        self._guard_until = None
 
         self._cmd_lin = 0.0                # 현재 출력값 (가속도 제한 계산용)
         self._cmd_ang = 0.0
@@ -242,6 +252,7 @@ class LaneFollowerNode(Node):
         'corner_min_turn_speed', 'corner_yaw_gain', 'corner_angle_timeout',
         'corner_latch_time', 'corner_turn_speed', 'corner_turn_time',
         'corner_scan_time', 'corner_creep_speed', 'corner_slow_scale',
+        'post_corner_guard_time', 'side_flip_confirm_time', 'offset_jump_max',
     )
     # 0~1 범위여야 하는 필터 계수 (범위를 벗어난 값은 거부)
     _UNIT_PARAMS = ('offset_alpha', 'd_alpha')
@@ -401,6 +412,32 @@ class LaneFollowerNode(Node):
             return
 
         offset = clamp(float(msg.data), -1.0, 1.0)
+
+        # 디바운스: 좌/우 검출 조합이 바뀌거나 offset이 급변한 샘플은 일정 시간 지속될 때만 반영
+        # (한 프레임짜리 오검출로 조향이 튀는 것 방지). 소실 후 복귀 첫 프레임은 검사 없이 수용
+        cfg = (self._left_detected, self._right_detected)
+        if self._prev_time is None:
+            self._stable_cfg = cfg
+            self._suspect_since = None
+        elif self.side_flip_confirm_time > 0.0:
+            suspect = cfg != self._stable_cfg or (
+                self.offset_jump_max > 0.0 and abs(offset - self._offset_f) > self.offset_jump_max)
+            if not suspect:
+                self._suspect_since = None
+                self._stable_cfg = cfg
+            else:
+                if self._suspect_since is None:
+                    self._suspect_since = now
+                if (now - self._suspect_since).nanoseconds / 1e9 < self.side_flip_confirm_time:
+                    self.get_logger().info(
+                        f'의심 샘플 무시: cfg(L,R)={cfg} offset={offset:.2f} (유지 {self._offset_f:.2f})',
+                        throttle_duration_sec=1.0)
+                    return
+                # 지속됐으므로 정상 변화로 수용 (D항 스파이크 방지를 위해 이력 리셋)
+                self._stable_cfg = cfg
+                self._suspect_since = None
+                self._prev_time = None
+
         prev_filtered = self._offset_f
         # 저역통과(EMA) 필터: 갑작스러운 offset 변화를 완화
         self._offset_f = self.offset_alpha * offset + (1.0 - self.offset_alpha) * prev_filtered
@@ -475,6 +512,13 @@ class LaneFollowerNode(Node):
         # 검출이 잠깐(detect_grace_time 이내) 끊긴 것은 소실로 보지 않고 마지막 offset으로 계속 추종
         elif self._lane_detected or lost < self.detect_grace_time:
             target_lin, target_ang = self.compute_tracking()
+            # 코너 회전 직후에는 검출기 좌/우 이력이 무효일 수 있어 offset이 반대로 나올 수 있음
+            # -> 방금 돈 방향의 반대쪽으로는 조향하지 않음
+            if self._guard_active(now):
+                if self._guard_dir < 0.0:
+                    target_ang = min(target_ang, 0.0)
+                else:
+                    target_ang = max(target_ang, 0.0)
         else:
             # 차선 소실: 경과 시간에 따라 유지 -> 탐색 -> 정지
             if lost < self.lost_hold_time:
@@ -562,8 +606,15 @@ class LaneFollowerNode(Node):
         self.get_logger().info('재탐색 종료: 차선 미검출')
         return 0.0, 0.0
 
+    # 코너 종료 후 가드 구간인지 (직전 회전의 반대 방향 조향을 막는 구간)
+    def _guard_active(self, now):
+        return self._guard_until is not None and now < self._guard_until
+
     # 코너 회전 종료: 코너 모드 해제, 재진입 금지, 오래된 방향 기록 초기화
     def _finish_corner(self, now, reason):
+        if self.post_corner_guard_time > 0.0:
+            self._guard_dir = self._corner_dir
+            self._guard_until = now + Duration(seconds=self.post_corner_guard_time)
         self._corner_mode = False
         self._corner_armed = False
         self._locked_side = None
@@ -595,11 +646,13 @@ class LaneFollowerNode(Node):
 
         # 한쪽 차선만 보이면 offset이 추정값이므로 감속하고,
         # 보이는 차선에서 멀어지는 쪽(안 보이는 차선 쪽)으로 회전을 추가
-        if self._left_detected != self._right_detected:
+        # (raw 대신 디바운스를 통과한 조합을 사용: 순간 오검출로 바이어스 방향이 뒤집히지 않게)
+        left_ok, right_ok = self._stable_cfg
+        if left_ok != right_ok:
             linear_x *= self.single_side_speed_scale
             # ROS 표준: 양의 각속도 = 왼쪽 회전, 음수 = 오른쪽 회전
             # 왼쪽 차선만 보임 -> 오른쪽으로(음수), 오른쪽 차선만 보임 -> 왼쪽으로(양수)
-            if self._left_detected:
+            if left_ok:
                 angular_z -= self.single_side_turn_bias
             else:
                 angular_z += self.single_side_turn_bias

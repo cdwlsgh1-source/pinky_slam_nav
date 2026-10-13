@@ -86,6 +86,12 @@ lane_follower_node:
     corner_creep_speed: 0.0
     # 수평선이 보이지만 차선이 아직 검출될 때 속도 배율
     corner_slow_scale: 0.7
+    # 좌/우 검출 조합이 바뀌거나 offset이 급변하면 이 시간(s) 지속될 때만 반영 (한 프레임 오검출 무시, 0이면 즉시 반영)
+    side_flip_confirm_time: 0.3
+    # 필터된 offset 대비 이 값(정규화) 넘게 튀면 의심 샘플 (0이면 점프 검사 안 함)
+    offset_jump_max: 0.4
+    # 코너 회전 종료 후 이 시간(s) 동안은 방금 돈 방향의 반대쪽으로 조향 금지 (0이면 미사용)
+    post_corner_guard_time: 3.0
     # 제어 루프 주기 (Hz)
     control_rate: 20.0
     # Crossline 검출 시 정지할지 여부
