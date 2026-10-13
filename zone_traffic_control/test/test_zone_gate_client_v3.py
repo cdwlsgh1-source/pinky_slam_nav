@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from zone_traffic_control.zone_gate_client_v3 import (RetryTimer,
+                                                      choose_entry_target,
                                                       parse_grant_msg,
                                                       parse_slot_msg)
 
@@ -50,6 +51,27 @@ def test_retry_timer_due_boundaries():
     assert not t.due(11.9)
     t.reset()
     assert t.due(11.9)
+
+
+# ---------------- choose_entry_target (patrol 노드 공용 판단) ----------------
+DOOR = (0.6, -0.5, 0.0)
+
+
+def test_choose_target_no_response_goes_to_door():
+    assert choose_entry_target(False, None, DOOR) == ('door', DOOR)
+
+
+def test_choose_target_slot_assigned():
+    assert choose_entry_target(False, (1, -0.05, -0.45, 0.0), DOOR) == ('slot', (-0.05, -0.45, 0.0))
+
+
+def test_choose_target_queue_full():
+    assert choose_entry_target(False, (-1, 0.0, 0.0, 0.0), DOOR) == ('full', None)
+
+
+def test_choose_target_grant_beats_stale_slot_and_full():
+    assert choose_entry_target(True, (0, 0.3, -0.45, 0.0), DOOR) == ('door', DOOR)
+    assert choose_entry_target(True, (-1, 0.0, 0.0, 0.0), DOOR) == ('door', DOOR)
 
 
 # ---------------- 통합 (실제 zone_manager_node_v3) ----------------

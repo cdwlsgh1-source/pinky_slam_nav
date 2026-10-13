@@ -1,14 +1,15 @@
 # Pinky 위험구역 대기열 — 단계별 PRD
 
-Oct 12, 2026 · 초안 v3 (**기존 파일은 수정하지 않고 전부 `_v3` 신규 파일로 만든다** — 이상 시 복구 목적. **Step Q1 완료**, 문 좌표는 A안 확정, 대기 앵커는 두 로봇이 공유. 복구 절차는 6절, 실측이 필요한 값은 7절)
+Oct 12, 2026 · 초안 v4 (**기존 코드는 수정하지 않고 전부 `_v3` 신규 파일로 만든다** — 이상 시 복구 목적. 예외는 `setup.py` entry point와 브릿지 yaml의 v3 토픽 블록 추가뿐. **Step Q1~Q3 완료**, 문 좌표는 A안 확정, 대기 앵커는 두 로봇이 공유. **GUI 연동은 실로봇 코드 검증(Q4~Q5) 뒤로 미룬다(Q6).** 복구 절차는 6절, 실측이 필요한 값은 7절)
 
 | Step | 상태 |
 | --- | --- |
 | Q1 매니저 v3 | **완료** (단위 테스트 15개, 시뮬 9개 PASS) |
-| Q2 게이트 클라이언트 v3 | 대기 |
-| Q3 순찰 노드 v3 | 대기 |
-| Q4 브릿지·GUI | 대기 |
-| Q5 실로봇 | 대기 |
+| Q2 게이트 클라이언트 v3 | **완료** (단위 4+, 통합 2 PASS) |
+| Q3 순찰 노드 v3 | **완료** (A안 적용, 모의 통합 테스트 11개 PASS, 실로봇 미검증) |
+| Q4 브릿지 + 실로봇 코드 테스트 (GUI 없이) | 브릿지 yaml 추가 **완료**, 앵커 실측·실기 테스트 대기 |
+| Q5 튜닝·복구 리허설·체크리스트 | 대기 |
+| Q6 GUI 연동 (`QUEUEING` 표시) | 대기 (Q4~Q5 통과 후) |
 
 ## 0. 공통 개요
 
@@ -23,7 +24,7 @@ Oct 12, 2026 · 초안 v3 (**기존 파일은 수정하지 않고 전부 `_v3` �
 ### 0-2. 목표와 비목표
 
 - **목표**: (1) 대기 지점을 **한 곳(앵커)** 으로 통일한다. (2) 앵커에 이미 로봇이 있으면 뒤에 오는 로봇은 **일정 간격 d 뒤**에 줄줄이 선다. (3) 앞 로봇이 진입하면 뒤 로봇이 **한 칸씩 전진**한다. (4) **문제가 생기면 v2 구성으로 즉시 되돌릴 수 있다.**
-- **비목표**: 구역 안 주행 변경 없음. **기존 파일(`zone_manager_node.py`, `zone_gate_client.py`, `pinky*_v2.py`, `zone_params.yaml`, 기존 브릿지 설정)은 한 줄도 바꾸지 않는다.** 로봇끼리 직접 통신하지 않는다 (도메인 분리).
+- **비목표**: 구역 안 주행 변경 없음. **기존 코드 파일(`zone_manager_node.py`, `zone_gate_client.py`, `pinky*_v2.py`, `zone_params.yaml`)은 한 줄도 바꾸지 않는다.** 기존 브릿지 yaml에는 **v3 토픽 블록만 덧붙인다**(0-3절 (e)). 로봇끼리 직접 통신하지 않는다 (도메인 분리).
 
 ### 0-3. 방향 결정
 
@@ -66,6 +67,18 @@ Oct 12, 2026 · 초안 v3 (**기존 파일은 수정하지 않고 전부 `_v3` �
 | `RED*OUT` | 도착하면 `notify_exit`로 락 반납 | **유지** (`POINTS`) |
 
 매니저가 계산하는 값은 다른 로봇의 상태에 따라 바뀌는 **대기 슬롯뿐**이다. 문 좌표는 고정값이고 `RED1`/`RED2`는 yaw와 경로가 달라 로봇별 값이므로 로봇 코드에 둔다 (B안 "문 좌표도 yaml로 이동", C안 "`RED*IN` 제거"는 채택하지 않음).
+
+**(e) 브릿지는 새 launch를 만들지 않고 기존 yaml에 추가 (확정)**
+
+판단 기준은 **새로 중계해야 할 토픽 수**다.
+
+| 항목 | 개수 | 비고 |
+| --- | --- | --- |
+| 매니저의 v3 토픽 | 6 | `request_entry`, `notify_exit`, `cancel_entry`, `grant_entry`, `queue_slot`, `status` |
+| 도메인을 건너야 하는 토픽 | **5** | `status`는 매니저와 GUI가 모두 관제 PC(50)에 있어 중계 불필요 (v1도 `status`는 중계하지 않음) |
+| 로봇별 yaml에 추가되는 분량 | 항목 5개 (약 35줄) | v1 블록(3개)과 같은 형식 |
+
+5개는 기존 yaml에 한 블록으로 덧붙여도 읽기 쉬운 분량이고, 새 launch를 만들면 로봇당 브릿지 프로세스가 하나씩 더 필요하다(yaml도 새로 있어야 함). 그래서 **`pinky_bridge_pinky1.yaml`, `pinky_bridge_pinky2.yaml`에 `ZONE-QUEUE-V3 ADDED ~ END` 블록을 추가**했다. 토픽 이름이 `/zone_manager_v3/*`라 기존 v1 토픽과 섞이지 않고, **복구는 이 블록을 지우고 브릿지를 재시작하면 끝**이다. (토픽이 수십 개로 늘거나 v3 브릿지만 따로 켜고 끄고 싶어지면 그때 별도 파일로 분리한다.)
 
 ### 0-4. 용어
 
@@ -110,7 +123,7 @@ P2 도착 → request_entry
 | 허가 후 | 슬롯 goal 취소 → `RED*IN` → 진입 | 점유자 등록 |
 | 구역 이탈 | `RED*OUT` 도착 → `notify_exit` | 락 해제 → 선두 grant → 뒤쪽은 지연 후 한 칸 전진 |
 
-### 0-6. 파일 구성 (전부 신규, 기존은 그대로)
+### 0-6. 파일 구성 (코드는 전부 신규, 기존은 그대로)
 
 | 구분 | 신규 파일 (v3) | 복사 원본 (수정 안 함) |
 | --- | --- | --- |
@@ -119,9 +132,9 @@ P2 도착 → request_entry
 | 파라미터 | `zone_traffic_control/config/zone_params_v3.yaml` | `zone_params.yaml` |
 | 실행 | `zone_traffic_control/launch/zone_manager_v3.launch.xml` | `zone_manager.launch.xml` |
 | 순찰 노드 | `pinky_patrol_node_pinky1_v3.py`, `pinky_patrol_node_pinky2_v3.py` | `pinky_patrol_node_pinky1_v2.py`, `pinky_patrol_node_pinky2_v2.py` |
-| 브릿지 | `domain_bridge/launch/bridges_v3.launch.xml` (기존 `bridges.launch.xml`은 미수정) | `bridges.launch.xml` |
+| 브릿지 | 기존 `domain_bridge/config/pinky_bridge_pinky1.yaml`, `pinky_bridge_pinky2.yaml`에 `ZONE-QUEUE-V3` 블록(토픽 5개) **추가** (launch는 변경 없음, 0-3절 (e)) | — |
 
-- 신규 파일을 실행 가능하게 하는 **`setup.py`의 `entry_points` 등록은 불가피하게 기존 파일에 줄을 추가**한다. 이것만 예외이며 기존 항목은 건드리지 않는다.
+- 기존 파일에 **덧붙이는 예외는 두 가지**다: (1) 신규 파일을 실행 가능하게 하는 `setup.py`의 `entry_points` 줄, (2) 브릿지 yaml의 `ZONE-QUEUE-V3` 블록. 둘 다 추가만 하고 기존 항목은 건드리지 않는다.
 - `pinky_patrol_node_pinky2_v3.py`는 `pinky2_v2`의 **현재 작업 트리 내용**(미커밋 변경 포함)을 복사해 시작한다.
 
 ### 0-7. 파라미터 (`zone_params_v3.yaml`)
@@ -153,7 +166,7 @@ v2 매니저가 `/zone_manager_v2/*`를 쓰는 것과 같은 방식으로, v3는
 | `/zone_manager_v3/cancel_entry` | 로봇 → 매니저 | `robot_id` | **신규**. 대기 포기 (stop 등). 큐 제거 후 뒤 로봇 전진 |
 
 - 모두 `std_msgs/String`, QoS는 기존과 같은 RELIABLE. 노드 이름은 `zone_manager_node_v3`.
-- 브릿지에는 위 6개 토픽을 **`bridges_v3.launch.xml`에 모두** 추가한다 (Step Q4).
+- 브릿지에는 `status`를 뺀 **5개**를 기존 로봇별 yaml에 추가했다 (0-3절 (e)). 방향: `request_entry`·`notify_exit`·`cancel_entry`는 로봇 → PC, `grant_entry`·`queue_slot`은 PC → 로봇. 토픽 이름은 양쪽 도메인에서 같다(remap 없음).
 
 ### 0-9. 예외와 안전
 
@@ -254,44 +267,108 @@ PRD의 Step Q3를 구현해줘.
 - 끝나면 git status 로 기존 파일이 수정되지 않았는지 확인해서 보여줘
 ```
 
-#### Step Q4. 브릿지·GUI
+#### Step Q4. 브릿지 + 실로봇 코드 테스트 (GUI 없이)
 
-- **내용**: v3 토픽 6개를 도메인 브릿지에 추가, 관제 GUI에 `QUEUEING` 상태 표시
-- **변경 파일**: `bridges_v3.launch.xml` (신규), `pinky_web_gui` (`QUEUEING`은 기존 상태 목록에 항목만 추가하는 최소 수정)
-- **검증**: 도메인 간 중계 확인
+GUI 연동 전에 **코드만으로** 실물 로봇에서 동작을 확인한다. 상태는 관제 GUI 대신 터미널(`ros2 topic echo`, 매니저·순찰 노드 로그)로 본다.
+
+- **내용**: (1) 브릿지 yaml에 v3 토픽 추가 — **완료**. (2) 앵커·후방 벡터 실측 후 `zone_params_v3.yaml` 반영. (3) 아래 T0~T7 순서로 실기 테스트.
+- **변경 파일**: `domain_bridge/config/pinky_bridge_pinky{1,2}.yaml`(완료), `zone_traffic_control/config/zone_params_v3.yaml`(실측값). 코드는 수정하지 않는다. 문제가 나오면 결과를 기록하고 별도 수정 요청으로 처리한다.
+- **하지 않는 것**: GUI 수정, `QUEUEING` 표시. GUI는 Q6.
+
+**공통 전제**
+
+- 도메인: 관제 PC 50, pinky1 20, pinky2 22. 같은 구역의 로봇은 **전부 v3**여야 한다 (v2 순찰 노드·v2/v1 매니저는 모두 종료, 3절).
+- 기존 yaml에 블록을 추가했으므로 **브릿지를 재시작**해야 새 토픽이 중계된다 (`bridges.launch.xml`을 다시 실행).
+- `zone_manager_v3.launch.xml`은 관제 PC에서 실행하고, 로봇에서는 `pinky_patrol_node_pinky{1,2}_v3`를 실행한다 (`colcon build` 후 `source`).
+- **임시 앵커(`0.30, -0.45`)로는 로봇을 움직이지 않는다.** T0에서 실측한 값을 넣은 뒤에만 T2 이후를 진행한다.
+- 로봇 옆에서 비상정지(전원/`cmd_vel` 정지)를 바로 할 수 있어야 한다. 처음에는 **구역 안 로봇 1대 + 대기 1대**로 시작한다.
+
+**테스트 순서**
+
+| 단계 | 이름 | 로봇 | 하는 일 | 합격 기준 |
+| --- | --- | --- | --- | --- |
+| T0 | 실측·설정 | 정지 | 맵에서 앵커 `(x, y, yaw)`, 후방 벡터 `(dx, dy)` 측정 (앵커가 `RED*OUT` 이탈 경로와 겹치지 않는 곳, 앵커→`RED*IN` 경로가 막히지 않는지). `xy_goal_tolerance` 확인 후 간격 d 결정. `zone_params_v3.yaml`에 반영하고 매니저 재시작 | 매니저 시작 로그에 실측 앵커·`back_dir`·`spacing`이 찍힘 |
+| T1 | 통신 점검 | **정지** (v3 노드는 `IDLE`) | 가짜 로봇 id로 토픽만 발행해 브릿지 5개 확인. 아래 "T1 명령" 참고 | 로봇 도메인에서 `grant_entry`, `queue_slot` 수신. 매니저 로그에 요청·취소가 보임. 끝나면 `status`가 `free` |
+| T2 | 단독 통과 | 1대 | `pinky1`에 `goto:P3` (대기자 없음) | `QUEUEING` 없음, 슬롯 이동 없음. v2와 같은 시간에 진입. 복귀 후 `status = free` |
+| T3 | 2대 대기 | 2대 | `pinky1` 구역 안(`goto:P3,P6`, 도착마다 10초 대기)일 때 `pinky2`에 `goto:P3` | `pinky2`가 슬롯 0(앵커)에 정지(`QUEUEING`), 앵커 오차 ≤ 0.1 m. `pinky1` 이탈 후 3초 안에 `pinky2`가 허가받고 `RED*IN`으로 이동·진입 |
+| T4 | stop 중 취소 | 2대 | T3 상태에서 대기 중인 `pinky2`에 `stop` | `pinky2` 정지·`STOPPED`, 매니저 로그에 `대기 취소`. `pinky1`이 나온 뒤 `status`가 곧바로 `free` (아무에게도 허가 안 감) |
+| T5 | 3번째 슬롯 | 실로봇 2대 + 가짜 대기자 | 가짜 id로 슬롯 0을 먼저 점유(`ros2 topic pub -r 1`)시켜 놓고 실로봇이 슬롯 1에 서는지 확인 | 슬롯 1 = 앵커 − d·후방 벡터, 오차 ≤ 0.1 m. 가짜 대기자를 끊으면 5초 뒤 stale 제거, 실로봇이 한 칸 전진 |
+| T6 | 크래시 | 2대 | 대기 중인 `pinky2` 노드를 Ctrl+C로 종료 | 약 5초 뒤 매니저 로그에 `request_entry 재전송 끊김 -> 대기열에서 제거` |
+| T7 | `start` 경로 | 1대씩 | `pinky1`, `pinky2`에 `start`. `pinky2`는 인덱스를 정정한 경로(`RED2IN`→`P3`→`P6`→`RED2OUT`→`P7`) 확인 | `RED2IN`에서 허가 절차, `RED2OUT` 도착 때 락 반납, `P7` 복귀 후 `DONE` |
+
+**T1 명령 (로봇은 움직이지 않는다 — 실제 로봇 id를 쓰지 않는다)**
+
+```bash
+# 로봇 도메인(예: pinky1 = 20)에서
+export ROS_DOMAIN_ID=20
+ros2 topic echo /zone_manager_v3/grant_entry &
+ros2 topic echo /zone_manager_v3/queue_slot &
+# 1) 빈 구역 요청 -> grant 수신
+ros2 topic pub --once /zone_manager_v3/request_entry std_msgs/msg/String "{data: 'tester1:t1'}"
+# 2) 점유 중 요청 -> queue_slot "tester2:0:<앵커 x>,<앵커 y>,<yaw>" 수신
+ros2 topic pub -r 1 /zone_manager_v3/request_entry std_msgs/msg/String "{data: 'tester2:t2'}"   # Ctrl+C 로 중단
+# 3) 정리
+ros2 topic pub --once /zone_manager_v3/cancel_entry std_msgs/msg/String "{data: 'tester2'}"
+ros2 topic pub --once /zone_manager_v3/notify_exit std_msgs/msg/String "{data: 'tester1'}"
+# 관제 PC(도메인 50)에서 점유 상태 확인
+ros2 topic echo /zone_manager_v3/status
+```
+
+**관찰 방법**
+
+- 관제 PC(도메인 50): `ros2 topic echo /zone_manager_v3/status`, `ros2 topic echo /pinky1/patrol_status`, `ros2 topic echo /pinky2/patrol_status` (`QUEUEING`·`WAITING_ZONE` 등 상태 확인), 매니저 터미널 로그.
+- 슬롯 정지 오차: 정지한 로봇의 `/pinky*/amcl_pose`와 `queue_slot` 좌표를 비교한다.
+- 명령은 기존과 같이 `patrol_cmd`로 보낸다 (예: `ros2 topic pub --once /pinky2/patrol_cmd std_msgs/msg/String "{data: 'goto:P3'}"`).
+
+**중단 조건**: 로봇이 슬롯이 아닌 곳으로 가거나 다른 로봇과 충돌 위험이 있으면 즉시 `stop` 후 비상정지하고, 매니저·순찰 노드 로그를 보존한 뒤 6절 복구 절차로 v2로 되돌린다.
 
 **요청 커맨드**
 
 ```text
-PRD의 Step Q4를 구현해줘.
-- domain_bridge/launch/bridges.launch.xml 은 수정하지 말고, 같은 방식으로 domain_bridge/launch/bridges_v3.launch.xml 을 신규 작성해 /zone_manager_v3/ 의 6개 토픽(request_entry, grant_entry, notify_exit, status, queue_slot, cancel_entry)을 기존 zone_manager 토픽과 같은 방향·QoS로 중계. CMakeLists.txt 에 설치 항목이 필요하면 줄 추가만 할 것
-- pinky_web_gui 에서 QUEUEING 상태를 인식해 표시 (기존 WAITING_ZONE 처리 코드를 먼저 찾아서 같은 방식으로, 최소 수정)
-- README 에 v3 구성과 복구 절차(PRD 6절) 요약 추가
-- 기존 테스트가 깨지지 않는지 실행해서 결과 보여줘
+PRD의 Step Q4 중 코드 작업은 이미 끝났어. 실로봇 테스트 준비를 도와줘.
+- 브릿지는 기존 domain_bridge/config/pinky_bridge_pinky{1,2}.yaml 의 ZONE-QUEUE-V3 블록으로 이미 추가됨. 코드는 수정하지 말 것
+- 내가 입력한 앵커 (x, y, yaw), 후방 벡터 (dx, dy), 간격 d 를 zone_traffic_control/config/zone_params_v3.yaml 에 반영하고 기존 TODO/임시값 주석을 갱신. 값을 모르면 임시값을 그대로 두고 T0 이후 단계는 진행하지 말 것
+- 테스트 중 나온 매니저/순찰 노드 로그를 붙여 줄 테니 T1~T7 합격 기준과 비교해서 판정하고, 불합격 항목은 원인 후보만 정리 (코드 수정은 별도 요청이 있을 때만)
+- 로봇을 직접 구동하는 명령은 실행하지 말고, 내가 칠 명령만 알려줘 (ROS 검증은 ROS_DOMAIN_ID=77 로컬 전용)
 ```
 
-#### Step Q5. 실로봇
+#### Step Q5. 튜닝·복구 리허설·체크리스트
 
-- **내용**: 앵커·간격·방향 실측과 튜닝. 앞 로봇이 구역에 있을 때 뒤 로봇이 슬롯에 정지하는지 확인. 복구 절차 리허설
-- **변경 파일**: `zone_params_v3.yaml`
-- **검증**: 체크리스트 (`docs/checklists/`)
+- **내용**: Q4 결과를 바탕으로 간격 d, 앵커 위치 보정. v2로의 복구 절차 리허설(6절). Q4의 T0~T7을 체크리스트 문서로 정리.
+- **변경 파일**: `zone_params_v3.yaml`(튜닝), 체크리스트 문서(`pinky_web_gui/docs/checklists/`의 기존 형식을 따르되 GUI 항목은 제외).
+- **검증**: 성공 기준(2절)을 실기로 충족. 복구 리허설을 5분 안에 완료.
 
 **요청 커맨드**
 
 ```text
 PRD의 Step Q5를 준비해줘.
-- pinky_web_gui/docs/checklists/ 의 기존 체크리스트 형식에 맞춰 대기열 실로봇 체크리스트 작성
-- 포함: 앵커/후방 벡터 실측 방법, 간격 d 결정(Nav2 xy_goal_tolerance 확인), 시나리오(1대만 통과, 2대 대기, stop 중 취소, 크래시 시 stale 제거), v2로 복구하는 리허설(PRD 6절)
+- pinky_web_gui/docs/checklists/ 의 기존 체크리스트 형식에 맞춰 대기열 실로봇 체크리스트 작성 (PRD Q4 의 T0~T7 을 항목으로, GUI 항목은 제외)
+- 포함: 앵커/후방 벡터 실측 방법, 간격 d 결정(Nav2 xy_goal_tolerance 확인), v2로 복구하는 리허설(PRD 6절)
 - 실측값을 zone_params_v3.yaml 에 넣는 절차까지 적어줘
 - 로봇을 직접 구동하지는 말고 문서만 작성
 ```
 
-> 앵커 좌표를 이미 알고 있으면 Q1 요청 끝에 `앵커는 (x, y, yaw), 후방 벡터는 (dx, dy)로 넣어줘`를 덧붙인다. 그러면 TODO 없이 바로 들어간다.
+#### Step Q6. GUI 연동 (Q4~Q5 통과 후)
+
+- **내용**: 관제 GUI에 `QUEUEING` 상태 표시 (기존 `WAITING_ZONE` 처리 방식을 따라 **항목만 추가하는 최소 수정**). README에 v3 구성과 복구 절차 요약.
+- **변경 파일**: `pinky_web_gui`(상태 목록), README.
+- **검증**: 기존 GUI 테스트가 깨지지 않을 것. `status` 토픽은 관제 PC 안에서만 쓰이므로 브릿지 변경은 없다.
+
+**요청 커맨드**
+
+```text
+PRD의 Step Q6을 구현해줘.
+- pinky_web_gui 에서 QUEUEING 상태를 인식해 표시 (기존 WAITING_ZONE 처리 코드를 먼저 찾아서 같은 방식으로, 최소 수정)
+- README 에 v3 구성과 복구 절차(PRD 6절) 요약 추가
+- 기존 테스트가 깨지지 않는지 실행해서 결과 보여줘
+```
+
+> 앵커 좌표를 이미 알고 있으면 Q4 요청 커맨드에 `앵커는 (x, y, yaw), 후방 벡터는 (dx, dy), 간격은 d`를 덧붙인다. 그러면 TODO 없이 바로 들어간다.
 
 ### 검증 규칙 (모든 단계 공통)
 
 - ROS 검증은 `ROS_DOMAIN_ID=77` + localhost 전용으로만 한다. 셸 기본 도메인 50은 실제 관제 도메인이므로 사용하지 않는다.
-- 실로봇 시험은 Step Q5에서만, 구역 안 로봇 1대 + 대기 1대로 시작한다.
+- 실로봇 시험은 Step Q4부터, **앵커를 실측한 뒤에만**, 구역 안 로봇 1대 + 대기 1대로 시작한다. GUI 없이 터미널·로그로 먼저 확인한다.
 - 단계마다 `git status`로 기존 파일이 수정되지 않았는지 확인한다.
 
 ## 2. 성공 기준
@@ -305,7 +382,7 @@ PRD의 Step Q5를 준비해줘.
 
 ## 3. 호환성과 혼용 금지
 
-- 기존 v2 파일과 기존 매니저는 변경이 없으므로 **그대로 동작한다**.
+- 기존 v2 코드와 기존 매니저는 변경이 없으므로 **그대로 동작한다**. 브릿지 yaml에는 v3 토픽 블록만 추가했고 기존 토픽 항목은 그대로다.
 - 토픽 이름공간이 다르기 때문에 v3 매니저와 기존 매니저를 **동시에 켜도 메시지는 섞이지 않는다**.
 - 하지만 **같은 구역을 쓰는 로봇은 모두 같은 계열(전부 v2 또는 전부 v3)로 맞춘다.** v2 로봇과 v3 로봇이 섞이면 두 매니저가 서로의 점유를 모르므로 상호 배제가 깨져 **두 대가 동시에 구역에 들어갈 수 있다.**
 
@@ -314,11 +391,12 @@ PRD의 Step Q5를 준비해줘.
 1. 앵커·후방 벡터의 실측 좌표 (맵에서 `RED1OUT` 이탈 경로와 겹치지 않는 곳).
 2. 간격 d 최종값 (0.35 m는 초기 추정).
 3. ~~pinky2 v3 시점~~ → **결정: pinky1_v3와 pinky2_v3를 함께 만든다** (혼용 금지 규칙 때문에 한 구역의 로봇은 같은 계열이어야 함).
-4. 관제 GUI에서 큐 상태(누가 몇 번째인지)를 보일지 (현재는 `QUEUEING` 상태만).
+4. 관제 GUI에서 큐 상태(누가 몇 번째인지)를 보일지 (현재는 `QUEUEING` 상태만, Q6에서 다룸).
 5. 기존 `zone_gate_client.py`와 v3의 공통 코드가 중복되는데, 안정화 후 공통 모듈로 합칠지 (이번 범위 아님).
-6. `pinky2_v2`의 `WAYPOINTS`(`RED2IN`이 0번)와 `ZONE_ENTRY_INDEX = 1`의 순번 불일치. `pinky2_v3`의 `start` 경로를 순번에 맞게 고칠지, `start`는 건드리지 않고 `goto`만 v3 대기열을 쓰게 할지 (Q3 시작 전 결정).
+6. (결정 완료: A안) `pinky2_v2`의 `WAYPOINTS`(`RED2IN`이 0번)와 `ZONE_ENTRY_INDEX = 1`(`ZONE_EXIT_INDEX = 4`도 `RED2OUT`이 3번이라 어긋남)의 순번 불일치를 `pinky2_v3`에서 `0`/`3`으로 정정했고, `start`와 `goto`가 같은 `_queue_and_enter`를 쓴다. v2 `start`와 순서가 달라지므로 Q5에서 `start` 경로를 실기로 한 번 더 확인한다.
 7. ~~문 좌표(`RED*IN/OUT`) 위치~~ → **결정: A안, 로봇 코드에 유지** (0-3절 (d)).
 8. 요청 전 구간(예: `P2` 도달 전)의 로봇 간 충돌은 Nav2 회피에만 의존한다. 이 구간까지 제어하려면 위치 기반 방식이 필요한데 이번 범위 밖이다 (0-3절 (c)).
+9. (결정 완료) 브릿지는 새 launch 대신 기존 yaml에 추가 (판단 기준: 새로 중계할 토픽 5개, 0-3절 (e)).
 
 ## 5. 참조
 
@@ -327,7 +405,7 @@ PRD의 Step Q5를 준비해줘.
 - `zone_traffic_control/zone_traffic_control/zone_manager_node.py` — `_on_request`, `_release_and_advance`, `_check_timeout`
 - `zone_traffic_control/zone_traffic_control/zone_gate_client.py` — `wait_for_entry`, `notify_exit`
 - `zone_traffic_control/zone_traffic_control/zone_manager_node_v2.py` — 토픽 이름공간 분리(`/zone_manager_v2/*`)의 선례
-- `zone_traffic_control/config/zone_params.yaml`, `domain_bridge/launch/bridges.launch.xml`
+- `zone_traffic_control/config/zone_params.yaml`, `domain_bridge/config/pinky_bridge_pinky{1,2}.yaml`(v1 `ZONE-MUTEX ADDED` 블록, v3 `ZONE-QUEUE-V3 ADDED` 블록), `domain_bridge/launch/bridges.launch.xml`
 
 ## 6. 이상 시 복구 절차 (v3 → v2)
 
@@ -335,7 +413,7 @@ PRD의 Step Q5를 준비해줘.
 
 1. 로봇에서 `pinky_patrol_node_pinky*_v3` 프로세스에 `stop` 명령을 보내고 종료한다.
 2. 관제 PC에서 `zone_manager_node_v3`(`zone_manager_v3.launch.xml`)를 종료한다.
-3. 브릿지를 `bridges_v3.launch.xml` 대신 기존 `bridges.launch.xml` 구성으로 되돌린다 (v3 토픽은 쓰이지 않으니 남겨 두어도 무방하다).
+3. 브릿지 yaml의 `ZONE-QUEUE-V3 ADDED ~ END` 블록을 지우고 브릿지를 재시작한다 (v3 토픽은 쓰이지 않으니 블록을 남겨 두어도 무방하다. v1 `ZONE-MUTEX` 블록은 그대로 둔다).
 4. 기존 `zone_manager_node`(`zone_manager.launch.xml`)를 켠다.
 5. 로봇에서 `pinky_patrol_node_pinky*_v2`를 실행한다.
 6. 같은 구역의 로봇이 **전부 v2**인지 확인한다 (혼용 금지).
@@ -343,5 +421,5 @@ PRD의 Step Q5를 준비해줘.
 ## 7. 구현 전에 필요한 실측값
 
 - 앵커 좌표 `(x, y, yaw)`, 후방 벡터 `(dx, dy)`
-- 앵커에서 `RED1IN`까지 Nav2 경로가 막히지 않는지
+- 앵커에서 `RED1IN`까지 Nav2 경로가 막히지 않는지 (**Q4 T0에서 실측. 이 값 없이는 실로봇을 움직이지 않는다**)
 - 실제 로봇 정지 오차 (Nav2 `xy_goal_tolerance`) → d 결정에 사용

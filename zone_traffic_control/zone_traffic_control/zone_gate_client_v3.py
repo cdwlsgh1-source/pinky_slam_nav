@@ -57,6 +57,25 @@ def parse_grant_msg(data):
     return robot_id, token
 
 
+def choose_entry_target(granted, slot, door):
+    """
+    진입 대기 중 로봇이 "지금 어디로 가야 하는지"를 고른다 (patrol 노드 공용 판단 규칙).
+      허가받음            -> ('door', door)       : 문(RED*IN)으로 진입
+      대기열 가득(k=-1)   -> ('full', None)       : 포기해야 함
+      슬롯 배정(k>=0)     -> ('slot', (x, y, yaw)): 매니저가 알려 준 대기 슬롯으로 이동
+      아직 응답 없음      -> ('door', door)       : 빈 구역일 수 있으니 v2처럼 문으로 먼저 출발
+    허가가 슬롯보다 항상 우선이다 (슬롯 메시지가 늦게 남아 있어도 허가 후엔 문으로 간다).
+    """
+    if granted:
+        return 'door', door
+    if slot is not None:
+        k, x, y, yaw = slot
+        if k == QUEUE_FULL_K:
+            return 'full', None
+        return 'slot', (x, y, yaw)
+    return 'door', door
+
+
 class RetryTimer:
     """주기(period)가 지났는지만 판단하는 작은 타이머. 시간은 호출자가 주입한다."""
 
