@@ -78,9 +78,12 @@ def test_zone_entry_matches_yaml_anchor(n):
 
 @pytest.mark.parametrize('n', [1, 2])
 def test_zone_exit_is_shared_and_red_points_removed(n):
-    """출구 좌표는 두 로봇 공통 (0.8, -0.5, 3.14), 기존 RED* 좌표는 POINTS 에 없다."""
+    """출구 좌표는 두 로봇이 같고(yaw 3.14 = 뒤 방향), 기존 RED* 좌표는 POINTS 에 없다."""
     cls = importlib.import_module(MODS[n]).PinkyPatrolNode
-    assert cls.POINTS['ZONE_EXIT'] == (0.8, -0.5, 3.14)
+    other = importlib.import_module(MODS[3 - n]).PinkyPatrolNode
+    assert cls.POINTS['ZONE_EXIT'] == other.POINTS['ZONE_EXIT']
+    assert cls.POINTS['ZONE_ENTRY'] == other.POINTS['ZONE_ENTRY']
+    assert cls.POINTS['ZONE_EXIT'][2] == pytest.approx(3.14, abs=0.01)
     assert not [k for k in cls.POINTS if k.startswith('RED')]
     assert cls.ZONE_ENTRY_NAME == 'ZONE_ENTRY' and cls.ZONE_EXIT_NAME == 'ZONE_EXIT'
 
@@ -227,8 +230,9 @@ def states(r):
     return [s for s, _ in r.statuses]
 
 
-DOOR1 = (0.8, -0.7, 0.0)       # ZONE_ENTRY (앵커). 이름은 기존 테스트와의 호환용
-EXIT = (0.8, -0.5, 3.14)       # ZONE_EXIT (락 반납 출구)
+_POINTS = importlib.import_module(MODS[1]).PinkyPatrolNode.POINTS
+DOOR1 = tuple(_POINTS['ZONE_ENTRY'])   # 앵커 (순찰 노드 상수, yaml queue_anchor 와 같은지는 별도 테스트가 검사)
+EXIT = tuple(_POINTS['ZONE_EXIT'])     # 락 반납 출구
 def _slot(k):
     """zone_params_v3.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 를 계산 (매니저가 발행하는 값과 같은 규칙)."""
     import yaml
@@ -244,12 +248,13 @@ SLOT0 = _slot(0)
 SLOT1 = _slot(1)
 
 
-def test_empty_zone_goes_straight_to_door(env):
+def test_empty_zone_grant_does_not_wait_at_anchor(env):
     r = make_robot(env, 1, 'pinky2')
     t, out = run_in_thread(r._queue_and_enter, 0, 'P3')
     assert env.pump(lambda: not t.is_alive())
     assert out['r'] is True
-    assert r.navigator.goals == [DOOR1]                  # 슬롯 이동 없음
+    assert len(r.navigator.goals) <= 1                   # 슬롯 이동 없음, 앵커 도착을 기다리지도 않음
+    assert r.navigator.goals in ([], [DOOR1])
     assert 'QUEUEING' not in states(r)
     r.gate.notify_exit()
     assert env.pump(lambda: env.status['v'] == 'free')
@@ -263,10 +268,12 @@ def test_waits_in_slot_then_enters(env):
     assert env.pump(lambda: SLOT0 in r.navigator.goals)  # 슬롯 좌표는 매니저가 준 값
     time.sleep(0.8)
     assert t.is_alive()                                  # 허가 전에는 문으로 들어가지 않음
+    n_before = len(r.navigator.goals)
     occ.notify_exit()
     assert env.pump(lambda: not t.is_alive(), 10)
     assert out['r'] is True
-    assert r.navigator.goals[-1] == DOOR1                # 허가 후 문으로 이동
+    assert r.navigator.goals[-1] == SLOT0                # 허가 후 앵커 이동 없음 (이미 슬롯 0 에 있음)
+    assert len(r.navigator.goals) == n_before            # 허가 후 새 goal 없음
     r.gate.notify_exit()
     assert env.pump(lambda: env.status['v'] == 'free')
 
@@ -311,7 +318,7 @@ def test_grant_received_while_traveling_to_slot(env):
     assert env.pump(lambda: not t.is_alive(), 12)
     assert out['r'] is True
     assert r.navigator.goals[0] == DOOR1 and SLOT0 in r.navigator.goals
-    assert r.navigator.goals[-1] == DOOR1
+    assert r.navigator.goals[-1] == SLOT0                # 허가 후 슬롯 goal 만 취소, 앵커로 가지 않음
     r.gate.notify_exit()
     assert env.pump(lambda: env.status['v'] == 'free')
 
@@ -335,14 +342,25 @@ def test_queue_full_gives_up_without_holding(env):
     assert env.pump(lambda: env.status['v'] == 'free', 4)
 
 
-def test_door_unreachable_after_grant_releases_lock(env):
-    r = make_robot(env, 1, 'pinky2')
-    r.navigator.fail_all = True                          # 문까지 이동이 계속 실패
+def test_grant_returns_immediately_without_going_to_anchor(env):
+    """슬롯 1 에서 기다리다 허가를 받으면 앵커/슬롯 0 을 거치지 않고 바로 반환한다 (호출자가 목적지로 직행)."""
+    occ = occupy(env)
+    front = env.Gate(env.other, 'pinky4')
+    front.reset()
+    front.send_request()
+    assert env.pump(lambda: front.current_slot is not None)      # 앞 대기자 k=0
+    r = make_robot(env, 1, 'pinky2', travel=0.3)
     t, out = run_in_thread(r._queue_and_enter, 0, 'P3')
-    assert env.pump(lambda: not t.is_alive())
-    assert out['r'] is False and states(r)[-1] == 'FAILED'
-    assert len(r.navigator.goals) == 3                   # NAV_RETRIES 만큼만 시도
-    assert env.pump(lambda: env.status['v'] == 'free', 4)    # 구역 밖이므로 락 반납
+    assert env.pump(lambda: SLOT1 in r.navigator.goals)          # 뒤 로봇 k=1
+    occ.notify_exit()                                            # 허가는 앞 대기자(pinky4)에게
+    front.notify_exit()                                          # 앞 대기자도 통과 -> pinky2 에게 허가
+    assert env.pump(lambda: not t.is_alive(), 12)
+    assert out['r'] is True
+    n_end = len(r.navigator.goals)
+    env.pump(lambda: False, 0.8)
+    assert len(r.navigator.goals) == n_end                       # 반환 뒤 앵커 등 새 goal 이 나가지 않음
+    r.gate.notify_exit()
+    assert env.pump(lambda: env.status['v'] == 'free', 4)
 
 
 def test_pinky2_start_path_uses_corrected_indexes(env):

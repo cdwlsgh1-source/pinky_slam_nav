@@ -88,8 +88,8 @@ class PinkyPatrolNode(Node):
         # 위험 구역 진입/반납 좌표 (두 로봇 공통)
         #   ZONE_ENTRY: 대기열 앵커(슬롯 0). zone_params_v3.yaml 의 queue_anchor 와 같아야 함 (테스트가 검사)
         #   ZONE_EXIT : 구역을 나온 뒤 락(토큰)을 반납하는 출구. yaw 3.14 = 뒤 방향(180도)
-        "ZONE_ENTRY": (0.8, -0.7, 0.0),
-        "ZONE_EXIT":  (0.8, -0.5, 3.14),
+        "ZONE_ENTRY": (1.0, -0.7, 0.0),
+        "ZONE_EXIT":  (0.7, -0.5, 3.14),
     }
 
     # start 명령의 순찰 경로: P2 -> ZONE_ENTRY -> P3 -> P6 -> ZONE_EXIT -> P1
@@ -469,11 +469,11 @@ class PinkyPatrolNode(Node):
           1) request_entry 발송 후 일단 문(ZONE_ENTRY_NAME)으로 출발 (빈 구역이면 v2처럼 곧바로 진행)
           2) 점유 중이라 슬롯(queue_slot)이 오면 -> 문 대신 그 슬롯 좌표로 이동하고 정지 (QUEUEING)
           3) 슬롯이 바뀌면(앞 로봇 이탈/취소) -> 현재 goal 취소 후 새 슬롯으로 재이동
-          4) 허가(grant)가 오면 -> 슬롯 goal 취소하고 문으로 이동, 도착하면 진입
+          4) 허가(grant)가 오면 -> 진행 중인 goal 만 취소하고 즉시 반환 (슬롯/앵커를 거치지 않고 호출자가 목적지로 직행)
           5) 대기 중 재전송(1초)으로 매니저에게 "아직 기다린다"고 알린다 (끊기면 5초 뒤 큐에서 제거됨)
         로봇 코드에는 대기 좌표가 없다. 앵커 좌표(ZONE_ENTRY)만 POINTS 에 있고 슬롯은 항상 매니저가 준다.
 
-        True  : 허가를 받고 문에 도착함 (락 보유)
+        True  : 허가를 받음 (락 보유). 앵커에 도착하지 않았어도 반환
         False : stop / 이동 최종 실패 / 대기열 가득 (락 없음. 허가를 이미 받았다면 반납함)
         """
         door = self.POINTS[self.ZONE_ENTRY_NAME]
@@ -498,6 +498,15 @@ class PinkyPatrolNode(Node):
             # 허가 전에는 1초마다 같은 토큰으로 재전송 (stale 제거 방지)
             if not gate.granted():
                 gate.resend_if_due()
+
+            # --- 허가(토큰)를 받았으면 대기열/앵커로 가지 않는다: 진행 중인 goal 만 취소하고 바로 반환 ---
+            #     (호출한 쪽이 곧바로 다음 목표(P3 등)로 출발하므로 슬롯·앵커를 거치지 않고 직행)
+            if gate.granted():
+                if moving:
+                    self._cancel_goal()
+                self.stop_blink()
+                self.set_drive_led()
+                return True
 
             kind, pose = choose_entry_target(gate.granted(), gate.current_slot, door)
             if kind == 'full':
@@ -536,12 +545,6 @@ class PinkyPatrolNode(Node):
             # --- 도착해서 대기 중: navigator 를 직접 spin 해야 grant/queue_slot 콜백이 처리됨 ---
             else:
                 rclpy.spin_once(self.navigator, timeout_sec=0.1)
-
-            # --- 문에 도착했고 허가도 있으면 진입 ---
-            if arrived and kind == 'door' and gate.granted():
-                self.stop_blink()
-                self.set_drive_led()
-                return True
 
             # --- 상태 / LED (바뀔 때만) ---
             if kind == 'slot':

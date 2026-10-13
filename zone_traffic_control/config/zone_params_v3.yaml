@@ -11,7 +11,7 @@ zone_manager_node_v3:
     # 간격 d = 0.50 m: 0.20 m 에서는 후진/접근 중 로봇끼리 부딪혀 늘림 (사용자 지정, 2026-10-13)
     # 주의: 슬롯 2 (-0.20,-0.70) 는 pinky2 홈 P7(0.0,-0.6) 과 약 0.22 m 라 queue_max 3 이면 겹칠 수 있음.
     #       back_dir 은 -x 방향(홈 쪽) 그대로이며 T3 에서 확인 후 확정.
-    queue_anchor: [0.8, -0.7, 0.0]      # slot 0 위치 [x, y, yaw(rad)]  (실측)
+    queue_anchor: [1.0, -0.7, 0.0]      # slot 0 위치 [x, y, yaw(rad)]  (실측)
     queue_back_dir: [-1.0, 0.0]         # 줄이 늘어나는 방향 (자동으로 단위벡터로 정규화)
     queue_spacing: 0.30                 # 슬롯 간격 d (m)
     queue_max: 3                        # 최대 대기자 수 (넘으면 k=-1 거부)
