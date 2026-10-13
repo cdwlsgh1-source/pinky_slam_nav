@@ -20,6 +20,17 @@ from zone_traffic_control.zone_gate_client_v3 import (RetryTimer,
 PKG_ROOT = Path(__file__).resolve().parents[1]
 
 
+def expected_slot(k):
+    """zone_params_v3.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 의 (x, y) 를 계산 (앵커가 바뀌어도 테스트 유지)."""
+    import yaml
+    from zone_traffic_control.zone_manager_node_v3 import normalize_dir, slot_pose
+    prm = yaml.safe_load((PKG_ROOT / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
+    prm = prm['zone_manager_node_v3']['ros__parameters']
+    x, y, _ = slot_pose(k, prm['queue_anchor'], normalize_dir(prm['queue_back_dir']),
+                        prm['queue_spacing'])
+    return x, y
+
+
 # ---------------- 순수 로직 ----------------
 def test_parse_slot_ok():
     assert parse_slot_msg('pinky2:1:-0.050,-0.450,0.000') == ('pinky2', 1, -0.05, -0.45, 0.0)
@@ -134,17 +145,17 @@ def test_integration_grant_slots_full_and_cancel(ros_env):
     assert spin_until(lambda: p1.granted(t1))
     assert p1.current_slot is None
 
-    # 2) 점유 중: p2, p3 는 슬롯 k=0, 1 (앵커 / 앵커 - d)
+    # 2) 점유 중: p2, p3 는 슬롯 k=0, 1 (yaml 의 앵커 / 앵커 + d·후방 벡터)
     t2 = p2.send_request()
     assert spin_until(lambda: p2.current_slot is not None)
     k, x, y, _ = p2.current_slot
-    assert k == 0 and (x, y) == pytest.approx((0.30, -0.45))
+    assert k == 0 and (x, y) == pytest.approx(expected_slot(0))
     assert not p2.granted(t2)
 
     p3.send_request()
     assert spin_until(lambda: p3.current_slot is not None)
     k, x, y, _ = p3.current_slot
-    assert k == 1 and (x, y) == pytest.approx((0.30 - 0.35, -0.45))
+    assert k == 1 and (x, y) == pytest.approx(expected_slot(1))
 
     # 3) queue_max=3 이므로 p4 까지는 들어간다(k=2). 넘치는 경우는 pinky5 로 확인
     p4.send_request()

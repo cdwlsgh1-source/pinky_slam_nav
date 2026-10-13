@@ -209,8 +209,19 @@ def states(r):
 
 
 DOOR1 = (0.6, -0.5, 0.0)
-SLOT0 = (0.3, -0.45, 0.0)
-SLOT1 = (-0.05, -0.45, 0.0)
+def _slot(k):
+    """zone_params_v3.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 를 계산 (매니저가 발행하는 값과 같은 규칙)."""
+    import yaml
+    from zone_traffic_control.zone_manager_node_v3 import normalize_dir, slot_pose
+    prm = yaml.safe_load((ZONE_PKG / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
+    prm = prm['zone_manager_node_v3']['ros__parameters']
+    x, y, yaw = slot_pose(k, prm['queue_anchor'], normalize_dir(prm['queue_back_dir']),
+                          prm['queue_spacing'])
+    return (round(x, 3), round(y, 3), round(yaw, 2))   # FakeNavigator 가 기록하는 형식과 동일
+
+
+SLOT0 = _slot(0)
+SLOT1 = _slot(1)
 
 
 def test_empty_zone_goes_straight_to_door(env):
