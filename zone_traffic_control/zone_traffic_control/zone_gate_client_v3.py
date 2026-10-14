@@ -196,6 +196,11 @@ class ZoneGateClient:
     # 슬롯 상태 (읽기 전용 속성)
     # @property = 괄호 없이 변수처럼 읽게 해줌:  gate.current_slot  (O)  gate.current_slot() (X)
     # ------------------------------------------------------------------
+    # @property: "값 조회"용 (괄호 없이 읽기) / 동작·인자 필요한 함수는 일반 메서드
+        # 사용조건
+        # 1) 인자 없음 -> Yes
+        # 2) 상태 안 바뀜 -> Yes
+        # 3) 값만 조회 -> Yes
     @property
     def current_slot(self):
         """(k, x, y, yaw) 또는 None. k=-1(대기열 가득)일 때도 튜플로 돌려준다."""
