@@ -86,18 +86,14 @@ def test_zone_exit_is_shared_and_red_points_removed(n):
     assert cls.POINTS['ZONE_EXIT'][2] == pytest.approx(3.14, abs=0.01)
     assert not [k for k in cls.POINTS if k.startswith('RED')]
     assert cls.ZONE_ENTRY_NAME == 'ZONE_ENTRY' and cls.ZONE_EXIT_NAME == 'ZONE_EXIT'
-    assert cls.POINTS['ZONE_EXIT'][:2] == (0.5, -0.5)
+    assert cls.POINTS['ZONE_EXIT'][:2] == (0.5, -0.4)
 
 
-def test_stop_exit_points_line_up_behind_zone_exit():
-    """stop 퇴장 위치: pinky1 = ZONE_EXIT, pinky2 = ZONE_EXIT 에서 +x 로 0.30 m (겹치지 않는 고정 오프셋)."""
-    c1 = importlib.import_module(MODS[1]).PinkyPatrolNode
-    c2 = importlib.import_module(MODS[2]).PinkyPatrolNode
-    ex = c1.POINTS['ZONE_EXIT']
-    assert c1.POINTS['ZONE_STOP_EXIT'] == ex
-    assert c2.POINTS['ZONE_STOP_EXIT'][0] == pytest.approx(ex[0] + 0.30)
-    assert c2.POINTS['ZONE_STOP_EXIT'][1:] == ex[1:]
-    for c in (c1, c2):
+def test_stop_exit_point_equals_zone_exit():
+    """stop 퇴장 위치는 두 로봇 모두 ZONE_EXIT 와 같은 점 (0.5, -0.4, 3.14), 직접 goto 는 금지."""
+    for n in (1, 2):
+        c = importlib.import_module(MODS[n]).PinkyPatrolNode
+        assert c.POINTS['ZONE_STOP_EXIT'] == c.POINTS['ZONE_EXIT'] == (0.5, -0.4, 3.14)
         assert c.STOP_EXIT_NAME == 'ZONE_STOP_EXIT'
         assert 'ZONE_STOP_EXIT' not in c.GOTO_ALLOWED      # 직접 goto 금지
 

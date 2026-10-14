@@ -89,10 +89,10 @@ class PinkyPatrolNode(Node):
         #   ZONE_ENTRY: 대기열 앵커(슬롯 0). zone_params_v3.yaml 의 queue_anchor 와 같아야 함 (테스트가 검사)
         #   ZONE_EXIT : 구역을 나온 뒤 락(토큰)을 반납하는 출구. yaw 3.14 = 뒤 방향(180도)
         "ZONE_ENTRY": (1.0, -0.7, 0.0),
-        "ZONE_EXIT":  (0.5, -0.5, 3.14),
-        # stop 으로 구역 밖에 나와 락을 반납하고 서는 위치 (로봇마다 고정). ZONE_EXIT 에서 +x 방향(입구 줄 쪽)으로
-        # 0.30 m 간격: pinky1 = ZONE_EXIT, pinky2 = ZONE_EXIT + 0.30. 서로 통신하지 않고 겹치지 않게 하는 고정 오프셋
-        "ZONE_STOP_EXIT": (0.8, -0.5, 3.14),
+        "ZONE_EXIT":  (0.5, -0.4, 3.14),
+        # stop 으로 구역 밖에 나와 락을 반납하고 서는 위치. 두 로봇 모두 ZONE_EXIT 와 같은 점 (2026-10-14 사용자 지정,
+        # 입구 줄(y=-0.7)과 거리를 벌려 충돌을 줄임). 로봇별 줄 세우기(오프셋)는 하지 않음
+        "ZONE_STOP_EXIT": (0.5, -0.4, 3.14),
     }
 
     # start 명령의 순찰 경로: P2 -> ZONE_ENTRY -> P3 -> P6 -> ZONE_EXIT -> P1
