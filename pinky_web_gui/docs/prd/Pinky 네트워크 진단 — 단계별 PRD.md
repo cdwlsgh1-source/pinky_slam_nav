@@ -2,6 +2,8 @@
 
 Oct 11, 2026 · 초안 v2.1 (Step N5 의심 원인 알람 추가. 외부 스크립트 실행 → **GUI 내장 상시 수집기**로 변경. 결정이 필요한 항목은 5절)
 
+> 현황 (2026-10-14): **N1~N5 모두 미착수** (`backend/` 에 수집기·`netdiag` 코드 없음, `config/netdiag.yaml` 없음). 그 사이 알람바가 서버 `AlarmManager` 로 바뀌어서 **N5 의 전제(현재 알람 상태바)가 낡았다** — N5 절의 "현재 알람 상태바"와 아래 정정 참고.
+
 ## 0. 공통 개요
 
 ### 0-1. 배경과 문제
@@ -229,7 +231,9 @@ pinky_web_gui 의 네트워크 수집기에 로봇 쪽 지표(CPU, 메모리, Wi
 
 네트워크 연결이 의심되는 원인이 생기면 **메인 화면 위쪽의 알람 상태바**에 알람을 띄운다. 등급(양호/주의/불량)만이 아니라 "왜 의심되는지"를 문구로 알려 주는 단계다. 수집기(N1)의 지표와 등급 이벤트(N3)를 입력으로 쓴다.
 
-### 현재 알람 상태바 (`frontend/index.html`, `app.js`, `style.css`)
+> **정정 (2026-10-14, 알람바 PRD A1~A7 구현 뒤)**: 아래 "현재 알람 상태바" 설명은 N5 를 쓴 시점(알람을 브라우저 `addAlarm` 이 만들고 이력만 쌓던 때)의 것이다. 지금은 서버 `backend/alarms.py` 의 `AlarmManager` 가 알람을 만들고 활성/해소/ACK/SIL, 레벨 5단계(HH/H/L/LL/info), 소리, 이력 파일(`data/alarms/`), Alarm 화면(History·Catalog)을 이미 갖고 있다. 따라서 N5 는 **별도 `net_alarm` WS 이벤트와 `addAlarm` 확장을 새로 만들지 말고**, 규칙 평가 결과를 `AlarmManager` 알람(카탈로그 `alarms.yaml` 에 코드 추가, 같은 원인 묶기·해소는 기존 기능 사용)으로 내도록 다시 설계한다. FRN5-3(시작·해소 줄), FRN5-4(묶기), FRN5-6(`net_alarm`), FRN5-8(이력 파일), FRN5-10~11(칩·표시)이 영향을 받는다. 구현 전에 이 절을 고쳐 쓴다.
+
+### 현재 알람 상태바 (N5 작성 시점, `frontend/index.html`, `app.js`, `style.css`)
 
 - 구성: 칩(`connChip` 연결 상태, `zoneChip` 구역 상태) → `비상 정지` 버튼 → 알람 목록(`#alarmList`, `addAlarm(level, text)`로 `{level, text, 시각}`를 맨 앞에 추가, 최대 `MAX_ALARMS`개).
 - 칩 색은 `data-level`(`ok`/`warn`/`bad`/`dim`)과 CSS 변수 `--ok`/`--warn`/`--bad`를 쓴다. 알람 목록 항목은 `.bad`/`.warn` 클래스로 색이 바뀐다.

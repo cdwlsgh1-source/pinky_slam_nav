@@ -48,6 +48,10 @@ Oct 6, 2026 · @JinHo
 
 ### 로드맵
 
+> 현황 (2026-10-14): Step 0~4, 6 구현 완료, Step 5 는 일부만 구현. 단위·mock 테스트 567개 통과(`.venv/bin/python -m pytest tests`). **실로봇 확인은 아직 하지 않았다** (`../checklists/README.md`). 아래 각 Step 의 완료 기준은 `[x]` = 자동 검증(mock·격리 도메인) 통과, `[ ]` = 사용자 실물 확인 대기이거나 미구현이다.
+> 이 PRD 의 구역 전제(v1 zone manager, RED1IN/OUT 문)는 순찰 노드 v3(`../../../my_pinky_package/docs/prd/Pinky 위험구역 대기열 — 단계별 PRD.md`) 이전 기준이다. v3 는 문(RED*)을 없애고 앵커 진입·출구 반납으로 바꿨고 GUI 연동은 그 PRD 의 Step Q6 에서 한다. 그때까지 이 PRD 의 RED* 관련 요구(FR3-12, FR4-1, FR4-4)는 v2 순찰 노드 기준으로만 맞다.
+
+
 1. **Step 0** 레포 분석, `CLAUDE.md` 작성, v1/v2 zone manager 확정
 2. **Step 1** 백엔드 뼈대: 상태 구독과 WebSocket 중계
 3. **Step 2** 지도 화면: 맵과 로봇 2대 위치 표시
@@ -79,10 +83,10 @@ Oct 6, 2026 · @JinHo
 
 ### 완료 기준
 
-- [ ] `CLAUDE.md`를 읽은 새 Claude Code 세션이 "로봇에 start 명령을 보내는 경로"를 정확히 설명한다.
-- [ ] `docs/interfaces.md`의 토픽 이름이 실제 코드와 브리지 YAML에서 확인된 것만 담고 있다.
-- [ ] v1/v2 결정과 근거가 기록되어 있다.
-- [ ] 기존 소스 파일이 하나도 수정되지 않았다 (`git diff`로 확인).
+- [x] `CLAUDE.md`를 읽은 새 Claude Code 세션이 "로봇에 start 명령을 보내는 경로"를 정확히 설명한다.
+- [x] `docs/interfaces.md`의 토픽 이름이 실제 코드와 브리지 YAML에서 확인된 것만 담고 있다.
+- [x] v1/v2 결정과 근거가 기록되어 있다.
+- [x] 기존 소스 파일이 하나도 수정되지 않았다 (`git diff`로 확인). 단 이후 Step 1 에서 브리지 yaml 에 배터리 토픽을 추가했다 (아래 Step 1 참고).
 
 ### Claude Code 프롬프트
 
@@ -133,12 +137,12 @@ Oct 6, 2026 · @JinHo
 
 ### 완료 기준
 
-- [ ] `--mock` 모드에서 `/api/state`가 두 로봇의 데이터를 반환한다.
+- [x] `--mock` 모드에서 `/api/state`가 두 로봇의 데이터를 반환한다. (`tests/test_state.py`, `test_mock_flow.py`)
 - [ ] 브라우저 콘솔에서 WebSocket에 접속하면 스냅샷과 pose 업데이트가 계속 찍힌다.
 - [ ] 실제 로봇 연결 시 `ros2 topic echo /pinky1/amcl_pose`의 값과 `/api/state`의 pose가 일치한다.
 - [ ] 로봇의 전원을 끄면 5초 후 `online: false`가 된다.
-- [ ] 잘못된 JSON을 `patrol_status`로 보내도 서버가 유지된다.
-- [ ] 기존 소스 파일은 수정되지 않았다.
+- [x] 잘못된 JSON을 `patrol_status`로 보내도 서버가 유지된다. (`test_invalid_json_keeps_server_and_raw_in_detail`)
+- [ ] 기존 소스 파일은 수정되지 않았다. **→ 어긋남**: `/battery_state` 를 받으려고 `domain_bridge/config/pinky_bridge_pinky{1,2}.yaml` 에 배터리 토픽을 추가했다 (커밋 `d923481`, 이후 위험구역 대기열 Step Q3 에서 v3 토픽 5개도 추가). 새 코드는 `pinky_web_gui/` 에만 둔다는 원칙의 의도된 예외이고 `CLAUDE.md` 6절의 "기존 파일 수정 금지" 와 충돌하니 다음 변경 때 정리가 필요하다.
 
 ### Claude Code 프롬프트
 
@@ -179,7 +183,7 @@ pinky_web_gui/backend/ 에 FastAPI + rclpy 백엔드를 만들어줘. 요구사�
 
 - [ ] mock 모드에서 지도 위 두 마커가 부드럽게 움직이고 방향 화살표가 진행 방향과 일치한다.
 - [ ] 실제 로봇에서 마커 위치와 로봇의 실제 위치가 맞는다 (원점 P1, 우측 끝 P3에서 직접 확인).
-- [ ] 지도 위 클릭 좌표가 기존 `pinky_map_viewer.html`의 같은 지점 좌표와 일치한다 (변환식 검증).
+- [x] 지도 위 클릭 좌표가 기존 `pinky_map_viewer.html`의 같은 지점 좌표와 일치한다 (변환식 검증, `tests/verify_transform.py`).
 - [ ] 백엔드를 껐다 켜면 새로고침 없이 자동 재연결된다.
 - [ ] 모바일 브라우저 폭에서도 사이드바가 지도 아래로 내려가며 깨지지 않는다.
 
@@ -233,12 +237,12 @@ pinky_web_gui/frontend/ 에 단일 HTML + JS 지도 화면을 만들어줘. 요�
 
 ### 완료 기준
 
-- [ ] mock 모드에서 start → MOVING → DONE 흐름과 stop → STOPPED 흐름이 화면에 반영된다.
+- [x] mock 모드에서 start → MOVING → DONE 흐름과 stop → STOPPED 흐름이 화면에 반영된다. (`tests/test_mock_flow.py`, `verify_step3_mock.py`)
 - [ ] 실제 pinky1에 `start`를 보내면 순찰이 시작되고, 기존 `pinky_control_client_v2.py`로 보낸 것과 같은 동작을 한다.
 - [ ] 지점 3개(P2, P3, P6)를 골라 보내면 로봇에 `goto:P2,P3,P6`가 전달되고, 카드에 지점별 진행이 표시되며, 마지막에 홈으로 복귀해 DONE이 된다.
-- [ ] 구역 안 지점(P3)이 포함된 경로를 두 로봇이 동시에 요청하면 한 대는 WAITING\_ZONE으로 표시되고, 구역이 비면 이어서 진행한다.
-- [ ] 순찰 중에 `start`를 다시 보내면 "응답 없음/무시됨" 표시가 5초 후에 나타난다.
-- [ ] `goto` 지점에 `RED1IN`을 넣어 API를 직접 호출하면 400이 반환된다.
+- [ ] (mock 통과: `test_two_robots_contend_for_zone_one_waits`, 실로봇은 대기열 v3 기준으로 다시 확인 필요) 구역 안 지점(P3)이 포함된 경로를 두 로봇이 동시에 요청하면 한 대는 WAITING\_ZONE으로 표시되고, 구역이 비면 이어서 진행한다.
+- [x] 순찰 중에 `start`를 다시 보내면 "응답 없음/무시됨" 표시가 5초 후에 나타난다. (`test_no_response_after_timeout`)
+- [x] `goto` 지점에 `RED1IN`을 넣어 API를 직접 호출하면 400이 반환된다. (`test_goto_rejects`; v3 에서 문이 없어져도 허용 목록 방식이라 계속 거절된다)
 - [ ] 노드를 막 켠 뒤 첫 작업에서 `STARTING`이 길어지면 "시작 준비 중" 안내가 표시된다.
 - [ ] 로봇 한 대를 끄면 그 로봇의 버튼만 비활성화되고 다른 로봇은 영향이 없다.
 - [ ] 두 로봇에 동시에 `start`해도 각각 올바른 토픽(`/pinky1/...`, `/pinky2/...`)으로 나간다.
@@ -289,12 +293,12 @@ PRD의 Step 3 FR3-1 ~ FR3-13을 구현해줘.
 
 ### 완료 기준
 
-- [ ] mock 모드에서 한 로봇이 구역에 들어가면 배지와 구역 영역 색이 바뀌고, 나가면 원래대로 돌아온다.
+- [x] mock 모드에서 한 로봇이 구역에 들어가면 배지와 구역 영역 색이 바뀌고, 나가면 원래대로 돌아온다. (`tests/test_zone.py`, `verify_step4_mock.py`, `verify_step4_ui.py`)
 - [ ] 실제 로봇에서 한 대가 구역에 있을 때 다른 로봇이 `WAITING_ZONE`으로 표시된다.
 - [ ] 지도의 구역 영역이 실제 맵의 P3\~P6 위치와 맞고, 사용자가 경계를 확인했다.
 - [ ] LiDAR 토글을 켜면 점이 벽 윤곽과 대체로 겹치고, 모두 끄면 `ros2 topic hz /pinky1/scan`의 구독자가 사라진다.
 - [ ] 비상정지를 누르면 순찰 중인 로봇이 2초 안에 멈춘다 (낮은 속도로 직접 확인). 노드를 막 켠 뒤 첫 작업의 초기 위치 보정 회전 중에도 확인한다.
-- [ ] 수동 조작 중 브라우저 탭을 닫으면 로봇이 0.5초 안에 멈춘다.
+- [ ] (mock 통과: `tests/test_motion.py` 입력 끊김·해제 시 즉시 0 속도, 실로봇 확인 대기) 수동 조작 중 브라우저 탭을 닫으면 로봇이 0.5초 안에 멈춘다.
 - [ ] 순찰 경로 선과 강조 지점이 `start`와 `goto` 모두에서 로봇의 실제 진행에 맞게 갱신된다.
 
 ### Claude Code 프롬프트
@@ -311,6 +315,8 @@ PRD의 Step 4 FR4-1 ~ FR4-9를 구현해줘. FR4-9(수동 조작)는 마지막�
 ```
 
 ## Step 5. 카메라, 로그와 이력, 인증 (선택)
+
+> 상태 (2026-10-14): **일부만 구현**. 로그 화면(`backend/logstore.py`, `frontend/logview.js`)과 인증(Step 6-1 로 대체)은 구현됐다. **카메라(FR5-1~2, 전용 브리지 YAML)는 구현하지 않았다** (`backend/`, `frontend/`, `domain_bridge/config/` 어디에도 없음). 로봇 추가는 `robots.yaml` 에 직접 쓰는 대신 왼쪽 메뉴 `Add Robot` 안내 팝업(`frontend/addrobot.js`)이 붙여 넣을 내용을 알려 주는 방식이다. 이력 파일 저장·재시작 후 유지는 로그 화면 기준으로 **확인 필요**, 알람 이력은 알람바 PRD 의 `data/alarms/` 파일이 맡는다. 아래 완료 기준은 모두 미확인이다.
 
 운영에 필요한 부가 기능을 추가한다: 로봇 카메라 영상, 이벤트 이력 저장, 접속 제한. 모두 선택 사항이므로 필요한 것만 골라서 진행해도 된다.
 
@@ -368,7 +374,7 @@ PRD의 Step 5 FR5-1 ~ FR5-10 중에서 내가 지금 요청하는 것만 구현�
 ## Step 6. 인증과 프로세스 제어 (시스템 패널)
 
 > 상태: 6-1 ~ 6-5 구현됨(mock 검증), 6-6 ~ 6-8 **실물 확인 대기**. 이 Step은 처음 계획(Step 0~5)에는 없었고 개발 중에 추가됐다. Step 5의 인증(FR5-8)은 여기서 **대체**됐다: 환경 변수 비밀번호 2개(viewer/operator) 대신 프로그램에 고정된 ID/비밀번호 계정(`mngr`=manager, `oper`=operator)을 쓴다. 역할 이름은 `operator`→`manager`, `viewer`→`operator`로 바뀌었다.
-> 실물 확인 절차: `../checklists/step6_process_control_real_checklist.md`. 사용법: `../../README.md`의 "인증과 프로세스 제어" 절.
+> 실물 확인 절차: `../checklists/step6_process_control_real_checklist.md`. 사용법: `../usage.md`의 "인증과 프로세스 제어" 절.
 
 관제 PC의 터미널과 로봇의 SSH 터미널을 오가며 켜던 것을 시스템 패널의 버튼으로 옮긴다. 켜고 끄는 대상: 도메인 브릿지(`ros2 launch launch/bridges.launch.xml`), `zone_manager`, 로봇별 bringup, map(Nav2), 순찰 노드.
 
@@ -448,7 +454,7 @@ PRD의 Step 5 FR5-1 ~ FR5-10 중에서 내가 지금 요청하는 것만 구현�
 
 ### 완료 기준 (Step 6 전체)
 
-- [ ] 6-1 ~ 6-5: 단위 테스트와 mock 검증 통과 (`tests/test_auth.py`, `test_procs.py`, `test_logstore.py`, `verify_proc_mock.py`, `verify_proc_ui.py`) — 구현 시 통과 확인됨
+- [x] 6-1 ~ 6-5: 단위 테스트와 mock 검증 통과 (`tests/test_auth.py`, `test_procs.py`, `test_logstore.py`, `verify_proc_mock.py`, `verify_proc_ui.py`) — 구현 시 통과 확인됨
 - [ ] 6-6: A1~A7 모두 통과 (사용자 확인)
 - [ ] 6-7: B1~B7 모두 통과 (사용자 확인)
 - [ ] 6-8: C1~C4 모두 통과 (사용자 확인)

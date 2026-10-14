@@ -16,3 +16,10 @@
 ## 전체 시작 순서 (웹 GUI 시스템 패널)
 
 웹 GUI 시스템 패널의 **전체 시작** 순서는 위와 다르다: 도메인 브릿지 → bringup → map → zone_manager → 순찰 노드(정지는 반대). 브릿지를 로봇 토픽보다 먼저 켜면 센서 QoS(best_effort)가 안 맞아 데이터가 안 넘어오는 것을 격리 도메인에서 재현해서 정한 순서이고, 각 단계가 켜진 것을 확인한 뒤 다음으로 간다 (`pinky_web_gui/config/processes.yaml` 의 목록 순서).
+
+## 위험구역 대기열 v3 와 GUI (2026-10-14)
+
+- 대기열 v3 는 `zone_manager_node_v3`, `zone_gate_client_v3`, 순찰 노드 `pinky_patrol_node_pinky{1,2}_v3` 로, 기존 v2 를 건드리지 않고 `_v3` 신규 파일로만 만들었다 (이상 시 v2 로 복구하려는 목적). 토픽은 `/zone_manager_v3/*`, 설정은 `zone_params_v3.yaml`, 실행은 `zone_manager_v3.launch.xml`.
+- v3 는 구역 문(RED*IN/OUT)을 없애고 앵커 진입(`ZONE_ENTRY`)·출구 반납(`ZONE_EXIT`)으로 바꿨다. 허가를 받은 로봇은 슬롯·앵커를 거치지 않고 목적지로 직행한다.
+- 웹 GUI(관제주행 PRD Step 3·4)는 v2 기준이다. `detail=RED*` 표시, 구역 영역의 문 표시, `interfaces.md` 의 허용 목록 설명이 v3 와 다르다. 연동은 대기열 PRD 의 Step Q6 에서 하며, 그 전에는 GUI 의 `processes.yaml` 을 v3 로 바꾸지 않는다.
+- 브리지 yaml 은 예외적으로 두 번 수정됐다: Step 1 의 배터리 토픽(`d923481`), 대기열 Q3 의 v3 토픽 5개(`899da88`).
