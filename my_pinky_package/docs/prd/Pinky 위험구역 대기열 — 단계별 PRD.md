@@ -334,11 +334,21 @@ GUI 연동 전에 **코드만으로** 실물 로봇에서 동작을 확인한다
 | 대기 중 `stop` 에 순찰 노드가 죽음 | **버그 발견 → 수정**. `Executor is already spinning` (`_cmd_cb` 에서 `navigator.cancelTask()` 를 호출하면 작업 스레드와 executor 충돌). 콜백은 플래그만 세우고 취소는 작업 스레드가 하도록 수정, LED 가 초록으로 남은 것도 노드 비정상 종료 때문으로 추정(미확인) |
 | 토큰 보유 중 `stop` | **문제 확인**. 구역 안이면 락을 일부러 유지하던 설계라 토큰이 반납되지 않음(120초 뒤 해제) → 아래 변경으로 처리 |
 
-변경 (2026-10-14, 사용자 결정): 토큰 보유 중 `stop` → `ZONE_STOP_EXIT` 로 나와 락 반납(대기열 밖 줄은 순찰 노드 고정 오프셋, 매니저 변경 없음). 이전 `stop` 동작은 새 명령 `emergency_stop` 으로 유지. 클라이언트 `pinky_patrol_cmd/pinky_control_client_v3.py` 에 `emergency_stop` 추가. 코드·가짜 navigator 테스트 57개 통과, **후퇴·`emergency_stop` 동작은 실기 미확인**.
+변경 (2026-10-14, 사용자 결정): 토큰 보유 중 `stop` → `ZONE_STOP_EXIT` 로 나와 락 반납(대기열 밖 줄은 순찰 노드 고정 오프셋, 매니저 변경 없음). 이전 `stop` 동작은 새 명령 `emergency_stop` 으로 유지. 클라이언트 `pinky_patrol_cmd/pinky_control_client_v3.py` 에 `emergency_stop` 추가. 코드·가짜 navigator 테스트 57개 통과.
+
+**T4 재시험 실기 결과 (2026-10-14, 위 변경 반영 후)**
+
+| 시험 | 결과 | 판정 |
+| --- | --- | --- |
+| `emergency_stop` (토큰 보유) | 현재 위치에서 120초 대기 후 토큰 반납 (`max_hold_sec` 기본값) | **성공** |
+| `stop` (토큰 보유) | `ZONE_STOP_EXIT` 로 이동, 도착 직후 토큰 반납 | **성공** |
+
+- T4(대기 중 stop / 토큰 보유 중 stop / emergency_stop) 세 경우 모두 실기 확인 완료.
+- 확인하지 않은 것: yaml `max_hold_sec` 를 바꿨을 때 `emergency_stop` 해제 시간이 따라가는지, pinky2 의 `ZONE_STOP_EXIT (0.8,-0.5)` 와 입구 슬롯 근접 여부(결과 보고에 pinky2 언급 없음).
 
 아직 측정/시험하지 않은 항목:
-- T2 단독 통과, T4 후퇴·`emergency_stop` 재시험(위 변경 후), T6 크래시(stale 제거), T7 `start` 경로
-- pinky2 `ZONE_STOP_EXIT (0.8,-0.5)` 가 입구 슬롯 0·1(y=-0.7)과 0.2 m 정도라 근접하는지 확인
+- T2 단독 통과, T6 크래시(stale 제거), T7 `start` 경로
+- pinky2 `ZONE_STOP_EXIT (0.8,-0.5)` 가 입구 슬롯 0·1(y=-0.7)과 0.2 m 정도라 근접하는지 확인, `max_hold_sec` 변경 시 `emergency_stop` 해제 시간 확인
 - `back_dir (-1, 0)` 육안 확정 (데이터로는 일치)
 
 **T1 명령 (로봇은 움직이지 않는다 — 실제 로봇 id를 쓰지 않는다)**
