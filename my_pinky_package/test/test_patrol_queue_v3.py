@@ -86,6 +86,20 @@ def test_zone_exit_is_shared_and_red_points_removed(n):
     assert cls.POINTS['ZONE_EXIT'][2] == pytest.approx(3.14, abs=0.01)
     assert not [k for k in cls.POINTS if k.startswith('RED')]
     assert cls.ZONE_ENTRY_NAME == 'ZONE_ENTRY' and cls.ZONE_EXIT_NAME == 'ZONE_EXIT'
+    assert cls.POINTS['ZONE_EXIT'][:2] == (0.5, -0.5)
+
+
+def test_stop_exit_points_line_up_behind_zone_exit():
+    """stop 퇴장 위치: pinky1 = ZONE_EXIT, pinky2 = ZONE_EXIT 에서 +x 로 0.30 m (겹치지 않는 고정 오프셋)."""
+    c1 = importlib.import_module(MODS[1]).PinkyPatrolNode
+    c2 = importlib.import_module(MODS[2]).PinkyPatrolNode
+    ex = c1.POINTS['ZONE_EXIT']
+    assert c1.POINTS['ZONE_STOP_EXIT'] == ex
+    assert c2.POINTS['ZONE_STOP_EXIT'][0] == pytest.approx(ex[0] + 0.30)
+    assert c2.POINTS['ZONE_STOP_EXIT'][1:] == ex[1:]
+    for c in (c1, c2):
+        assert c.STOP_EXIT_NAME == 'ZONE_STOP_EXIT'
+        assert 'ZONE_STOP_EXIT' not in c.GOTO_ALLOWED      # 직접 goto 금지
 
 
 # ==============================================================================
@@ -191,13 +205,13 @@ def make_robot(env, n, robot_id, travel=0.3):
     cls = importlib.import_module(MODS[n]).PinkyPatrolNode
     nav = env.Nav(travel=travel)
     r = types.SimpleNamespace(navigator=nav, robot_id=robot_id, statuses=[], _stop_requested=False,
-                              _running=True, notified=[])
+                              _emergency_requested=False, _running=True, notified=[])
     r.gate = env.Gate(nav, robot_id)
     for name in ('POINTS', 'WAYPOINTS', 'ZONE_ENTRY_NAME', 'ZONE_EXIT_NAME', 'ZONE_ENTRY_INDEX',
-                 'ZONE_EXIT_INDEX', 'NAV_RETRIES'):
+                 'ZONE_EXIT_INDEX', 'NAV_RETRIES', 'STOP_EXIT_NAME'):
         setattr(r, name, getattr(cls, name))
     for name in ('_queue_and_enter', '_start_goal', '_cancel_goal', '_record_pose', '_abort_entry',
-                 'make_pose', 'get_current_pose', '_run_patrol'):
+                 'make_pose', 'get_current_pose', '_run_patrol', '_retreat_after_stop'):
         setattr(r, name, types.MethodType(cls.__dict__[name], r))
     r.get_logger = nav.get_logger
     r.publish_status = lambda state, idx, detail='': r.statuses.append((state, detail))
@@ -309,6 +323,21 @@ def test_stop_while_queued_cancels_entry(env):
     assert env.pump(lambda: env.status['v'] == 'free', 4)
 
 
+@pytest.mark.parametrize('n', [1, 2])
+def test_stop_command_callback_does_not_cancel_from_callback_thread(env, n):
+    """stop 명령 콜백은 플래그만 세운다. 콜백에서 navigator.cancelTask() 를 부르면 실기에서
+    'Executor is already spinning' 으로 노드가 죽었다 (T4, 2026-10-14)."""
+    cls = importlib.import_module(MODS[n]).PinkyPatrolNode
+    r = make_robot(env, n, f'pinky{n}')
+    r._cmd_cb = types.MethodType(cls.__dict__['_cmd_cb'], r)
+    calls = []
+    r.navigator.cancelTask = lambda: calls.append('cancel')
+    r._running = True
+    r._cmd_cb(types.SimpleNamespace(data='stop'))
+    assert r._stop_requested is True
+    assert calls == []
+
+
 def test_grant_received_while_traveling_to_slot(env):
     occ = occupy(env)
     r = make_robot(env, 1, 'pinky2', travel=2.0)         # 느린 이동: 도착 전에 허가가 온다
@@ -385,3 +414,53 @@ def test_pinky1_start_path_waits_in_queue(env):
     assert env.pump(lambda: not t.is_alive(), 20)
     assert states(r)[-1] == 'DONE'
     assert env.pump(lambda: env.status['v'] == 'free', 4)
+
+
+# ------------------------------------------------------------------------------
+# stop / emergency_stop (T4 후속, 2026-10-14)
+# ------------------------------------------------------------------------------
+def _goal(wp):
+    """POINTS 튜플 -> FakeNavigator.goals 에 기록되는 (x, y, yaw) 형태."""
+    return (round(wp[0], 3), round(wp[1], 3), round(wp[2] if len(wp) > 2 else 0.0, 2))
+
+
+def _stop_in_zone(env, emergency):
+    r = make_robot(env, 2, 'pinky2', travel=1.0)
+    t, out = run_in_thread(r._run_patrol)
+    p3 = _goal(r.POINTS['P3'])
+    assert env.pump(lambda: p3 in r.navigator.goals)       # 허가받고 구역 안(P3)으로 가는 중
+    assert env.status['v'] == 'occupied_by:pinky2'
+    r._emergency_requested = emergency
+    r._stop_requested = True
+    return r, t
+
+
+def test_stop_in_zone_retreats_to_stop_exit_and_returns_token(env):
+    r, t = _stop_in_zone(env, emergency=False)
+    assert env.pump(lambda: not t.is_alive(), 12)
+    assert r.navigator.goals[-1] == _goal(r.POINTS['ZONE_STOP_EXIT'])
+    assert 'RETREATING' in states(r) and states(r)[-1] == 'STOPPED'
+    assert env.pump(lambda: env.status['v'] == 'free', 4)    # 토큰 반납됨
+
+
+def test_emergency_stop_in_zone_keeps_token_and_position(env):
+    r, t = _stop_in_zone(env, emergency=True)
+    assert env.pump(lambda: not t.is_alive(), 12)
+    assert _goal(r.POINTS['ZONE_STOP_EXIT']) not in r.navigator.goals
+    assert 'RETREATING' not in states(r)
+    assert not env.pump(lambda: env.status['v'] == 'free', 2.0)   # 락 유지 (max_hold_sec 뒤에만 해제)
+    r.gate.notify_exit()                                   # 정리
+    assert env.pump(lambda: env.status['v'] == 'free', 4)
+
+
+@pytest.mark.parametrize('n', [1, 2])
+def test_cmd_cb_emergency_stop_sets_both_flags(env, n):
+    cls = importlib.import_module(MODS[n]).PinkyPatrolNode
+    r = make_robot(env, n, f'pinky{n}')
+    r._cmd_cb = types.MethodType(cls.__dict__['_cmd_cb'], r)
+    r._running = True
+    r._cmd_cb(types.SimpleNamespace(data='emergency_stop'))
+    assert r._stop_requested and r._emergency_requested
+    r._stop_requested = r._emergency_requested = False
+    r._cmd_cb(types.SimpleNamespace(data='stop'))
+    assert r._stop_requested and not r._emergency_requested

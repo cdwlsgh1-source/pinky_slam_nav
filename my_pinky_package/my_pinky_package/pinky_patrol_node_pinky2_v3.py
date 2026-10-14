@@ -89,7 +89,10 @@ class PinkyPatrolNode(Node):
         #   ZONE_ENTRY: 대기열 앵커(슬롯 0). zone_params_v3.yaml 의 queue_anchor 와 같아야 함 (테스트가 검사)
         #   ZONE_EXIT : 구역을 나온 뒤 락(토큰)을 반납하는 출구. yaw 3.14 = 뒤 방향(180도)
         "ZONE_ENTRY": (1.0, -0.7, 0.0),
-        "ZONE_EXIT":  (0.7, -0.5, 3.14),
+        "ZONE_EXIT":  (0.5, -0.5, 3.14),
+        # stop 으로 구역 밖에 나와 락을 반납하고 서는 위치 (로봇마다 고정). ZONE_EXIT 에서 +x 방향(입구 줄 쪽)으로
+        # 0.30 m 간격: pinky1 = ZONE_EXIT, pinky2 = ZONE_EXIT + 0.30. 서로 통신하지 않고 겹치지 않게 하는 고정 오프셋
+        "ZONE_STOP_EXIT": (0.8, -0.5, 3.14),
     }
 
     # start 명령의 순찰 경로: P2 -> ZONE_ENTRY -> P3 -> P6 -> ZONE_EXIT -> P1
@@ -112,6 +115,7 @@ class PinkyPatrolNode(Node):
 
     # [goto용] POINTS의 키 이름 기준
     ZONE_ENTRY_NAME = 'ZONE_ENTRY'                       # 허가 요청 지점
+    STOP_EXIT_NAME = 'ZONE_STOP_EXIT'                   # stop 퇴장 후 락 반납 지점
     ZONE_EXIT_NAME = 'ZONE_EXIT'                       # 락 반납 지점
     ZONE_POINTS = {'P3', 'P4', 'P5', 'P6'}           # 위험 구역 안 포인트
 
@@ -153,7 +157,8 @@ class PinkyPatrolNode(Node):
 
         # 스레드 간 공유 상태
         self._running = False         # 작업(순찰/goto) 수행 중 여부
-        self._stop_requested = False  # stop 명령 수신 여부
+        self._stop_requested = False  # stop / emergency_stop 명령 수신 여부
+        self._emergency_requested = False  # emergency_stop 수신 여부 (True 면 후퇴/락 반납 없이 현재 동작 유지)
         self._thread = None           # 작업 스레드 핸들
         self._pose_initialized = False  # 초기 위치 보정을 이미 했는지 (노드 실행 후 1회만)
 
@@ -265,6 +270,7 @@ class PinkyPatrolNode(Node):
                 self.get_logger().warn('이미 순찰 중입니다. 명령 무시.')
                 return
             self._stop_requested = False
+            self._emergency_requested = False
             self._running = True   # 스레드 시작 전에 세팅 (연타 시 중복 실행 방지)
             self._thread = threading.Thread(target=self._run_patrol, daemon=True)
             self._thread.start()
@@ -293,18 +299,25 @@ class PinkyPatrolNode(Node):
                 return
 
             self._stop_requested = False
+            self._emergency_requested = False
             self._running = True
             self._thread = threading.Thread(
                 target=self._run_route, args=(names,), daemon=True)
             self._thread.start()
 
-        # --- stop: 현재 작업 중단 ---
-        elif cmd == 'stop':
+        # --- stop / emergency_stop: 현재 작업 중단 ---
+        #   stop           : 멈춘 뒤, 구역 안에서 락을 들고 있으면 ZONE_STOP_EXIT 로 나와 락을 반납한다
+        #   emergency_stop : 그 자리 정지 + 락 유지 (락은 zone_manager 의 max_hold_sec 뒤에 자동 해제)
+        elif cmd in ('stop', 'emergency_stop'):
             if not self._running:
                 self.get_logger().warn('순찰 중이 아닙니다. 명령 무시.')
                 return
+            # 콜백(executor 스레드)에서 navigator.cancelTask() 를 부르면 작업 스레드가 같은 executor 를 spin 중이라
+            # 'Executor is already spinning' 으로 노드가 죽는다. 플래그만 세우고 취소는 작업 스레드가 한다
+            # (_navigate / _queue_and_enter / 순찰 루프가 매 0.1초 _stop_requested 를 확인해 goal 을 취소함).
+            if cmd == 'emergency_stop':
+                self._emergency_requested = True
             self._stop_requested = True
-            self.navigator.cancelTask()   # 로컬 액션이라 바로 취소 가능
 
         else:
             self.get_logger().warn(f'알 수 없는 명령: {cmd}')
@@ -596,6 +609,37 @@ class PinkyPatrolNode(Node):
         self.stop_blink()
         self.publish_status(state, idx, detail or name)
 
+    def _retreat_after_stop(self):
+        """
+        stop 으로 멈췄을 때 구역 안에서 락을 들고 있다면: ZONE_STOP_EXIT 로 나가 락을 반납한다.
+        _navigate 는 _stop_requested 면 곧바로 취소하므로 여기서는 별도 이동 루프를 쓴다.
+        emergency_stop 이면(이동 중에 들어와도) 즉시 멈추고 락을 유지한다 (max_hold_sec 뒤 자동 해제).
+        True : 도착해서 락을 반납함 / False : emergency 이거나 도달 실패 (락 유지)
+        """
+        if self._emergency_requested:
+            self.get_logger().warn('emergency_stop: 후퇴/락 반납 없이 현재 위치 유지 (max_hold_sec 뒤 락 자동 해제)')
+            return False
+        wp = self.POINTS[self.STOP_EXIT_NAME]
+        self.publish_status('RETREATING', -1, self.STOP_EXIT_NAME)
+        self.set_drive_led()
+        for attempt in range(self.NAV_RETRIES):
+            self.navigator.goToPose(self.make_pose(*wp))
+            while not self.navigator.isTaskComplete():
+                if self._emergency_requested:           # 후퇴 중 emergency_stop: 즉시 정지, 락 유지
+                    self.navigator.cancelTask()
+                    self.get_logger().warn('emergency_stop: 후퇴 중단, 락 유지')
+                    return False
+                time.sleep(0.1)
+            if self._emergency_requested:
+                return False
+            if self.navigator.getResult() == TaskResult.SUCCEEDED:
+                self.gate.notify_exit()
+                self.get_logger().info(f'stop: {self.STOP_EXIT_NAME} 도착, 락 반납 완료')
+                return True
+            self.get_logger().warn(f'후퇴 이동 실패, 재시도 {attempt+1}/{self.NAV_RETRIES}')
+        self.get_logger().warn('후퇴 실패 - 락 유지 (max_hold_sec 타임아웃 대기)')
+        return False
+
     def _leave_zone(self):
         """
         이탈 문(ZONE_EXIT_NAME)으로 이동 -> 락 반납.
@@ -696,6 +740,11 @@ class PinkyPatrolNode(Node):
             else:                                           # 홈 이동 실패 또는 stop
                 self.publish_status('STOPPED' if self._stop_requested else 'FAILED', -1, 'return')
         finally:
+            # stop 으로 끝났고 구역 안에서 락을 들고 있으면 구역 밖(ZONE_STOP_EXIT)으로 나와 락을 반납
+            # (emergency_stop 이면 현재 위치/락 유지)
+            if in_zone and self._stop_requested:
+                if self._retreat_after_stop():
+                    self.publish_status('STOPPED', -1, 'retreated')
             self.set_idle_led()     # 어떤 경우든 종료 시 대기 LED로 복귀
             self._running = False
 
@@ -705,6 +754,7 @@ class PinkyPatrolNode(Node):
     def _run_patrol(self):
         """[별도 스레드] WAYPOINTS 전체 순회. rclpy.spin()을 막지 않아 stop을 받을 수 있음."""
         self._running = True
+        holding = False   # True = 허가(락) 보유 중 (stop 시 후퇴/반납 판단용)
         self.publish_status('STARTING', -1)
         try:
             # 1) 최초 1회만 초기 위치 보정 (이후 start/goto에서는 생략)
@@ -724,6 +774,7 @@ class PinkyPatrolNode(Node):
                 if i == self.ZONE_ENTRY_INDEX:
                     if not self._queue_and_enter(i, self.ZONE_ENTRY_NAME):
                         break   # 중단/실패 상태는 _queue_and_enter 가 이미 발행함 (DONE 건너뜀)
+                    holding = True
                     self.publish_status('MOVING', i + 1)
                     continue
 
@@ -758,6 +809,7 @@ class PinkyPatrolNode(Node):
                         # 구역 이탈 waypoint 도착 -> 락 반납
                         if i == self.ZONE_EXIT_INDEX:
                             self.gate.notify_exit()
+                            holding = False
 
                         break  # 성공 -> 재시도 루프 탈출 (else 스킵)
                     else:
@@ -770,14 +822,18 @@ class PinkyPatrolNode(Node):
                     self.publish_status('FAILED', i + 1)
 
                 if self._stop_requested:
-                    # 구역 안에서 멈춘 경우 notify_exit를 보내지 않음
-                    # (물리적으로 아직 구역 안. max_hold_sec 타임아웃으로 해제됨)
+                    # 구역 안에서 멈춘 경우: 여기서는 notify_exit 를 보내지 않고 finally 에서
+                    # stop 이면 ZONE_STOP_EXIT 로 후퇴 후 반납, emergency_stop 이면 락 유지(max_hold_sec 뒤 해제)
                     self.publish_status('STOPPED', i)
                     break
             else:
                 # for-else: 바깥 루프가 끝까지 돌았을 때 = 전체 완주
                 self.publish_status('DONE', len(self.WAYPOINTS))
         finally:
+            # stop 으로 끝났고 구역 안에서 락을 들고 있으면 ZONE_STOP_EXIT 로 나와 락을 반납 (emergency_stop 이면 유지)
+            if holding and self._stop_requested:
+                if self._retreat_after_stop():
+                    self.publish_status('STOPPED', -1, 'retreated')
             self.set_idle_led()     # 순찰 종료(DONE/STOPPED/FAILED/예외) -> 대기 LED
             self._running = False
 

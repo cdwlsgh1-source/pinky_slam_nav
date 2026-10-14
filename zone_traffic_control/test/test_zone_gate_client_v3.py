@@ -20,6 +20,16 @@ from zone_traffic_control.zone_gate_client_v3 import (RetryTimer,
 PKG_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _params():
+    import yaml
+    prm = yaml.safe_load((PKG_ROOT / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
+    return prm['zone_manager_node_v3']['ros__parameters']
+
+
+# 슬롯 전진은 queue_advance_delay_sec 뒤에 일어나므로 대기 시간을 yaml 값에서 계산 (지연을 바꿔도 테스트 유지)
+ADVANCE_WAIT = 2 * _params()['queue_advance_delay_sec'] + 3.0
+
+
 def expected_slot(k):
     """zone_params_v3.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 의 (x, y) 를 계산 (앵커가 바뀌어도 테스트 유지)."""
     import yaml
@@ -106,9 +116,14 @@ def ros_env():
     node = Node('gate_client_v3_test')
     clients = {rid: ZoneGateClient(node, rid) for rid in ('pinky1', 'pinky2', 'pinky3', 'pinky4')}
 
-    def spin_until(cond, timeout=6.0):
+    def spin_until(cond, timeout=ADVANCE_WAIT):
         end = time.time() + timeout
         while time.time() < end:
+            # 실제 순찰 노드처럼 대기 중(미허가)인 클라이언트는 1초마다 재전송한다.
+            # 안 하면 queue_stale_sec(5초) 안에 전진 지연(queue_advance_delay_sec)을 기다리다 큐에서 제거됨
+            for c in clients.values():
+                if c._token is not None and not c.granted():
+                    c.resend_if_due()
             rclpy.spin_once(node, timeout_sec=0.05)
             if cond():
                 return True
@@ -164,12 +179,12 @@ def test_integration_grant_slots_full_and_cancel(ros_env):
     # 4) 취소: p3 가 cancel 하면 p4 가 k=1 로 전진 (advance delay 1.5s 이후)
     p3.cancel_entry()
     assert p3.current_slot is None
-    assert spin_until(lambda: p4.current_slot[0] == 1, timeout=6.0)
+    assert spin_until(lambda: p4.current_slot[0] == 1, timeout=ADVANCE_WAIT)
 
     # 5) 출입: p1 이 exit -> p2 허가, p4 는 k=0
     p1.notify_exit()
     assert spin_until(lambda: p2.granted(t2))
-    assert spin_until(lambda: p4.current_slot[0] == 0, timeout=6.0)
+    assert spin_until(lambda: p4.current_slot[0] == 0, timeout=ADVANCE_WAIT)
 
     # 정리: p2 exit -> p4 허가 -> p4 exit
     p2.notify_exit()
