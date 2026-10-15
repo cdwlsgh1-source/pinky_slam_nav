@@ -159,7 +159,7 @@ gate.notify_exit()                # 구역을 나오면 락 반납
 ```
 zone_traffic_control/
 ├── config/
-│   ├── zone_params_v3.yaml        # v3 파라미터 (사용)
+│   ├── zone_params_v3.yaml                     # v3 파라미터 (사용)
 │   └── zone_params.yaml, zone_params_v2.yaml   # 구버전
 ├── docs/
 │   └── zone_v3_relationship_light.svg          # 구조도
@@ -167,12 +167,12 @@ zone_traffic_control/
 │   ├── zone_manager_v3.launch.xml # v3 실행 (사용)
 │   └── zone_manager.launch.xml, zone_manager_v2.launch.xml   # 구버전
 ├── test/
-│   ├── test_zone_manager_v3.py    # slot_pose / normalize_dir / ZoneQueue
+│   ├── test_zone_manager_v3.py                 # slot_pose / normalize_dir / ZoneQueue
 │   └── test_zone_gate_client_v3.py
 ├── zone_traffic_control/
-│   ├── zone_manager_node_v3.py    # [핵심] 구역 관리자 노드
-│   ├── zone_gate_client_v3.py     # [핵심] 로봇용 클라이언트
-│   ├── README.md                  # 구버전(v1) 코드 해설
+│   ├── zone_manager_node_v3.py                 # [핵심] 구역 관리자 노드
+│   ├── zone_gate_client_v3.py                  # [핵심] 로봇용 클라이언트
+│   ├── README.md                               # 구버전(v1) 코드 해설
 │   └── zone_manager_node*.py, zone_gate_client*.py   # 구버전 (v1, v2)
 ├── package.xml / setup.py / setup.cfg
 └── resource/zone_traffic_control
