@@ -121,15 +121,3 @@ pinky_web_gui/
 
 상위 저장소(`pinky_slam_nav/`)의 다른 폴더(`my_pinky_package/` 순찰 노드, `zone_traffic_control/`, `domain_bridge/`, `map_view_pc/` …)와 역할은 [`CLAUDE.md`](CLAUDE.md) 2절에 있다. 파일 단위 설명은 [`docs/usage.md`](docs/usage.md) 의 "구조" 절.
 
-## 기여 방법
-
-별도 기여 가이드는 없어서 [`CLAUDE.md`](CLAUDE.md) 의 규칙을 요약한다.
-
-- 새 코드는 `pinky_web_gui/` 안에만 만든다. 기존 ROS 패키지(`my_pinky_package/`, `zone_traffic_control/`, `domain_bridge/` 등)는 수정하지 않는다.
-- 주석과 docstring 은 한국어로, "왜 이렇게 했는지"를 적는다.
-- 로봇 이름을 코드에 하드코딩하지 않는다 (`config/robots.yaml`).
-- 로봇으로 나가는 명령은 허용 목록(`start`, `stop`, `goto:<허용 포인트>`)만 통과시킨다.
-- mock 모드로 먼저 확인하고, 실제 로봇 테스트는 사용자가 직접 한다. ROS 검증은 `ROS_DOMAIN_ID=77`, `ROS_LOCALHOST_ONLY=1` 로만 한다.
-- 변경 후 `.venv/bin/python -m pytest tests -q` 를 통과시킨다.
-- 이슈·PR 절차, 브랜치 규칙: **[TODO]** 정해진 것이 없다.
-
