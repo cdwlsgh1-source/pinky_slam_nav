@@ -48,25 +48,6 @@ start pinky_map_viewer.html         # Windows (cmd)
    - 지점 좌표(P1~P7 등)는 `pinky_web_gui/config/points.yaml`에 있습니다.
 4. 지도에 표시된 `P1`, `P2` 같은 번호는 뷰어에서 클릭한 순서일 뿐이고, 순찰 노드의 지점 이름(P1~P7)과는 관계없습니다.
 
-## 지도 정보
-
-`my_pinky_map10.yaml`의 값입니다.
-
-| 항목 | 값 | 설명 |
-|---|---|---|
-| `image` | `my_pinky_map10.pgm` | 지도 이미지 (189 × 120 px) |
-| `mode` | `trinary` | free / occupied / unknown 3값 |
-| `resolution` | `0.010` | 1 px = 0.01 m |
-| `origin` | `[-0.167, -0.907, 0]` | 이미지 **왼쪽 아래** 모서리의 map 좌표 `[x, y, yaw]` |
-| `negate` | `0` | 색상 반전 없음 |
-| `occupied_thresh` | `0.65` | 이 값보다 어두우면 occupied |
-| `free_thresh` | `0.196` | 이 값보다 밝으면 free |
-
-- 지도 범위: x `-0.167 ~ 1.723` m, y `-0.907 ~ 0.293` m (해상도와 이미지 크기에서 계산한 값).
-- 뷰어의 좌표 변환식은 `x = -0.167 + px × 0.01`, `y = 0.293 − py × 0.01`입니다. 이미지의 맨 윗줄이 `py = 0`입니다.
-- 뷰어는 픽셀 밝기만 보고 occupancy를 표시합니다(255 근처는 free, 0 근처는 occupied, 그 외는 unknown). yaml의 `occupied_thresh`/`free_thresh`로 판정하지는 않습니다.
-- 뷰어 안의 지도 값(`META`)은 yaml에서 읽는 것이 아니라 HTML에 직접 적혀 있습니다. 지도를 새로 만들면 `pinky_map_viewer.html`의 `META`와 내장 이미지를 함께 바꿔야 합니다. 자동 변환 도구는 이 저장소에 없습니다 **[TODO]**.
-
 ## 프로젝트 구조
 
 ```
