@@ -6,7 +6,7 @@
 
 ## 구조도
 
-![zone v3 관계도](docs/zone_v3_4files_light.svg)
+![zone v3 관계도](docs/zone_manager_architecture.svg)
 
 핵심 실행 코드는 3개입니다.
 
