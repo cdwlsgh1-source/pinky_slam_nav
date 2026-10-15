@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 840" width="1500" height="840" role="img" aria-labelledby="t d">
+  <title id="t">pinky_web_gui 시스템 구조도</title>
+  <desc id="d">브라우저가 REST와 WebSocket으로 관제 PC의 FastAPI 백엔드에 접속하고, 백엔드의 rclpy 노드가 도메인 브릿지를 거쳐 로봇 두 대와 토픽을 주고받으며, 프로세스 관리 모듈이 브릿지·zone_manager를 직접, 로봇 프로세스는 SSH로 시작·정지하는 구조</desc>
+  <style>
+    :root {
+      --text: #1f2328; --sub: #57606a;
+      --gray-fill: #eef0f3; --gray-stroke: #6e7781;
+      --pc-fill: #e8f0fe; --pc-stroke: #3367d6; --pc-in: #ffffff;
+      --br-fill: #fff4e0; --br-stroke: #e08a00;
+      --rb-fill: #e6f4ea; --rb-stroke: #2e8b57; --rb-in: #ffffff;
+      --http: #3367d6; --ros: #c9701f; --ctl: #6e7781;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --text: #e6edf3; --sub: #9198a1;
+        --gray-fill: #21262d; --gray-stroke: #8b949e;
+        --pc-fill: #14233f; --pc-stroke: #6b9cff; --pc-in: #0f1a2e;
+        --br-fill: #3a2a0c; --br-stroke: #f0a638;
+        --rb-fill: #12301f; --rb-stroke: #4cc38a; --rb-in: #0d2218;
+        --http: #8ab4ff; --ros: #f0a638; --ctl: #9aa4ae;
+      }
+    }
+    text { font-family: "Noto Sans KR","Noto Sans CJK KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif; fill: var(--text); }
+    .title { font-size: 26px; font-weight: 700; }
+    .group { font-size: 18px; font-weight: 700; }
+    .gsub  { font-size: 13px; fill: var(--sub); }
+    .nm    { font-size: 14.5px; font-weight: 700; }
+    .ds    { font-size: 12px; fill: var(--sub); }
+    .lb    { font-size: 12px; font-weight: 700; }
+    .lb-h { fill: var(--http); } .lb-r { fill: var(--ros); } .lb-c { fill: var(--ctl); }
+    .g  { fill: var(--gray-fill); stroke: var(--gray-stroke); stroke-width: 2.5; }
+    .gi { fill: var(--pc-in); stroke: var(--gray-stroke); stroke-width: 1.5; }
+    .pc { fill: var(--pc-fill); stroke: var(--pc-stroke); stroke-width: 3; }
+    .pi { fill: var(--pc-in); stroke: var(--pc-stroke); stroke-width: 1.8; }
+    .br { fill: var(--br-fill); stroke: var(--br-stroke); stroke-width: 2.5; }
+    .rb { fill: var(--rb-fill); stroke: var(--rb-stroke); stroke-width: 3; }
+    .ri { fill: var(--rb-in); stroke: var(--rb-stroke); stroke-width: 1.8; }
+    .l-h { stroke: var(--http); stroke-width: 3; fill: none; marker-start: url(#mh); marker-end: url(#mh); }
+    .l-r { stroke: var(--ros); stroke-width: 3; fill: none; marker-start: url(#mr); marker-end: url(#mr); }
+    .l-r1 { stroke: var(--ros); stroke-width: 3; fill: none; marker-end: url(#mr); }
+    .l-c { stroke: var(--ctl); stroke-width: 2.2; fill: none; stroke-dasharray: 7 5; marker-end: url(#mc); }
+    .c-h { fill: var(--http); } .c-r { fill: var(--ros); } .c-c { fill: var(--ctl); }
+  </style>
+  <defs>
+    <marker id="mh" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path class="c-h" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="mr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path class="c-r" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="mc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path class="c-c" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="title" x="30" y="44">pinky_web_gui 시스템 구조도</text>
+
+  <!-- ============ 브라우저 ============ -->
+  <rect class="g" x="30" y="100" width="230" height="440" rx="16"/>
+  <text class="group" x="145" y="132" text-anchor="middle">브라우저</text>
+  <text class="gsub" x="145" y="152" text-anchor="middle">frontend (정적 파일, 빌드 없음)</text>
+  <g>
+    <rect class="gi" x="50" y="172" width="190" height="50" rx="9"/><text class="nm" x="145" y="202" text-anchor="middle">지도 · 로봇 상태</text>
+    <rect class="gi" x="50" y="232" width="190" height="50" rx="9"/><text class="nm" x="145" y="262" text-anchor="middle">명령 패널</text>
+    <rect class="gi" x="50" y="292" width="190" height="50" rx="9"/><text class="nm" x="145" y="322" text-anchor="middle">구역 · 비상정지 · LiDAR</text>
+    <rect class="gi" x="50" y="352" width="190" height="50" rx="9"/><text class="nm" x="145" y="382" text-anchor="middle">알람바 · Alarm 화면</text>
+    <rect class="gi" x="50" y="412" width="190" height="50" rx="9"/><text class="nm" x="145" y="442" text-anchor="middle">시스템 패널 · 로그</text>
+    <rect class="gi" x="50" y="472" width="190" height="50" rx="9"/><text class="nm" x="145" y="502" text-anchor="middle">로그인 · 라이트/다크</text>
+  </g>
+
+  <!-- ============ 관제 PC ============ -->
+  <rect class="pc" x="380" y="100" width="780" height="690" rx="18"/>
+  <text class="group" x="400" y="128">관제 PC</text>
+  <text class="gsub" x="470" y="128">ROS_DOMAIN_ID = 50</text>
+
+  <!-- FastAPI 백엔드 -->
+  <rect class="pi" x="400" y="146" width="740" height="318" rx="14"/>
+  <text class="nm" x="420" y="172" style="font-size:16px">FastAPI 백엔드 (backend/main.py)</text>
+  <text class="ds" x="420" y="190">REST /api/* · WebSocket /ws · 로그인 필요 (--no-auth 제외) · 큐를 소비하는 단일 태스크만 상태를 갱신</text>
+  <g>
+    <rect class="gi" x="420" y="204" width="220" height="52" rx="9"/><text class="nm" x="530" y="226" text-anchor="middle">auth</text><text class="ds" x="530" y="244" text-anchor="middle">고정 계정 · 세션 · 시도 제한</text>
+    <rect class="gi" x="660" y="204" width="220" height="52" rx="9"/><text class="nm" x="770" y="226" text-anchor="middle">hub</text><text class="ds" x="770" y="244" text-anchor="middle">WS 클라이언트별 전송 큐</text>
+    <rect class="gi" x="900" y="204" width="220" height="52" rx="9"/><text class="nm" x="1010" y="226" text-anchor="middle">state · zone</text><text class="ds" x="1010" y="244" text-anchor="middle">상태 모델 · 구역 점유 해석</text>
+
+    <rect class="gi" x="420" y="266" width="220" height="52" rx="9"/><text class="nm" x="530" y="288" text-anchor="middle">commands</text><text class="ds" x="530" y="306" text-anchor="middle">허용 목록 검증 · 응답 추적</text>
+    <rect class="gi" x="660" y="266" width="220" height="52" rx="9"/><text class="nm" x="770" y="288" text-anchor="middle">alarms · alarmlog</text><text class="ds" x="770" y="306" text-anchor="middle">알람 생성 · 이력 파일</text>
+    <rect class="gi" x="900" y="266" width="220" height="52" rx="9"/><text class="nm" x="1010" y="288" text-anchor="middle">motion</text><text class="ds" x="1010" y="306" text-anchor="middle">비상정지 · 수동 조작</text>
+
+    <rect class="gi" x="420" y="328" width="220" height="52" rx="9"/><text class="nm" x="530" y="350" text-anchor="middle">map_loader · planner</text><text class="ds" x="530" y="368" text-anchor="middle">지도 PNG · 경로 추정(A*)</text>
+    <rect class="gi" x="660" y="328" width="220" height="52" rx="9"/><text class="nm" x="770" y="350" text-anchor="middle">scan</text><text class="ds" x="770" y="368" text-anchor="middle">LiDAR 점 감소 · 좌표 변환</text>
+    <rect class="gi" x="900" y="328" width="220" height="52" rx="9"/><text class="nm" x="1010" y="350" text-anchor="middle">logstore</text><text class="ds" x="1010" y="368" text-anchor="middle">프로세스 · 서버 로그 보관</text>
+  </g>
+  <rect class="pc" x="420" y="392" width="700" height="56" rx="10" style="stroke-width:2.2"/>
+  <text class="nm" x="770" y="414" text-anchor="middle">ros_bridge — rclpy 노드 (별도 스레드에서 spin)</text>
+  <text class="ds" x="770" y="434" text-anchor="middle">구독: amcl_pose · patrol_status · battery · odom · tf · scan · zone status   |   발행: /{id}/patrol_cmd · /{id}/cmd_vel</text>
+
+  <!-- 중간 행: config / zone_manager / domain_bridge -->
+  <rect class="g" x="400" y="510" width="220" height="92" rx="12"/>
+  <text class="nm" x="510" y="536" text-anchor="middle">config · data</text>
+  <text class="ds" x="510" y="556" text-anchor="middle">config/*.yaml (robots, processes,</text>
+  <text class="ds" x="510" y="572" text-anchor="middle">points, zone, alarms) · 지도</text>
+  <text class="ds" x="510" y="588" text-anchor="middle">data/alarms 이력 파일</text>
+
+  <rect class="br" x="650" y="510" width="220" height="92" rx="12"/>
+  <text class="nm" x="760" y="542" text-anchor="middle">zone_manager_node</text>
+  <text class="ds" x="760" y="564" text-anchor="middle">위험 구역 점유 관리</text>
+  <text class="ds" x="760" y="582" text-anchor="middle">/zone_manager/status 발행</text>
+
+  <rect class="br" x="900" y="510" width="240" height="92" rx="12"/>
+  <text class="nm" x="1020" y="542" text-anchor="middle">domain_bridge</text>
+  <text class="ds" x="1020" y="564" text-anchor="middle">pinky1 50 ↔ 20</text>
+  <text class="ds" x="1020" y="582" text-anchor="middle">pinky2 50 ↔ 22</text>
+
+  <!-- procs -->
+  <rect class="pi" x="400" y="670" width="740" height="84" rx="14"/>
+  <text class="nm" x="420" y="698" style="font-size:16px">procs (backend/procs.py) — 프로세스 관리, 시스템 패널</text>
+  <text class="ds" x="420" y="720">processes.yaml 에 적힌 프로세스만 실행 · 전체 시작은 브릿지 → bringup → map → zone_manager → 순찰 노드 순</text>
+  <text class="ds" x="420" y="738">서버를 종료하면 GUI가 켠 프로세스를 모두 정지</text>
+
+  <!-- ============ 로봇 ============ -->
+  <rect class="rb" x="1240" y="100" width="240" height="690" rx="18"/>
+  <text class="group" x="1360" y="128" text-anchor="middle">로봇</text>
+
+  <text class="nm" x="1360" y="172" text-anchor="middle">pinky1 (ROS_DOMAIN_ID 20)</text>
+  <rect class="ri" x="1260" y="186" width="200" height="56" rx="9"/><text class="nm" x="1360" y="210" text-anchor="middle">bringup · Nav2 · map</text><text class="ds" x="1360" y="228" text-anchor="middle">센서 · 모터 · 지도 기반 주행</text>
+  <rect class="ri" x="1260" y="256" width="200" height="56" rx="9"/><text class="nm" x="1360" y="280" text-anchor="middle">순찰 노드</text><text class="ds" x="1360" y="298" text-anchor="middle">patrol_cmd ↔ patrol_status</text>
+
+  <text class="nm" x="1360" y="472" text-anchor="middle">pinky2 (ROS_DOMAIN_ID 22)</text>
+  <rect class="ri" x="1260" y="486" width="200" height="56" rx="9"/><text class="nm" x="1360" y="510" text-anchor="middle">bringup · Nav2 · map</text><text class="ds" x="1360" y="528" text-anchor="middle">센서 · 모터 · 지도 기반 주행</text>
+  <rect class="ri" x="1260" y="556" width="200" height="56" rx="9"/><text class="nm" x="1360" y="580" text-anchor="middle">순찰 노드</text><text class="ds" x="1360" y="598" text-anchor="middle">patrol_cmd ↔ patrol_status</text>
+
+  <text class="ds" x="1360" y="690" text-anchor="middle">bringup · map · 순찰 노드는</text>
+  <text class="ds" x="1360" y="708" text-anchor="middle">시스템 패널이 SSH로 시작·정지</text>
+
+  <!-- ============ 연결선 ============ -->
+  <!-- 브라우저 <-> 백엔드 -->
+  <line class="l-h" x1="264" y1="300" x2="396" y2="300"/>
+  <text class="lb lb-h" x="330" y="276" text-anchor="middle">HTTP</text>
+  <text class="lb lb-h" x="330" y="292" text-anchor="middle">/api/*</text>
+  <text class="lb lb-h" x="330" y="326" text-anchor="middle">WebSocket</text>
+  <text class="lb lb-h" x="330" y="342" text-anchor="middle">/ws</text>
+
+  <!-- ros_bridge <-> domain_bridge -->
+  <line class="l-r" x1="1060" y1="452" x2="1060" y2="506"/>
+  <text class="lb lb-r" x="1070" y="484">/{id}/* 토픽</text>
+  <!-- zone_manager -> ros_bridge -->
+  <line class="l-r1" x1="800" y1="506" x2="800" y2="452"/>
+  <text class="lb lb-r" x="810" y="484">/zone_manager/status</text>
+
+  <!-- domain_bridge <-> 로봇 -->
+  <path class="l-r" d="M1140 545 H1195 V284 H1256"/>
+  <text class="lb lb-r" x="1198" y="272" text-anchor="middle">50 ↔ 20</text>
+  <path class="l-r" d="M1140 575 H1215 V584 H1256"/>
+  <text class="lb lb-r" x="1198" y="608" text-anchor="middle">50 ↔ 22</text>
+
+  <!-- procs -> local processes (점선) -->
+  <line class="l-c" x1="740" y1="666" x2="740" y2="606"/>
+  <text class="lb lb-c" x="750" y="640">시작 · 정지</text>
+  <line class="l-c" x1="1000" y1="666" x2="1000" y2="606"/>
+  <text class="lb lb-c" x="1010" y="640">시작 · 정지</text>
+
+  <!-- procs -> 로봇 (SSH) -->
+  <line class="l-c" x1="1144" y1="712" x2="1236" y2="712"/>
+  <text class="lb lb-c" x="1190" y="700" text-anchor="middle">SSH</text>
+  <text class="lb lb-c" x="1190" y="730" text-anchor="middle">키 로그인</text>
+
+  <!-- 범례 -->
+  <line class="l-h" x1="30" y1="800" x2="80" y2="800"/><text class="ds" x="90" y="804">브라우저 ↔ 백엔드 (HTTP · WebSocket)</text>
+  <line class="l-r" x1="360" y1="800" x2="410" y2="800"/><text class="ds" x="420" y="804">ROS 2 토픽</text>
+  <line class="l-c" x1="540" y1="800" x2="590" y2="800"/><text class="ds" x="600" y="804">프로세스 시작·정지 (관제 PC는 직접, 로봇은 SSH)</text>
+</svg>
