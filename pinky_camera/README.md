@@ -16,7 +16,7 @@ Pinky 로봇의 CSI 카메라 영상을 ROS 2 토픽으로 발행하고, YOLO �
 ```
 camera_node ──camera/image_raw/compressed──▶ lane_detector_node ──lane/center_offset ... ──▶ lane_follower_node ──cmd_vel──▶ 모터
 ```
-
+![데이터 흐름도](docs/pinky_camera_pipeline.svg)
 
 | 노드 | 구독 | 발행 |
 |---|---|---|
