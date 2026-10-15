@@ -14,7 +14,8 @@ Pinky 로봇의 CSI 카메라 영상을 ROS 2 토픽으로 발행하고, YOLO �
 토픽 이름은 launch의 `namespace`(기본 `pinky1`)가 앞에 붙습니다. 예: `/pinky1/lane/center_offset`
 
 ```
-camera_node ──camera/image_raw/compressed──▶ lane_detector_node ──lane/center_offset ... ──▶ lane_follower_node ──cmd_vel──▶ 모터
+camera_node ──camera/image_raw/compressed──▶ lane_detector_node ──lane/center_offset ...
+──▶ lane_follower_node ──cmd_vel──▶ 모터
 ```
 ![데이터 흐름도](docs/pinky_camera_pipeline.svg)
 
