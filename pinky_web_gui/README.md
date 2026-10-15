@@ -16,6 +16,9 @@
 
 > 실제 로봇에서의 확인은 아직 하지 않았다. 프로세스 제어는 mock 으로만 검증했다 ([`docs/checklists/`](docs/checklists/README.md) 의 절차는 사용자가 수행).
 
+## 시스템 구성도
+![시스템 구성도](docs/pinky_web_gui_architecture.svg)
+
 ## 설치 방법
 
 사전 요구 (이 PC 에서 확인한 값, [`docs/reference/environment.md`](docs/reference/environment.md)): Ubuntu 24.04, ROS 2 `jazzy`, Python 3.12. 다른 버전은 **[TODO] 확인 안 됨**. `rclpy` 는 pip 가 아니라 ROS 2 가 제공하므로 venv 를 `--system-site-packages` 로 만든다.
