@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="760" viewBox="0 0 680 380" role="img">
+<title>zone_manager_node(v1), zone_manager_node_v3, zone_gate_client_v3, pinky_patrol_node_pinky1_v3 관계도</title>
+<defs>
+<marker id="arrow-coral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="m-coral" d="M2 1L8 5L2 9" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="m-gray" d="M2 1L8 5L2 9" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<style>
+:root {
+  --text: #1F1E1D; --sub: #5F5E5A; --outline: #B4B2A9;
+  --gray-fill: #F1EFE8; --gray-stroke: #5F5E5A; --gray-t: #444441; --gray-s: #5F5E5A;
+  --coral-fill: #FAECE7; --coral-stroke: #993C1D; --coral-t: #712B13; --coral-s: #993C1D;
+  --teal-fill: #E1F5EE; --teal-stroke: #0F6E56; --teal-t: #085041; --teal-s: #0F6E56;
+  --red: #E24B4A; --red-s: #A32D2D; --arrow-coral: #D85A30; --arrow-gray: #888780;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #E6E4DC; --sub: #B4B2A9; --outline: #6B6A64;
+    --gray-fill: #2B2B28; --gray-stroke: #A8A69E; --gray-t: #D3D1C7; --gray-s: #A8A69E;
+    --coral-fill: #3A1D14; --coral-stroke: #F0997B; --coral-t: #F5C4B3; --coral-s: #F0997B;
+    --teal-fill: #0B2E25; --teal-stroke: #5DCAA5; --teal-t: #9FE1CB; --teal-s: #5DCAA5;
+    --red: #F26B6A; --red-s: #F09595; --arrow-coral: #F0997B; --arrow-gray: #A8A69E;
+  }
+}
+text { font-family: "Noto Sans CJK KR", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", "NanumGothic", "Noto Sans CJK JP", sans-serif; }
+.th { font-size: 14px; font-weight: 500; fill: var(--text); }
+.ts { font-size: 12px; fill: var(--sub); }
+.teal-t { fill: var(--teal-t); }
+.teal-s { fill: var(--teal-s); }
+.coral-t { fill: var(--coral-t); }
+.coral-s { fill: var(--coral-s); }
+.gray-t { fill: var(--gray-t); }
+.gray-s { fill: var(--gray-s); }
+.red-s { fill: var(--red-s); }
+.outline { fill: none; stroke: var(--outline); stroke-width: 0.8; stroke-dasharray: 4 4; }
+.box-gray  { fill: var(--gray-fill);  stroke: var(--gray-stroke);  stroke-width: 0.8; }
+.box-coral { fill: var(--coral-fill); stroke: var(--coral-stroke); stroke-width: 0.8; }
+.box-teal  { fill: var(--teal-fill);  stroke: var(--teal-stroke);  stroke-width: 0.8; }
+.ln-red   { stroke: var(--red); stroke-width: 1; stroke-dasharray: 5 4; }
+.ln-gray  { stroke: var(--arrow-gray);  stroke-width: 1.5; }
+.ln-coral { stroke: var(--arrow-coral); stroke-width: 1.5; }
+.m-coral { stroke: var(--arrow-coral); }
+.m-gray  { stroke: var(--arrow-gray); }
+</style>
+</defs>
+
+<rect class="outline" x="20" y="45" width="220" height="260" rx="12"/>
+<rect class="outline" x="440" y="45" width="220" height="260" rx="12"/>
+<text class="th" x="130" y="60" text-anchor="middle" dominant-baseline="central">관제 PC (50)</text>
+<text class="th" x="550" y="60" text-anchor="middle" dominant-baseline="central">로봇 pinky1 (20)</text>
+
+<line class="outline" x1="340" y1="42" x2="340" y2="305"/>
+<text class="th" x="340" y="28" text-anchor="middle" dominant-baseline="central">domain_bridge</text>
+
+<rect class="box-gray" x="35" y="75" width="190" height="56" rx="8"/>
+<text class="th gray-t" x="130" y="93" text-anchor="middle" dominant-baseline="central">zone_manager_node</text>
+<text class="ts gray-s" x="130" y="111" text-anchor="middle" dominant-baseline="central">v1 · /zone_manager/*</text>
+
+<rect class="box-coral" x="35" y="225" width="190" height="56" rx="8"/>
+<text class="th coral-t" x="130" y="243" text-anchor="middle" dominant-baseline="central">zone_manager_node_v3</text>
+<text class="ts coral-s" x="130" y="261" text-anchor="middle" dominant-baseline="central">/zone_manager_v3/*</text>
+
+<rect class="box-teal" x="455" y="75" width="190" height="56" rx="8"/>
+<text class="th teal-t" x="550" y="93" text-anchor="middle" dominant-baseline="central">patrol_node_pinky1_v3</text>
+<text class="ts teal-s" x="550" y="111" text-anchor="middle" dominant-baseline="central">Nav2 순찰</text>
+
+<rect class="box-coral" x="455" y="225" width="190" height="56" rx="8"/>
+<text class="th coral-t" x="550" y="243" text-anchor="middle" dominant-baseline="central">ZoneGateClient</text>
+<text class="ts coral-s" x="550" y="261" text-anchor="middle" dominant-baseline="central">zone_gate_client_v3</text>
+
+<line class="ln-red" x1="227" y1="103" x2="453" y2="103"/>
+<text class="ts red-s" x="290" y="90" text-anchor="middle" dominant-baseline="central">통신 안 됨</text>
+<text class="ts red-s" x="392" y="117" text-anchor="middle" dominant-baseline="central">토픽 이름 다름</text>
+
+<line class="ln-gray" x1="130" y1="133" x2="130" y2="223" marker-end="url(#arrow-gray)"/>
+<text class="ts" x="142" y="178" dominant-baseline="central">복사해서 확장</text>
+
+<line class="ln-gray" x1="550" y1="133" x2="550" y2="223" marker-end="url(#arrow-gray)"/>
+<text class="ts" x="562" y="178" dominant-baseline="central">import</text>
+
+<line class="ln-coral" x1="453" y1="240" x2="227" y2="240" marker-end="url(#arrow-coral)"/>
+<text class="ts" x="290" y="228" text-anchor="middle" dominant-baseline="central">요청·취소·이탈</text>
+<line class="ln-coral" x1="227" y1="268" x2="453" y2="268" marker-end="url(#arrow-coral)"/>
+<text class="ts" x="392" y="284" text-anchor="middle" dominant-baseline="central">허가·슬롯·상태</text>
+
+<rect class="box-teal" x="30" y="335" width="14" height="14" rx="3"/>
+<text class="ts" x="52" y="342" dominant-baseline="central">로봇 순찰 노드</text>
+<rect class="box-coral" x="180" y="335" width="14" height="14" rx="3"/>
+<text class="ts" x="202" y="342" dominant-baseline="central">v3 구역 허가 (이번에 쓰는 구조)</text>
+<rect class="box-gray" x="410" y="335" width="14" height="14" rx="3"/>
+<text class="ts" x="432" y="342" dominant-baseline="central">v1 (이전 방식 · 별개로 동작)</text>
+</svg>
