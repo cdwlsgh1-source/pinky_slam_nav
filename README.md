@@ -27,6 +27,7 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
      ├─ /<robot>/patrol_status ◀────────────────  로봇
      └─ /zone_manager/* (request_entry / grant_entry / notify_exit)
 ```
+![시스템 구성도](docs/pinky_architecture_adaptive.svg)
 
 ## 설치 방법
 
