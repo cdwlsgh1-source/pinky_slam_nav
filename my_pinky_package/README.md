@@ -21,7 +21,7 @@ Pinky 로봇에서 실행하는 Nav2 순찰 노드 패키지. 개발 중인 **v3
              zone_manager_node_v3 ◀── request_entry / cancel_entry / notify_exit ── ZoneGateClient
                                   ──▶ grant_entry / queue_slot ──────────────────▶ (zone_gate_client_v3)
 ```
-![시스템 구성도](docs/pinky_patrol_v3_flow.svg)
+![시스템 구성도](my_pinky_package/docs/pinky_patrol_v3_flow.svg)
 
 | 파일 | 실행 위치 | 역할 |
 |---|---|---|
