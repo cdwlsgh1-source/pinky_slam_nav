@@ -31,7 +31,7 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
 
 ## 설치 방법
 
-검증된 환경: Ubuntu 24.04, ROS 2 `jazzy`, Python 3.12 (관제 PC 기준). 다른 배포판은 **[TODO] 확인 안 됨**.
+검증된 환경: Ubuntu 24.04, ROS 2 `jazzy`, Python 3.12 (관제 PC 기준).
 
 **1. ROS 패키지 빌드** (관제 PC와 각 로봇에서 저장소 루트 기준)
 
@@ -66,7 +66,7 @@ python3 -m venv --system-site-packages .venv
 
 아래 순서로 실행합니다 (`robot_id`는 `zone_traffic_control/config/zone_params.yaml`의 `robot_ids`와 같아야 합니다).
 
-**1. 로봇**: 각 로봇에서 Nav2 bringup 실행 (명령은 이 저장소에 없음, **[TODO]**)
+**1. 로봇**: 각 로봇에서 Nav2 bringup 실행
 
 **2. 관제 PC — 도메인 브릿지** (한 대만 띄우려면 `pinky2:=false`)
 
@@ -130,7 +130,7 @@ export ROS_DOMAIN_ID=50
 
 ### 대기열(v3) 구성 (선택)
 
-문(RED*) 대신 앵커/대기 슬롯을 쓰는 버전입니다. 웹 GUI는 v2 기준이므로 GUI의 `processes.yaml`은 v3로 바꾸지 마세요 (`pinky_web_gui/docs/reference/decisions.md`).
+RED POINT(RED*) 대신 앵커/대기슬롯을 쓰는 버전입니다. 웹 GUI는 v2 기준이므로 GUI의 `processes.yaml`은 v3로 바꾸지 마세요 (`pinky_web_gui/docs/reference/decisions.md`).
 
 ```bash
 # 관제 PC
@@ -237,13 +237,3 @@ pinky_slam_nav/
 ├── map_view_pc/            # 지도(my_pinky_map10.yaml/.pgm), 좌표 뷰어 HTML
 └── ros2_network_test/      # Wi-Fi/ROS 2 네트워크 진단 스크립트
 ```
-
-## 알려진 이슈 / TODO
-
-- 이 저장소에는 `package.json`이 없습니다 (ROS 2 + Python 프로젝트). 빌드는 `colcon`, 웹 GUI 의존성은 `pinky_web_gui/requirements.txt`입니다.
-- 라이선스: 루트 라이선스 파일 없음 (`domain_bridge/LICENSE`만 존재). 프로젝트 라이선스는 **[TODO]**
-- Nav2 bringup 명령과 로봇 환경 구성은 이 저장소에 없음 **[TODO]**
-- `my_pinky_package/my_pinky_package/pinky_patrol_node_pinky2_v2.py`의 `ZONE_ENTRY_INDEX`/`ZONE_EXIT_INDEX`가 5개 경로와 맞지 않는 문제가 `pinky_web_gui/docs/reference/known-pitfalls.md`에 미해결로 기록되어 있음. 실행 전 확인 필요
-- 웹 GUI의 프로세스 제어와 실제 로봇 연동은 mock으로만 검증됨 (실물 확인 절차: `pinky_web_gui/docs/checklists/`)
-- `zone_traffic_control/README.md`가 언급하는 `pinky_control_client_v3.py`는 저장소에 없음 **[TODO]**
-- 이슈/PR 절차, 브랜치 규칙: **[TODO]**
