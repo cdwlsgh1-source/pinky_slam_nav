@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="t d">
+  <title id="t">순찰 명령과 구역 대기열 흐름 (v3)</title>
+  <desc id="d">관제 PC의 명령 클라이언트와 zone_manager_node_v3가 domain_bridge를 거쳐 로봇의 순찰 노드(v3), ZoneGateClient와 통신하는 구성</desc>
+  <style>
+    :root {
+      --text: #1f2328; --sub: #57606a;
+      --pc-fill: #e8f0fe; --pc-stroke: #3367d6; --pc-in: #ffffff;
+      --br-fill: #fff4e0; --br-stroke: #e08a00;
+      --rb-fill: #e6f4ea; --rb-stroke: #2e8b57; --rb-in: #ffffff;
+      --cmd: #3367d6; --up: #c9701f; --down: #1f8f66; --line: #57606a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --text: #e6edf3; --sub: #9198a1;
+        --pc-fill: #14233f; --pc-stroke: #6b9cff; --pc-in: #0f1a2e;
+        --br-fill: #3a2a0c; --br-stroke: #f0a638;
+        --rb-fill: #12301f; --rb-stroke: #4cc38a; --rb-in: #0d2218;
+        --cmd: #8ab4ff; --up: #f0a638; --down: #4cc38a; --line: #b1bac4;
+      }
+    }
+    text { font-family: "Noto Sans KR","Noto Sans CJK KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif; fill: var(--text); }
+    .title { font-size: 24px; font-weight: 700; }
+    .group { font-size: 18px; font-weight: 700; }
+    .node  { font-size: 17px; font-weight: 600; }
+    .meta  { font-size: 14px; fill: var(--sub); }
+    .lbl   { font-size: 15px; font-family: "SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; }
+    .pc { fill: var(--pc-fill); stroke: var(--pc-stroke); stroke-width: 3; }
+    .pcn { fill: var(--pc-in); stroke: var(--pc-stroke); stroke-width: 2; }
+    .br { fill: var(--br-fill); stroke: var(--br-stroke); stroke-width: 3; }
+    .rb { fill: var(--rb-fill); stroke: var(--rb-stroke); stroke-width: 3; }
+    .rbn { fill: var(--rb-in); stroke: var(--rb-stroke); stroke-width: 2; }
+    .a-cmd  { stroke: var(--cmd);  stroke-width: 3; fill: none; marker-end: url(#h-cmd); }
+    .a-up   { stroke: var(--up);   stroke-width: 3; fill: none; marker-end: url(#h-up); }
+    .a-down { stroke: var(--down); stroke-width: 3; fill: none; marker-end: url(#h-down); }
+    .a-imp  { stroke: var(--line); stroke-width: 2; fill: none; stroke-dasharray: 6 5; marker-end: url(#h-line); }
+    .c-cmd { fill: var(--cmd); } .c-up { fill: var(--up); } .c-down { fill: var(--down); }
+  </style>
+  <defs>
+    <marker id="h-cmd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="c-cmd" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="h-up" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="c-up" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="h-down" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="c-down" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="h-line" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path fill="#8b949e" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="title" x="40" y="42">순찰 명령 · 구역 대기열 흐름 (v3)</text>
+
+  <!-- 관제 PC -->
+  <rect class="pc" x="40" y="80" width="320" height="480" rx="16"/>
+  <text class="group" x="200" y="112" text-anchor="middle">관제 PC</text>
+  <text class="meta" x="200" y="134" text-anchor="middle">ROS_DOMAIN_ID = 50</text>
+  <rect class="pcn" x="65" y="160" width="270" height="90" rx="10"/>
+  <text class="node" x="200" y="198" text-anchor="middle">pinky_control_client_v2.py</text>
+  <text class="meta" x="200" y="224" text-anchor="middle">start / stop / goto / monitor</text>
+  <rect class="pcn" x="65" y="390" width="270" height="140" rx="10"/>
+  <text class="node" x="200" y="440" text-anchor="middle">zone_manager_node_v3</text>
+  <text class="meta" x="200" y="466" text-anchor="middle">점유자 1명 + FIFO 대기열</text>
+  <text class="meta" x="200" y="490" text-anchor="middle">허가 · 슬롯 좌표 발행</text>
+
+  <!-- domain_bridge -->
+  <rect class="br" x="440" y="80" width="320" height="480" rx="16"/>
+  <text class="group" x="600" y="112" text-anchor="middle">domain_bridge</text>
+  <text class="meta" x="600" y="134" text-anchor="middle">/pinky1/..., /pinky2/... 로 remap</text>
+
+  <!-- 로봇 -->
+  <rect class="rb" x="840" y="80" width="320" height="480" rx="16"/>
+  <text class="group" x="1000" y="112" text-anchor="middle">로봇</text>
+  <text class="meta" x="1000" y="134" text-anchor="middle">pinky1 = 20 / pinky2 = 22</text>
+  <rect class="rbn" x="865" y="160" width="270" height="90" rx="10"/>
+  <text class="node" x="1000" y="198" text-anchor="middle">patrol_node_v3</text>
+  <text class="meta" x="1000" y="224" text-anchor="middle">pinky_patrol_node_pinky{1,2}_v3</text>
+  <rect class="rbn" x="865" y="390" width="270" height="140" rx="10"/>
+  <text class="node" x="1000" y="440" text-anchor="middle">ZoneGateClient</text>
+  <text class="meta" x="1000" y="466" text-anchor="middle">zone_gate_client_v3</text>
+  <text class="meta" x="1000" y="490" text-anchor="middle">요청 · 취소 · 이탈 통보</text>
+
+  <!-- 순찰 노드 -> gate client (import) -->
+  <line class="a-imp" x1="1000" y1="254" x2="1000" y2="386"/>
+  <text class="meta" x="1012" y="325">import</text>
+
+  <!-- 명령 -->
+  <line class="a-cmd" x1="339" y1="205" x2="861" y2="205"/>
+  <text class="lbl c-cmd" x="600" y="190" text-anchor="middle">/&lt;robot&gt;/patrol_cmd</text>
+
+  <!-- 구역: 로봇 -> 매니저 -->
+  <line class="a-up" x1="861" y1="458" x2="339" y2="458"/>
+  <text class="lbl c-up" x="600" y="422" text-anchor="middle">request_entry · cancel_entry</text>
+  <text class="lbl c-up" x="600" y="443" text-anchor="middle">notify_exit</text>
+
+  <!-- 구역: 매니저 -> 로봇 -->
+  <line class="a-down" x1="339" y1="505" x2="861" y2="505"/>
+  <text class="lbl c-down" x="600" y="490" text-anchor="middle">grant_entry · queue_slot</text>
+
+  <text class="meta" x="600" y="600" text-anchor="middle">구역 토픽 이름공간: /zone_manager_v3/*</text>
+</svg>

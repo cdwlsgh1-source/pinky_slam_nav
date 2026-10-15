@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" width="1200" height="700" role="img" aria-labelledby="t d">
+  <title id="t">Pinky SLAM-NAV 시스템 구성도</title>
+  <desc id="d">관제 PC(도메인 50)와 pinky1(20), pinky2(22)를 domain_bridge로 연결한 구성</desc>
+  <style>
+    :root {
+      --text: #1f2328; --sub: #57606a;
+      --pc-fill: #e8f0fe; --pc-stroke: #3367d6;
+      --br-fill: #fff4e0; --br-stroke: #e08a00;
+      --rb-fill: #e6f4ea; --rb-stroke: #2e8b57;
+      --line: #444c56;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --text: #e6edf3; --sub: #9198a1;
+        --pc-fill: #14233f; --pc-stroke: #6b9cff;
+        --br-fill: #3a2a0c; --br-stroke: #f0a638;
+        --rb-fill: #12301f; --rb-stroke: #4cc38a;
+        --line: #b1bac4;
+      }
+    }
+    text { font-family: "Noto Sans KR","Noto Sans CJK KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif; fill: var(--text); }
+    .title { font-size: 26px; font-weight: 700; }
+    .main  { font-size: 20px; }
+    .note  { font-size: 16px; fill: var(--sub); }
+    .small { font-size: 17px; }
+    .pc { fill: var(--pc-fill); stroke: var(--pc-stroke); stroke-width: 3; }
+    .br { fill: var(--br-fill); stroke: var(--br-stroke); stroke-width: 3; }
+    .rb { fill: var(--rb-fill); stroke: var(--rb-stroke); stroke-width: 3; }
+    .link { stroke: var(--line); stroke-width: 3; fill: none; marker-start: url(#ah); marker-end: url(#ah); }
+    .head { fill: var(--line); }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <text class="title" x="40" y="45">Pinky SLAM-NAV 시스템 구성</text>
+  <text class="small" x="600" y="95" text-anchor="middle">관제 PC → 로봇:  /&lt;robot&gt;/patrol_cmd  (start / stop / goto)</text>
+  <text class="small" x="600" y="122" text-anchor="middle">로봇 → 관제 PC:  /&lt;robot&gt;/patrol_status</text>
+
+  <rect class="pc" x="40" y="230" width="320" height="240" rx="16"/>
+  <text class="main" x="200" y="305" text-anchor="middle">관제 PC</text>
+  <text class="main" x="200" y="337" text-anchor="middle">ROS_DOMAIN_ID = 50</text>
+  <text class="main" x="200" y="392" text-anchor="middle">zone_manager_node</text>
+  <text class="main" x="200" y="424" text-anchor="middle">웹 GUI / 순찰 클라이언트</text>
+
+  <rect class="br" x="500" y="140" width="220" height="100" rx="14"/>
+  <text class="main" x="610" y="184" text-anchor="middle">domain_bridge</text>
+  <text class="main" x="610" y="214" text-anchor="middle">(pinky1)</text>
+  <rect class="br" x="500" y="460" width="220" height="100" rx="14"/>
+  <text class="main" x="610" y="504" text-anchor="middle">domain_bridge</text>
+  <text class="main" x="610" y="534" text-anchor="middle">(pinky2)</text>
+
+  <rect class="rb" x="860" y="140" width="300" height="100" rx="14"/>
+  <text class="main" x="1010" y="184" text-anchor="middle">pinky1</text>
+  <text class="main" x="1010" y="214" text-anchor="middle">ROS_DOMAIN_ID = 20</text>
+  <rect class="rb" x="860" y="460" width="300" height="100" rx="14"/>
+  <text class="main" x="1010" y="504" text-anchor="middle">pinky2</text>
+  <text class="main" x="1010" y="534" text-anchor="middle">ROS_DOMAIN_ID = 22</text>
+
+  <line class="link" x1="368" y1="300" x2="492" y2="195"/>
+  <line class="link" x1="368" y1="400" x2="492" y2="505"/>
+  <line class="link" x1="728" y1="190" x2="852" y2="190"/>
+  <line class="link" x1="728" y1="510" x2="852" y2="510"/>
+
+  <text class="note" x="600" y="372" text-anchor="middle">※ 관제 PC 쪽 토픽은 /pinky1/..., /pinky2/... 로 remap</text>
+  <text class="small" x="600" y="628" text-anchor="middle">구역 제어:  /zone_manager/*  (request_entry · grant_entry · notify_exit)</text>
+  <text class="small" x="600" y="658" text-anchor="middle">request_entry, notify_exit: 로봇 → 관제 PC  /  grant_entry: 관제 PC → 로봇</text>
+</svg>

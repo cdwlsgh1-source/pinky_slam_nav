@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 440" width="1560" height="440" role="img" aria-labelledby="t d">
+  <title id="t">pinky_camera 차선 추종 데이터 흐름</title>
+  <desc id="d">camera_node가 영상을 발행하면 lane_detector_node가 차선 정보를 발행하고, lane_follower_node가 cmd_vel을 발행해 모터를 구동하는 흐름</desc>
+  <style>
+    :root {
+      --text: #1f2328; --sub: #57606a; --line: #6e7781;
+      --n1-fill: #e6f4ea; --n1-stroke: #2e8b57;
+      --n2-fill: #e8f0fe; --n2-stroke: #3367d6;
+      --n3-fill: #fff4e0; --n3-stroke: #e08a00;
+      --n4-fill: #eef0f3; --n4-stroke: #6e7781;
+      --a1: #2e8b57; --a2: #3367d6; --a3: #c9701f;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --text: #e6edf3; --sub: #9198a1; --line: #8b949e;
+        --n1-fill: #12301f; --n1-stroke: #4cc38a;
+        --n2-fill: #14233f; --n2-stroke: #6b9cff;
+        --n3-fill: #3a2a0c; --n3-stroke: #f0a638;
+        --n4-fill: #21262d; --n4-stroke: #8b949e;
+        --a1: #4cc38a; --a2: #8ab4ff; --a3: #f0a638;
+      }
+    }
+    text { font-family: "Noto Sans KR","Noto Sans CJK KR","Malgun Gothic","Apple SD Gothic Neo",sans-serif; fill: var(--text); }
+    .title { font-size: 26px; font-weight: 700; }
+    .node  { font-size: 20px; font-weight: 700; }
+    .desc  { font-size: 15px; fill: var(--sub); }
+    .lbl   { font-size: 14px; font-family: "SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; }
+    .lbl-b { font-weight: 700; }
+    .small { font-size: 13px; font-family: "SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; fill: var(--sub); }
+    .note  { font-size: 14px; fill: var(--sub); }
+    .n1 { fill: var(--n1-fill); stroke: var(--n1-stroke); stroke-width: 3; }
+    .n2 { fill: var(--n2-fill); stroke: var(--n2-stroke); stroke-width: 3; }
+    .n3 { fill: var(--n3-fill); stroke: var(--n3-stroke); stroke-width: 3; }
+    .n4 { fill: var(--n4-fill); stroke: var(--n4-stroke); stroke-width: 3; }
+    .a1 { stroke: var(--a1); stroke-width: 3.5; fill: none; marker-end: url(#h1); }
+    .a2 { stroke: var(--a2); stroke-width: 3.5; fill: none; marker-end: url(#h2); }
+    .a3 { stroke: var(--a3); stroke-width: 3.5; fill: none; marker-end: url(#h3); }
+    .dash { stroke: var(--line); stroke-width: 2; fill: none; stroke-dasharray: 6 5; marker-end: url(#hd); }
+    .c1 { fill: var(--a1); } .c2 { fill: var(--a2); } .c3 { fill: var(--a3); } .cd { fill: var(--line); }
+  </style>
+  <defs>
+    <marker id="h1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="c1" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="h2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="c2" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="h3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="c3" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="hd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="cd" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="title" x="40" y="44">pinky_camera 차선 추종 데이터 흐름</text>
+
+  <!-- 노드 (폭 230) -->
+  <rect class="n1" x="40"   y="150" width="230" height="120" rx="14"/>
+  <text class="node" x="155"  y="198" text-anchor="middle">camera_node</text>
+  <text class="desc" x="155"  y="226" text-anchor="middle">CSI 카메라 캡처</text>
+  <text class="desc" x="155"  y="248" text-anchor="middle">→ JPEG 발행</text>
+
+  <rect class="n2" x="457"  y="150" width="230" height="120" rx="14"/>
+  <text class="node" x="572"  y="198" text-anchor="middle">lane_detector_node</text>
+  <text class="desc" x="572"  y="226" text-anchor="middle">YOLO 차선 ·</text>
+  <text class="desc" x="572"  y="248" text-anchor="middle">Crossline 검출</text>
+
+  <rect class="n3" x="873"  y="150" width="230" height="120" rx="14"/>
+  <text class="node" x="988"  y="198" text-anchor="middle">lane_follower_node</text>
+  <text class="desc" x="988"  y="226" text-anchor="middle">PD 제어 · 소실 시</text>
+  <text class="desc" x="988"  y="248" text-anchor="middle">감속/탐색/정지</text>
+
+  <rect class="n4" x="1290" y="150" width="230" height="120" rx="14"/>
+  <text class="node" x="1405" y="198" text-anchor="middle">모터</text>
+  <text class="desc" x="1405" y="226" text-anchor="middle">모터 드라이버가</text>
+  <text class="desc" x="1405" y="248" text-anchor="middle">/cmd_vel 구독</text>
+
+  <!-- 화살표 -->
+  <line class="a1" x1="274" y1="210" x2="453" y2="210"/>
+  <text class="lbl lbl-b c1" x="363" y="172" text-anchor="middle">camera/image_raw/</text>
+  <text class="lbl lbl-b c1" x="363" y="192" text-anchor="middle">compressed</text>
+
+  <line class="a2" x1="691" y1="210" x2="869" y2="210"/>
+  <text class="lbl lbl-b c2" x="780" y="192" text-anchor="middle">lane/center_offset 외</text>
+  <text class="small" x="780" y="236" text-anchor="middle">lane/detected</text>
+  <text class="small" x="780" y="254" text-anchor="middle">lane/left_detected</text>
+  <text class="small" x="780" y="272" text-anchor="middle">lane/right_detected</text>
+  <text class="small" x="780" y="290" text-anchor="middle">lane/offset_trend</text>
+  <text class="small" x="780" y="308" text-anchor="middle">lane/corner_ahead</text>
+  <text class="small" x="780" y="326" text-anchor="middle">crossline/detected</text>
+
+  <line class="a3" x1="1107" y1="210" x2="1286" y2="210"/>
+  <text class="lbl lbl-b c3" x="1197" y="192" text-anchor="middle">cmd_vel</text>
+  <text class="small" x="1197" y="236" text-anchor="middle">geometry_msgs/Twist</text>
+
+  <!-- 보조 입출력 -->
+  <line class="dash" x1="572" y1="274" x2="572" y2="370"/>
+  <text class="small" x="584" y="350">lane/debug/compressed</text>
+  <text class="small" x="584" y="368">(디버그 영상)</text>
+
+  <line class="dash" x1="988" y1="96" x2="988" y2="146"/>
+  <text class="small" x="1000" y="118">odom</text>
+  <text class="small" x="1000" y="136">(코너 회전각 계산)</text>
+
+  <text class="note" x="40" y="420">토픽 이름 앞에 /&lt;namespace&gt; 가 붙습니다 (예: /pinky1/lane/center_offset). 단, 모터 쪽 cmd_vel은 launch에서 절대 경로 /cmd_vel로 리맵됩니다.</text>
+</svg>
