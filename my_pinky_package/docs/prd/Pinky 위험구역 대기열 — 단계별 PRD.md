@@ -9,7 +9,11 @@ Oct 12, 2026 · 초안 v4 (**기존 코드는 수정하지 않고 전부 `_v3` �
 | Q3 순찰 노드 v3 | **완료** (A안 적용, 모의 통합 테스트 11개 PASS, 실로봇 미검증) |
 | Q4 브릿지 + 실로봇 코드 테스트 (GUI 없이) | 브릿지 yaml 추가 **완료**, 앵커 실측·실기 테스트 대기 |
 | Q5 튜닝·복구 리허설·체크리스트 | 대기 |
-| Q6 GUI 연동 (`QUEUEING` 표시) | 대기 (Q4~Q5 통과 후) |
+| Q6 GUI 연동 (4개 세부 단계) | 대기 (Q4~Q5 통과 후) |
+| ├ Q6-1 상태 인식 (`QUEUEING`·`RETREATING`) | 대기 |
+| ├ Q6-2 문 제거 반영 (앵커·슬롯·출구 표시) | 대기 |
+| ├ Q6-3 명령·프로세스 전환 (v3 토픽, `emergency_stop`) | 대기 |
+| └ Q6-4 실기 확인·README | 대기 |
 
 ## 0. 공통 개요
 
@@ -443,17 +447,66 @@ PRD의 Step Q5를 준비해줘.
 
 #### Step Q6. GUI 연동 (Q4~Q5 통과 후)
 
-- **내용**: 관제 GUI에 `QUEUEING` 상태 표시 (기존 `WAITING_ZONE` 처리 방식을 따라 **항목만 추가하는 최소 수정**). README에 v3 구성과 복구 절차 요약.
-- **변경 파일**: `pinky_web_gui`(상태 목록), README.
-- **검증**: 기존 GUI 테스트가 깨지지 않을 것. `status` 토픽은 관제 PC 안에서만 쓰이므로 브릿지 변경은 없다.
+- **배경(v3 이력)**: GUI(`pinky_web_gui`)는 v2 기준으로 만들어졌고, 그 뒤 v3 가 파일명·컨셉을 바꿨다. 한 덩어리로 하면 범위가 안 보여서 4개 세부 단계로 나눈다. 각 단계는 커밋 1개 단위이며 순서(Q6-1 → 2 → 3 → 4)대로 한다.
+- **변경 사항 (GUI 가 맞춰야 할 것)**
+  - 파일: `zone_manager_node_v3`, `zone_gate_client_v3`, `pinky_patrol_node_pinky{1,2}_v3`, `zone_params_v3.yaml`, `zone_manager_v3.launch.xml`, `pinky_control_client_v3.py`. v1/v2 는 복구용으로 그대로 둔다.
+  - 토픽: `/zone_manager_v3/*`. GUI 는 아직 `robots.yaml` 의 `zone_status_topic: /zone_manager/status` 를 본다(값 형식 `free` | `occupied_by:<id>` 는 같다).
+  - 문 폐지: `RED*IN/OUT` 대신 `ZONE_ENTRY`(앵커 (1.0,-0.7)) / `ZONE_EXIT`((0.5,-0.4)). `ZONE_*` 는 직접 `goto` 금지. 허가를 받으면 슬롯·앵커를 거치지 않고 목적지로 직행한다.
+  - 상태 이름: 새로 `QUEUEING`(대기 슬롯에서 정지), `RETREATING`(`stop` 후 `ZONE_STOP_EXIT` 로 후퇴). `STOPPED` 의 `detail='retreated'`. v3 에는 문 앞 대기가 없어 `WAITING_ZONE` 은 사실상 쓰이지 않는다.
+  - 명령: `stop` = 구역 밖으로 후퇴 후 락 반납, `emergency_stop`(신설) = 제자리 정지·락 유지·`max_hold_sec` 뒤 자동 해제.
+  - GUI 쪽 현황: 상태 목록(`backend/motion.py:19`, `frontend/patrolview.js:5`, `frontend/zoneview.js:5`, `docs/interfaces.md:77`)에 `QUEUEING`·`RETREATING` 이 없고, `patrolview.js`·`zoneview.js`·`interfaces.md` 가 문(`RED*`) 기준이며, `emergency_stop` 은 없다. `processes.yaml` 은 v1 매니저와 v2 순찰 노드를 띄운다. `pinky_web_gui/CLAUDE.md`·`docs/reference/decisions.md` 에 "연동 전에는 processes.yaml 을 v3 로 바꾸지 않는다"는 규칙이 있다.
+- **공통 제약**: GUI 쪽 파일만 수정(비GUI `_v2`·`_v3` 파일은 건드리지 않음). `status` 토픽은 관제 PC 안에서만 쓰이므로 브릿지 변경은 없다. ROS 검증은 `ROS_DOMAIN_ID=77` + localhost 전용. 로봇을 움직이는 명령은 내가 실행하지 않음. 커밋은 요청할 때만, `git add` 는 경로를 명시(세션 export `.txt` 제외).
 
-**요청 커맨드**
+| 세부 단계 | 내용 | 변경 파일 | 검증 |
+| --- | --- | --- | --- |
+| **Q6-1 상태 인식** | `QUEUEING`·`RETREATING` 을 상태 목록·LED·문구·작업중 판정에 추가(기존 `WAITING_ZONE` 방식 그대로, 최소 수정). mock 에 QUEUEING 흐름 추가 | `backend/motion.py`, `backend/mock.py`, `frontend/patrolview.js`·`zoneview.js`·`app.js`, `docs/interfaces.md` | 기존 pytest + mock 흐름 통과, 신규 상태 단위 테스트 |
+| **Q6-2 문 제거 반영** | `RED*`·`doors` 기준 표시를 앵커/출구 기준으로 정리. 구역 도면에 대기 슬롯(앵커+후방 벡터+간격)·`ZONE_ENTRY`/`ZONE_EXIT` 표시, 대기 표시를 `QUEUEING` 슬롯 번호로. 값은 `zone_params_v3.yaml` 에서 읽어 중복 하드코딩 금지 | `config/zone.yaml`, `frontend/zoneview.js`, `backend/`(설정 로더), `docs/interfaces.md` | 도면 표시 단위 테스트, `tests/verify_*_ui.py` |
+| **Q6-3 명령·프로세스 전환** | `zone_status_topic` 을 `/zone_manager_v3/status` 로, `processes.yaml` 의 zone_manager·순찰 노드를 v3 로 교체(v2 항목은 주석으로 보존). 명령 패널에 `emergency_stop` 추가, `stop` 의미 변경(후퇴) 안내 | `config/robots.yaml`, `config/processes.yaml`, `backend/`(명령 검증), `frontend/app.js` | pytest, 런치 확인은 도메인 77 에서만. 실로봇은 사용자가 시험 |
+| **Q6-4 실기 확인·README** | GUI 로 `start`·대기열·`stop`·`emergency_stop` 한 번씩(사용자 시험, 로그·스크린샷으로 판정). README 에 v3 구성과 복구 절차(6절) 요약, `CLAUDE.md`·`decisions.md` 의 "v3 로 바꾸지 말 것" 문구 해제 | README, `pinky_web_gui/CLAUDE.md`, `docs/reference/decisions.md`, 이 PRD | 사용자 실기 로그, 문서 점검 |
+
+**요청 커맨드 (공통 머리말 + 단계별 본문)**
+
+공통 머리말(매 단계 맨 앞에 붙인다):
 
 ```text
-PRD의 Step Q6을 구현해줘.
-- pinky_web_gui 에서 QUEUEING 상태를 인식해 표시 (기존 WAITING_ZONE 처리 코드를 먼저 찾아서 같은 방식으로, 최소 수정)
+[v3 이력] 대기열 v3 는 기존 v2 를 건드리지 않고 _v3 신규 파일로 만들었다(복구용 보존).
+- 문(RED*IN/OUT) 폐지 → ZONE_ENTRY(앵커 1.0,-0.7) / ZONE_EXIT(0.5,-0.4), ZONE_* 는 직접 goto 금지
+- 토픽 /zone_manager_v3/*, 설정 zone_params_v3.yaml, 순찰 노드 pinky_patrol_node_pinky{1,2}_v3
+- 새 상태 QUEUEING, RETREATING / stop = 후퇴 후 락 반납, emergency_stop = 제자리 정지(락 유지)
+- 상세는 my_pinky_package/docs/prd/Pinky 위험구역 대기열 — 단계별 PRD.md 의 Step Q6 절과 6절(복구)
+- pinky_web_gui 안의 파일만 수정하고, 비GUI _v2/_v3 파일은 수정하지 않는다. ROS 검증은 ROS_DOMAIN_ID=77 + localhost 전용
+- 로봇을 움직이는 명령은 실행하지 말고, 내가 칠 명령만 알려줘. 커밋은 내가 요청할 때만
+```
+
+```text
+[Q6-1] PRD 의 Step Q6-1 을 구현해줘.
+- pinky_web_gui 에서 WAITING_ZONE 을 처리하는 코드를 먼저 전부 찾아서(backend/motion.py, frontend/patrolview.js, zoneview.js, app.js, docs/interfaces.md) 같은 방식으로 QUEUEING·RETREATING 을 추가 (최소 수정)
+- LED 색, 상태 문구, 작업중(WORKING) 판정, "응답 없음" 판정에 빠지는 곳이 없는지 확인
+- backend/mock.py 에 QUEUEING 흐름(점유 중이면 슬롯에서 대기 → 허가 → 진행)을 추가
+- 기존 테스트가 깨지지 않는지 실행하고, 신규 상태 테스트를 추가해서 결과 보여줘
+```
+
+```text
+[Q6-2] PRD 의 Step Q6-2 를 구현해줘. (Q6-1 완료 후)
+- RED*·doors 기준으로 그리는 표시(zoneview.js, config/zone.yaml, interfaces.md)를 찾아서 앵커/출구 기준으로 정리
+- 구역 도면에 대기 슬롯(앵커 + 후방 벡터 + 간격)과 ZONE_ENTRY / ZONE_EXIT 를 표시하고, QUEUEING 로봇은 슬롯 번호를 보여줘
+- 앵커·후방 벡터·간격은 zone_params_v3.yaml 에서 읽고 GUI 에 값을 복사해 하드코딩하지 말 것 (바꾸면 한 곳만 고치면 되게)
+- 도면 표시 단위 테스트와 tests/verify_*_ui.py 결과를 보여줘
+```
+
+```text
+[Q6-3] PRD 의 Step Q6-3 을 구현해줘. (Q6-2 완료 후)
+- robots.yaml 의 zone_status_topic 을 /zone_manager_v3/status 로, processes.yaml 의 zone_manager 와 순찰 노드를 v3(zone_manager_v3.launch.xml, pinky_patrol_node_pinky*_v3)로 교체
+- v2 항목은 지우지 말고 주석으로 남기고, 되돌리는 방법(PRD 6절)을 파일 상단 주석에 적어줘
+- 명령 패널에 emergency_stop 을 추가하고 stop 은 "구역 밖으로 후퇴 후 락 반납"임을 안내 문구로 표시. 백엔드 명령 검증 목록도 맞춰줘
+- pytest 결과와, 도메인 77 에서 런치가 뜨는지만 확인한 결과를 보여줘 (실로봇 연동은 내가 시험)
+```
+
+```text
+[Q6-4] PRD 의 Step Q6-4 를 준비해줘. (Q6-3 완료 후, 내가 GUI 로 시험한 뒤 로그를 붙이면 판정)
+- GUI 실기 시험 순서 정리: start(대기열), 대기 중 stop, 토큰 보유 중 stop, emergency_stop, 두 로봇 동시 stop
 - README 에 v3 구성과 복구 절차(PRD 6절) 요약 추가
-- 기존 테스트가 깨지지 않는지 실행해서 결과 보여줘
+- 시험이 통과하면 pinky_web_gui/CLAUDE.md 와 docs/reference/decisions.md 의 "processes.yaml 을 v3 로 바꾸지 말 것" 문구를 현재 상태로 고치고, 이 PRD 표를 갱신
 ```
 
 > 앵커 좌표를 이미 알고 있으면 Q4 요청 커맨드에 `앵커는 (x, y, yaw), 후방 벡터는 (dx, dy), 간격은 d`를 덧붙인다. 그러면 TODO 없이 바로 들어간다.
