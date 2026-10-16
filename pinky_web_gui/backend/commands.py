@@ -11,9 +11,9 @@ from .config import is_door
 ALLOWED_CMDS = ('start', 'stop', 'goto')
 
 # 명령마다 "받아들였다" 고 볼 수 있는 patrol_status 상태. 노드는 start/goto 를 받으면 곧바로 STARTING 을 발행하고,
-# stop 은 작업을 끊으면서 STOPPED 를 발행한다. 작업 중인 로봇은 무시한 명령과 상관없이 MOVING 등으로 계속 상태가 바뀌므로
+# stop 은 작업을 끊으면서 STOPPED 를 발행한다 (v3 는 구역 안 토큰 보유 로봇이 후퇴를 먼저 하므로 RETREATING 이 먼저 나오고 STOPPED 는 후퇴가 끝난 뒤다). 작업 중인 로봇은 무시한 명령과 상관없이 MOVING 등으로 계속 상태가 바뀌므로
 # "아무 상태 변화" 를 응답으로 보면 무시된 start 가 응답한 것으로 잘못 표시된다.
-ACK_STATES = {'start': ('STARTING',), 'goto': ('STARTING',), 'stop': ('STOPPED',), 'estop': ('STOPPED',)}
+ACK_STATES = {'start': ('STARTING',), 'goto': ('STARTING',), 'stop': ('STOPPED', 'RETREATING'), 'estop': ('STOPPED', 'RETREATING')}
 
 # 비상정지 이력의 detail (patrol_cmd stop 에 로봇이 응답하지 않은 경우). 작업 중이 아니던 로봇은 stop 에 응답하지 않는 것이 정상이라
 # '응답 없음' 오류로 표시하지 않고, 0 속도는 따로 보냈다는 사실을 알려 준다.

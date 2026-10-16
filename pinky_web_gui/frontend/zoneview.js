@@ -2,7 +2,7 @@
 // Step 4 화면 로직(순수 함수): 구역 배지, 구역 진입 대기 문구, 경로 오버레이 계산. DOM 에 의존하지 않는다 (patrolview.js 와 같은 방식).
 (function (root) {
   // 작업 중 상태. 경로 선은 이때만 그린다 (끝난 작업의 경로를 계속 보여 주면 현재 상황으로 오해한다).
-  const WORKING = ['STARTING', 'MOVING', 'WAITING_ZONE', 'ARRIVED', 'LEAVING_ZONE', 'RETURNING', 'RETRY'];
+  const WORKING = ['STARTING', 'MOVING', 'WAITING_ZONE', 'QUEUEING', 'ARRIVED', 'LEAVING_ZONE', 'RETREATING', 'RETURNING', 'RETRY'];
   const isDoor = (n) => typeof n === 'string' && n.toUpperCase().startsWith('RED');
 
   // FR4-2: 상단 구역 배지. info 는 서버의 zone_info/zone 메시지({state, holder, held_sec}), recvMs 는 그것을 받은 시각(클라이언트 시계).
@@ -62,7 +62,7 @@
       else if (wp >= 0 && wp < idx.length) {
         const at = idx[wp];
         if (state === 'ARRIVED') target = at;
-        else if (state === 'WAITING_ZONE') target = at > 0 && names[at - 1] === (doors && doors.in) ? at - 1 : at;
+        else if (state === 'WAITING_ZONE' || state === 'QUEUEING') target = at > 0 && names[at - 1] === (doors && doors.in) ? at - 1 : at;
         else if (state === 'MOVING') target = isDoor(detail) && at > 0 && names[at - 1] === detail ? at - 1 : at;
         else if (state === 'LEAVING_ZONE') {
           // 구역 안 -> 밖 도중이면 waypoint 는 '다음(밖) 지점' 순번이라 문이 그 앞에 있고, 마지막 지점에서 나오면 문이 그 뒤에 있다
@@ -76,7 +76,7 @@
       const names = cfg.start_route.slice();
       let target = -1;
       if ((state === 'MOVING' || state === 'RETRY') && wp >= 0 && wp < names.length) target = wp;  // 방금 도착한 다음 번호가 다음 목표
-      else if (state === 'WAITING_ZONE' && wp >= 0 && wp < names.length) target = wp;               // 진입 문 인덱스
+      else if ((state === 'WAITING_ZONE' || state === 'QUEUEING') && wp >= 0 && wp < names.length) target = wp;   // 진입 문(v3 는 ZONE_ENTRY) 인덱스
       return { names, target };
     }
     return null;

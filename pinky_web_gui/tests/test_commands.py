@@ -138,6 +138,16 @@ def test_stop_acked_by_stopped_only_and_goto_by_starting():
     assert results(t) == [ACKNOWLEDGED, ACKNOWLEDGED]
 
 
+def test_stop_acked_by_retreating_for_queue_v3():
+    # v3 에서 구역 안 로봇은 stop 을 받으면 후퇴(RETREATING)부터 하고 STOPPED 는 후퇴가 끝난 뒤라서, 후퇴 시작을 응답으로 본다
+    t, c = tracker()
+    t.sent('a', 'stop', [], 'stop')
+    assert t.on_patrol('a', 'RETREATING')
+    t.sent('b', 'start', [], 'start')
+    assert t.on_patrol('b', 'RETREATING') == []       # start 의 응답은 여전히 STARTING 만
+    assert results(t) == [ACKNOWLEDGED, SENT]
+
+
 def test_ack_only_for_same_robot():
     t, c = tracker()
     t.sent('a', 'start', [], 'start')

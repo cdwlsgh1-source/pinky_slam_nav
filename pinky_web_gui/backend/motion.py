@@ -16,7 +16,7 @@ from .config import ANGULAR_HARD_MAX, LINEAR_HARD_MAX
 log = logging.getLogger('backend.motion')
 
 # 작업 중 상태 (순찰 노드의 _running 이 True 인 동안). 이때는 수동 조작을 받지 않는다 (FR4-9).
-WORKING = ('STARTING', 'MOVING', 'WAITING_ZONE', 'ARRIVED', 'LEAVING_ZONE', 'RETURNING', 'RETRY')
+WORKING = ('STARTING', 'MOVING', 'WAITING_ZONE', 'QUEUEING', 'ARRIVED', 'LEAVING_ZONE', 'RETREATING', 'RETURNING', 'RETRY')
 TAIL_SEC = 0.3  # 수동 조작이 끝난 뒤 0 속도를 이만큼 더 반복한다 (패킷 하나가 유실돼도 멈추도록)
 
 

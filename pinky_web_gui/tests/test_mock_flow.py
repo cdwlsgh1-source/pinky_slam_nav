@@ -12,9 +12,9 @@ CFG = load_config()
 class Run:
     """MockFleet 을 띄우고 큐에 나온 patrol/zone 이벤트를 모아 둔다."""
 
-    def __init__(self, calib=0.3, wait_scale=0.02, speed=20.0):
+    def __init__(self, calib=0.3, wait_scale=0.02, speed=20.0, **fleet_opts):
         self.queue = asyncio.Queue()
-        self.fleet = MockFleet(CFG, self.queue, wait_scale=wait_scale, speed=speed, calib_sec=calib)
+        self.fleet = MockFleet(CFG, self.queue, wait_scale=wait_scale, speed=speed, calib_sec=calib, **fleet_opts)
         self.patrol = {rid: [] for rid in CFG.robots}   # rid -> [(t, state, waypoint, detail)]
         self.zone = []
         self.order = []                                  # 전체 순서: (rid|'zone', 값)
@@ -231,4 +231,61 @@ def test_two_robots_contend_for_zone_one_waits():
             # 두 번째 로봇의 ARRIVED 는 첫 번째 로봇이 LEAVING_ZONE 한 뒤다 (동시에 구역 안에 있지 않다)
             idx = {k: i for i, k in enumerate(r.order)}
             assert idx[('pinky1', ('LEAVING_ZONE', 0, 'RED1OUT'))] < idx[('pinky2', ('ARRIVED', 0, 'P3'))]
+    run(go())
+
+
+# ---- 대기열 v3 (queue_mode): QUEUEING / RETREATING ----
+
+def test_queue_mode_second_robot_queues_with_slot_and_never_waiting_zone():
+    async def go():
+        async with Run(calib=0.1, wait_scale=0.3, queue_mode=True) as r:
+            r.fleet.publish_cmd('pinky1', 'goto:P3')
+            r.fleet.publish_cmd('pinky2', 'goto:P3')
+            await r.until('pinky1', 'DONE', timeout=10)
+            await r.until('pinky2', 'DONE', timeout=10)
+            queued = [rid for rid in CFG.robots if any(s == 'QUEUEING' for s, _, _ in r.states(rid))]
+            assert len(queued) == 1                                    # 먼저 도착한 쪽은 줄을 서지 않는다
+            assert all(s != 'WAITING_ZONE' for rid in CFG.robots for s, _, _ in r.states(rid))
+            assert [d for s, _, d in r.states(queued[0]) if s == 'QUEUEING'] == ['slot0']
+            assert r.zone == ['free', 'occupied_by:' + [x for x in CFG.robots if x != queued[0]][0], 'free',
+                              'occupied_by:' + queued[0], 'free']
+    run(go())
+
+
+def test_queue_mode_free_zone_passes_without_queue_state():
+    async def go():
+        async with Run(calib=0.1, queue_mode=True) as r:
+            r.fleet.publish_cmd('pinky1', 'goto:P3')
+            await r.until('pinky1', 'DONE', timeout=10)
+            assert all(s not in ('QUEUEING', 'WAITING_ZONE') for s, _, _ in r.states('pinky1'))
+    run(go())
+
+
+def test_queue_mode_stop_while_holding_retreats_then_releases():
+    async def go():
+        async with Run(calib=0.1, wait_scale=50.0, queue_mode=True) as r:
+            r.fleet.publish_cmd('pinky1', 'goto:P3')
+            await r.until('pinky1', 'ARRIVED', timeout=10)           # 구역 안(토큰 보유)
+            r.fleet.publish_cmd('pinky1', 'stop')
+            await r.until('pinky1', 'STOPPED', timeout=10)
+            assert r.states('pinky1')[-2:] == [('RETREATING', -1, 'ZONE_STOP_EXIT'), ('STOPPED', -1, 'retreated')]
+            assert r.zone[-1] == 'free'
+    run(go())
+
+
+def test_queue_mode_stop_while_queueing_leaves_queue_without_retreat():
+    async def go():
+        async with Run(calib=0.1, wait_scale=50.0, queue_mode=True) as r:
+            r.fleet.publish_cmd('pinky1', 'goto:P3')
+            await r.until('pinky1', 'ARRIVED', timeout=10)
+            r.fleet.publish_cmd('pinky2', 'goto:P3')
+            await r.until('pinky2', 'QUEUEING', timeout=10)
+            r.fleet.publish_cmd('pinky2', 'stop')
+            await r.until('pinky2', 'STOPPED', timeout=10)
+            assert all(s != 'RETREATING' for s, _, _ in r.states('pinky2'))
+            assert r.states('pinky2')[-1][2] != 'retreated'
+            assert r.fleet._waiters == []                              # 줄에서 빠졌다
+            assert r.zone[-1] == 'occupied_by:pinky1'                 # 구역 안 로봇의 락은 그대로
+            r.fleet.publish_cmd('pinky1', 'stop')
+            await r.until('pinky1', 'STOPPED', timeout=10)
     run(go())

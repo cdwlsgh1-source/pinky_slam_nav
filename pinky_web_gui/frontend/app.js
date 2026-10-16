@@ -444,8 +444,8 @@ function drawMarker(id, r) {
   ctx.closePath();
   ctx.fill(); ctx.stroke();
   ctx.restore();
-  const waiting = r.patrol && r.patrol.state === 'WAITING_ZONE';
-  if (waiting) {  // FR4-3: 구역 진입 대기
+  const waiting = r.patrol && (r.patrol.state === 'WAITING_ZONE' || r.patrol.state === 'QUEUEING');
+  if (waiting) {  // FR4-3: 구역 진입 대기 (v3 는 QUEUEING)
     ctx.save();
     ctx.strokeStyle = '#e03131'; ctx.lineWidth = 3; ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.arc(sx, sy, MARKER_R + 6, 0, Math.PI * 2); ctx.stroke();
@@ -702,9 +702,10 @@ function renderCards() {
     const p = r.patrol, state = p && p.state;
     c.stateBadge.textContent = state || '-';
     c.stateBadge.dataset.level = PatrolView.badgeLevel(state);
-    if (state === 'WAITING_ZONE') {  // FR4-3
+    if (state === 'WAITING_ZONE' || state === 'QUEUEING') {  // FR4-3
       const zi = app.zoneInfo, holder = zi && zi.state === 'occupied' && zi.holder !== id ? ' · ' + zi.holder + ' 사용 중' : '';
-      c.prog.textContent = ZoneView.waitingText(cfg, r.lastTask, p) + holder;
+      const base = state === 'WAITING_ZONE' ? ZoneView.waitingText(cfg, r.lastTask, p) : PatrolView.progressText(cfg, r.lastTask, p);
+      c.prog.textContent = base + holder;
     } else {
       c.prog.textContent = PatrolView.progressText(cfg, r.lastTask, p);
     }

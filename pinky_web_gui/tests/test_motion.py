@@ -143,7 +143,7 @@ def test_rejects_non_finite_input(lin, ang):
     assert not ok and why and r.sent == []
 
 
-@pytest.mark.parametrize('state', ['STARTING', 'MOVING', 'WAITING_ZONE', 'ARRIVED', 'LEAVING_ZONE', 'RETURNING', 'RETRY'])
+@pytest.mark.parametrize('state', ['STARTING', 'MOVING', 'WAITING_ZONE', 'QUEUEING', 'ARRIVED', 'LEAVING_ZONE', 'RETREATING', 'RETURNING', 'RETRY'])
 def test_rejected_while_patrolling(state):
     r = Rig()
     r.state['a'] = state

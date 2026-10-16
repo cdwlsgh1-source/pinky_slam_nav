@@ -76,6 +76,16 @@
 
 state 11종: `IDLE`, `STARTING`, `MOVING`, `WAITING_ZONE`, `ARRIVED`, `LEAVING_ZONE`, `RETURNING`, `DONE`, `STOPPED`, `FAILED`, `RETRY`.
 
+**대기열 v3 순찰 노드(`pinky_patrol_node_pinky{1,2}_v3`)는 2종을 더 낸다 (GUI 는 Step Q6-1 에서 인식을 추가했다).** v3 에는 문 앞 대기가 없어서 `WAITING_ZONE` 대신 `QUEUEING` 이 나온다 (v3 코드에 `WAITING_ZONE` 분기가 남아 있지만 문 앞 도착 상태일 때만이라 정상 흐름에서는 보기 어렵다 — 실기로는 **확인 필요**).
+
+| state | waypoint | detail | 의미 | 근거 |
+|---|---|---|---|---|
+| `QUEUEING` | 진입 지점 인덱스(`WAITING_ZONE` 과 같은 의미) | `slot<번호>` (0 = 앵커 자리) | 구역이 점유 중이라 매니저가 알려 준 슬롯에서 정지해 순서를 기다림 | `pinky_patrol_node_pinky1_v3.py` `_queue_and_enter` 의 `publish_status(phase, idx, detail)` |
+| `RETREATING` | -1 | `ZONE_STOP_EXIT` | 구역 안에서 `stop` 을 받아 구역 밖으로 후퇴 중. 도착하면 락을 반납하고 `STOPPED` | `_retreat_after_stop` |
+| `STOPPED` (후퇴 뒤) | -1 | `retreated` | 후퇴와 반납을 마치고 정지 | `_retreat_after_stop` |
+
+`stop` 의 응답 판정: 구역 안 로봇은 후퇴가 끝나야 `STOPPED` 가 나오므로 GUI 는 `RETREATING` 도 `stop` 의 응답으로 본다 (`ACK_STATES`). `emergency_stop`(제자리 정지, 락 유지)은 Q6-3 에서 다룬다.
+
 `IDLE`은 노드 시작 시 `waypoint=-1`로 한 번만 발행한다 (:155). 작업이 끝나면(`DONE`/`STOPPED`/`FAILED`) 이후 별도의 `IDLE`은 코드에서 확인되지 않는다 — 마지막 state가 그대로 남는다. (`_run_patrol`/`_run_route`의 `finally`는 LED와 `_running`만 바꾼다. :578-580, :669-671)
 
 ## 4. `start` 순찰과 `goto` 경로의 차이

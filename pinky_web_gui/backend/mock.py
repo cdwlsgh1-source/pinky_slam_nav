@@ -6,6 +6,8 @@
   - goto 입력 검증(`no point given`/`unknown point`/`not allowed`)은 작업 중 확인보다 먼저 한다
   - 노드를 켠 뒤 첫 작업은 초기 위치 보정(제자리 회전)으로 STARTING 이 길고 그 동안 stop 을 확인하지 않는다
   - 구역(P3~P6) 락은 로봇끼리 공유한다. 이미 점유 중이면 WAITING_ZONE 으로 기다린다
+  - queue_mode=True 면 대기열 v3 의 상태를 흉내 낸다: 점유 중일 때만 QUEUEING(detail `slot<순번>`)으로 줄을 서고(빈 구역은 상태 없이 통과),
+    구역 안에서 stop 을 받으면 RETREATING 을 거쳐 STOPPED(detail `retreated`)가 된다. 문 이동(RED*)과 `emergency_stop` 은 흉내 내지 않는다
 실제 노드와 다른 점: stop 으로 끝날 때 구역 락을 즉시 반납한다 (실제는 max_hold_sec 타임아웃에 의존).
 이동은 벽을 무시하는 직선 보간이다. 배터리 percentage 는 실제 로봇과 같이 0~100 단위다.
 
@@ -41,9 +43,13 @@ class _Stopped(Exception):
 
 
 class MockFleet:
-    def __init__(self, cfg, queue, wait_scale=1.0, speed=0.5, calib_sec=6.0, planner=None, scan_mount_yaw=0.0, scan_mount_tf=True):
+    def __init__(self, cfg, queue, wait_scale=1.0, speed=0.5, calib_sec=6.0, planner=None, scan_mount_yaw=0.0, scan_mount_tf=True,
+                 queue_mode=False, retreat_sec=0.5):
         self._cfg = cfg
         self._queue = queue
+        self._queue_mode = queue_mode  # 대기열 v3 의 QUEUEING / RETREATING 흐름 (기본은 v2 의 WAITING_ZONE)
+        self._retreat_sec = retreat_sec  # stop 후 구역 밖으로 후퇴하는 데 걸리는 시간 (queue_mode)
+        self._waiters = []             # queue_mode: 락을 기다리는 로봇을 신청 순서대로
         self._scan_mount_tf = scan_mount_tf    # False 면 센서가 돌려 달렸어도 tf 를 주지 않는다 (amcl + 보정 각도 대체 경로 시험용)
         self._scan_mount_yaw = scan_mount_yaw  # 가짜 센서가 로봇 정면에서 돌아 달린 각도(rad). 0 이 아니면 tf 경로로 보낸다
         self._planner = planner      # 있으면 지점 사이를 벽을 피하는 경로로 이동한다 (없으면 직선)
@@ -214,8 +220,14 @@ class MockFleet:
             try:
                 await coro
             except _Stopped:
-                wp, detail = self._cur[rid]
-                self._status(rid, 'STOPPED', wp, detail)
+                if self._queue_mode and self._zone_owner == rid:
+                    # v3: 토큰을 쥔 채 stop 을 받으면 구역 밖으로 후퇴한 뒤 반납한다 (후퇴 중에는 stop 을 다시 확인하지 않는다)
+                    self._status(rid, 'RETREATING', -1, 'ZONE_STOP_EXIT')
+                    await asyncio.sleep(self._retreat_sec)
+                    self._status(rid, 'STOPPED', -1, 'retreated')
+                else:
+                    wp, detail = self._cur[rid]
+                    self._status(rid, 'STOPPED', wp, detail)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -296,13 +308,26 @@ class MockFleet:
         door_out = next((n for n in route if self._points[n]['door'] and n.endswith('OUT')), None)
         return door_in, door_out
 
+    async def _wait_zone(self, rid, wp, detail=''):
+        """락이 날 때까지 기다린다. v2 는 WAITING_ZONE 을 항상 발행하고, queue_mode(v3)는 점유 중일 때만 QUEUEING 으로 줄을 선다."""
+        if self._queue_mode:
+            if self._zone_owner not in (None, rid):
+                self._waiters.append(rid)
+                self._status(rid, 'QUEUEING', wp, f'slot{len(self._waiters) - 1}')
+        else:
+            self._status(rid, 'WAITING_ZONE', wp, detail)
+        self._cur[rid] = (wp, detail)
+        try:
+            while self._zone_owner not in (None, rid) or (rid in self._waiters and self._waiters[0] != rid):
+                await self._sleep(rid, ZONE_POLL_SEC)
+        finally:
+            if rid in self._waiters:
+                self._waiters.remove(rid)
+
     async def _enter_zone(self, rid, door_in, wp, name):
-        """문까지 가서 락을 기다린다 (notice: WAITING_ZONE)."""
+        """문까지 가서 락을 기다린다 (notice: WAITING_ZONE, queue_mode 는 QUEUEING)."""
         await self._move(rid, door_in)
-        self._status(rid, 'WAITING_ZONE', wp, name)
-        self._cur[rid] = (wp, name)
-        while self._zone_owner not in (None, rid):
-            await self._sleep(rid, ZONE_POLL_SEC)
+        await self._wait_zone(rid, wp, name)
         self._zone_owner = rid
         self._queue.put_nowait(('zone', f'occupied_by:{rid}'))
 
@@ -323,9 +348,7 @@ class MockFleet:
             await self._move(rid, name)
             self._status(rid, 'MOVING', i + 1)  # 도착한 웨이포인트 다음 번호, 도착 후 발행
             if name == door_in:
-                self._status(rid, 'WAITING_ZONE', i)
-                while self._zone_owner not in (None, rid):
-                    await self._sleep(rid, ZONE_POLL_SEC)
+                await self._wait_zone(rid, i)
                 self._zone_owner = rid
                 self._queue.put_nowait(('zone', f'occupied_by:{rid}'))
             elif name == door_out:
