@@ -46,7 +46,7 @@ python3 -m venv --system-site-packages .venv
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-export ROS_DOMAIN_ID=50
+export ROS_DOMAIN_ID=100
 .venv/bin/python -m backend.main
 ```
 
@@ -100,7 +100,7 @@ curl -s -b /tmp/pinky.cookie -X POST localhost:8000/api/robots/pinky1/command \
 
 | 변수 | 값 | 설명 |
 |---|---|---|
-| `ROS_DOMAIN_ID` | `50` | 실제 로봇 연결 시 관제 도메인. 다르면 서버가 시작 때 경고한다 (`backend/main.py`) |
+| `ROS_DOMAIN_ID` | `100` | 실제 로봇 연결 시 관제 도메인. 다르면 서버가 시작 때 경고한다 (`backend/main.py`) |
 | `ROS_LOCALHOST_ONLY` | 설정하지 않음 | `1` 이면 브리지 토픽을 못 받는다는 경고가 나온다 |
 | `ROS_DOMAIN_ID=77` + `ROS_LOCALHOST_ONLY=1` | 시험용 | ROS 경로 검증(`tests/verify_step4_ros.py`)에서만 쓰는 격리 값. 실제 도메인과 섞이지 않게 이 값으로만 검증한다 |
 | `ssh.password_env` 가 가리키는 변수 | 선택 | `processes.yaml` 의 항목마다 변수 **이름**을 적으면 그 환경변수를 SSH 비밀번호로 쓴다 (`sshpass` 필요). 기본은 키 로그인이고 비밀번호를 파일에 두지 않는다 |

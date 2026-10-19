@@ -1,0 +1,147 @@
+name: pinky_bridge_pinky3_only
+
+topics:
+  # 관제 PC(100) -> 핑키3(30)
+  /pinky3/patrol_cmd:
+    type: std_msgs/msg/String
+    from_domain: 100
+    to_domain: 30
+    remap: /patrol_cmd
+
+  /patrol_status:
+    type: std_msgs/msg/String
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/patrol_status
+
+  /pinky3/cmd_vel:
+    type: geometry_msgs/msg/Twist
+    from_domain: 100
+    to_domain: 30
+    remap: /cmd_vel
+
+  /pinky3/initialpose:
+    type: geometry_msgs/msg/PoseWithCovarianceStamped
+    from_domain: 100
+    to_domain: 30
+    remap: /initialpose
+
+  /pinky3/goal_pose:
+    type: geometry_msgs/msg/PoseStamped
+    from_domain: 100
+    to_domain: 30
+    remap: /goal_pose
+
+  # 핑키3(30) -> 관제 PC(100)
+  /scan:
+    type: sensor_msgs/msg/LaserScan
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/scan
+
+  /odom:
+    type: nav_msgs/msg/Odometry
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/odom
+
+  /tf:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/tf
+
+  /tf_static:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/tf_static
+
+  /amcl_pose:
+    type: geometry_msgs/msg/PoseWithCovarianceStamped
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/amcl_pose
+
+  /battery_state:
+    type: sensor_msgs/msg/BatteryState
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/battery_state
+
+  # 로봇은 /battery_state 대신 Float32 두 개(/battery/percent, /battery/voltage)를 발행함.
+  # 웹 GUI 백엔드가 이 두 토픽을 구독한다.
+  /battery/percent:
+    type: std_msgs/msg/Float32
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/battery/percent
+
+  /battery/voltage:
+    type: std_msgs/msg/Float32
+    from_domain: 30
+    to_domain: 100
+    remap: /pinky3/battery/voltage
+
+  # === ZONE-MUTEX ADDED ======================================================
+  # zone_manager_node는 관제 PC(도메인 100)에서만 실행됩니다.
+  # 메시지 안에 "pinky3:토큰" 형태로 robot_id가 이미 포함되어 있어서
+  # patrol_cmd/status와 달리 로봇별로 토픽 이름을 따로 remap할 필요가 없습니다.
+  # (pinky3 쪽 브릿지 파일과 토픽 이름을 동일하게 맞춰서, 관제 PC의
+  #  /zone_manager/request_entry 토픽 하나에 두 로봇이 함께 publish/subscribe함)
+
+  # 로봇(30) -> 관제 PC(100): "구역 들어갈게요" 요청
+  /zone_manager/request_entry:
+    type: std_msgs/msg/String
+    from_domain: 30
+    to_domain: 100
+
+  # 로봇(30) -> 관제 PC(100): "구역 나왔어요" 통보
+  /zone_manager/notify_exit:
+    type: std_msgs/msg/String
+    from_domain: 30
+    to_domain: 100
+
+  # 관제 PC(100) -> 로봇(30): 진입 허가
+  /zone_manager/grant_entry:
+    type: std_msgs/msg/String
+    from_domain: 100
+    to_domain: 30
+  # ============================================================================
+
+  # === ZONE-QUEUE-V3 ADDED ===================================================
+  # zone_manager_node_v3(대기열 슬롯 방식) 전용. 토픽 이름이 /zone_manager_v3/* 라서
+  # 위의 /zone_manager/* (v1) 와 섞이지 않는다. 메시지에 robot_id 가 들어 있어 remap 불필요.
+  # status 는 매니저와 GUI 가 모두 관제 PC(100)에 있어 도메인을 건너갈 일이 없으므로 넣지 않는다.
+  # [복구] 이 블록(ZONE-QUEUE-V3 ADDED ~ END)만 지우면 v2 구성으로 돌아간다 (PRD 6절).
+
+  # 로봇(30) -> 관제 PC(100): 진입 요청 (대기 중 1초마다 재전송)
+  /zone_manager_v3/request_entry:
+    type: std_msgs/msg/String
+    from_domain: 30
+    to_domain: 100
+
+  # 로봇(30) -> 관제 PC(100): 구역 이탈 통보
+  /zone_manager_v3/notify_exit:
+    type: std_msgs/msg/String
+    from_domain: 30
+    to_domain: 100
+
+  # 로봇(30) -> 관제 PC(100): 대기 포기 (stop / 이동 실패 / queue_full)
+  /zone_manager_v3/cancel_entry:
+    type: std_msgs/msg/String
+    from_domain: 30
+    to_domain: 100
+
+  # 관제 PC(100) -> 로봇(30): 진입 허가
+  /zone_manager_v3/grant_entry:
+    type: std_msgs/msg/String
+    from_domain: 100
+    to_domain: 30
+
+  # 관제 PC(100) -> 로봇(30): 대기 슬롯 좌표 "robot_id:k:x,y,yaw" (k=-1 이면 대기열 가득 참)
+  /zone_manager_v3/queue_slot:
+    type: std_msgs/msg/String
+    from_domain: 100
+    to_domain: 30
+  # === ZONE-QUEUE-V3 END =====================================================

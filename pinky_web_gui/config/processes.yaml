@@ -36,7 +36,7 @@ processes:
 
   # ================================================================================================================================
   # ---- 1. 도메인 브릿지 (관제 PC) ----
-  # pinky1(20<->50) 과 pinky2(22<->50) 브릿지를 domain_bridge 패키지의 bridges.launch.xml 하나로 같이 띄운다 (터미널의 ros2 launch 와 같다).
+  # pinky1(10<->100), pinky2(20<->100), pinky3(30<->100) 브릿지를 domain_bridge 패키지의 bridges.launch.xml 하나로 같이 띄운다 (터미널의 ros2 launch 와 같다).
   # cwd 는 이 PC 의 저장소 경로다 (/home/pinky/... 는 로봇 경로라 PC 에 없다).
   # 브릿지를 먼저 켜면 로봇 토픽이 없을 때 구독이 기본 QoS(reliable)로 만들어져 best_effort 센서 토픽(/odom, /scan)이 안 넘어올 수 있다.
   # 그래서 [전체 시작] 은 bringup 이 켜진 뒤 로봇 토픽이 오는지 확인하고, 안 오면 restart_if_stalled 인 이 프로세스를 한 번 재시작한다.
@@ -46,7 +46,7 @@ processes:
     group: "도메인 브릿지"
     label: 도메인 브릿지 (pinky1, pinky2)
     kind: local
-    domain: 50
+    domain: 100
     cwd: "{repo}"
     command: "ros2 launch domain_bridge bridges.launch.xml"
     detect: "domain_bridge .*pinky_bridge_pinky"
@@ -71,7 +71,7 @@ processes:
     kind: ssh
     robot: pinky1
     health: true
-    domain: 20
+    domain: 10
     ssh: {host: "192.168.45.20", user: "pinky", port: 22}
     cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
     env: *pinky1_env
@@ -85,7 +85,7 @@ processes:
     kind: ssh
     robot: pinky2
     health: true
-    domain: 22
+    domain: 20
     ssh: {host: "192.168.45.22", user: "pinky", port: 22}
     cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
     env: *pinky2_env
@@ -102,7 +102,7 @@ processes:
     label: pinky1 map (Nav2)
     kind: ssh
     robot: pinky1
-    domain: 20
+    domain: 10
     ssh: {host: "192.168.45.20", user: "pinky", port: 22}
     cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
     env: *pinky1_env
@@ -115,7 +115,7 @@ processes:
     label: pinky2 map (Nav2)
     kind: ssh
     robot: pinky2
-    domain: 22
+    domain: 20
     ssh: {host: "192.168.45.22", user: "pinky", port: 22}
     cwd: /home/pinky      # 터미널의 기본 위치(~). map:=my_pinky_map10.yaml 이 여기서 찾아진다
     env: *pinky2_env
@@ -130,7 +130,7 @@ processes:
     group: "zone_manager"
     label: zone_manager
     kind: local
-    domain: 50
+    domain: 100
     command: "ros2 launch zone_traffic_control zone_manager.launch.xml"
     detect: "zone_manager_node"
 
@@ -144,7 +144,7 @@ processes:
     label: pinky1 순찰 노드
     kind: ssh
     robot: pinky1
-    domain: 20
+    domain: 10
     ssh: {host: "192.168.45.20", user: "pinky", port: 22}
     cwd: /home/pinky/pinky_slam_nav
     env: *pinky1_env
@@ -158,7 +158,7 @@ processes:
     label: pinky2 순찰 노드
     kind: ssh
     robot: pinky2
-    domain: 22
+    domain: 20
     ssh: {host: "192.168.45.22", user: "pinky", port: 22}
     cwd: /home/pinky/pinky_slam_nav
     env: *pinky2_env

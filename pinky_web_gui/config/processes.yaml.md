@@ -66,14 +66,14 @@ ros2 launch pinky_bringup bringup_robot.launch.xml   # command
 
 | 분류 | id | 실행 위치 | 도메인 | 명령 |
 |---|---|---|---|---|
-| 1. 도메인 브릿지 | bridge | 관제 PC | 50 | `ros2 launch domain_bridge bridges.launch.xml` |
-| 2. bringup | bringup_pinky1 / 2 | 로봇 SSH | 20 / 22 | `ros2 launch pinky_bringup bringup_robot.launch.xml` |
-| 3. map (Nav2) | map_pinky1 / 2 | 로봇 SSH | 20 / 22 | `ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml` |
-| 4. zone_manager | zone_manager | 관제 PC | 50 | `ros2 launch zone_traffic_control zone_manager.launch.xml` |
-| 5. 순찰 노드 | patrol_pinky1 / 2 | 로봇 SSH | 20 / 22 | `ros2 run my_pinky_package pinky_patrol_node_pinky{1,2}_v2` |
+| 1. 도메인 브릿지 | bridge | 관제 PC | 100 | `ros2 launch domain_bridge bridges.launch.xml` |
+| 2. bringup | bringup_pinky1 / 2 | 로봇 SSH | 10 / 20 | `ros2 launch pinky_bringup bringup_robot.launch.xml` |
+| 3. map (Nav2) | map_pinky1 / 2 | 로봇 SSH | 10 / 20 | `ros2 launch pinky_navigation bringup_launch.xml map:=my_pinky_map10.yaml` |
+| 4. zone_manager | zone_manager | 관제 PC | 100 | `ros2 launch zone_traffic_control zone_manager.launch.xml` |
+| 5. 순찰 노드 | patrol_pinky1 / 2 | 로봇 SSH | 10 / 20 | `ros2 run my_pinky_package pinky_patrol_node_pinky{1,2}_v2` |
 
 - 로봇 IP: pinky1 = 192.168.45.20, pinky2 = 192.168.45.22 (user: pinky, port 22)
-- 도메인 브릿지: pinky1(20↔50), pinky2(22↔50)를 하나의 launch로 같이 띄움
+- 도메인 브릿지: pinky1(10↔100), pinky2(20↔100), pinky3(30↔100)를 하나의 launch로 같이 띄움
 
 ## 7. 핵심 개념과 주의점
 

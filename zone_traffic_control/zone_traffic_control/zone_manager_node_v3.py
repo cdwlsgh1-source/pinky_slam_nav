@@ -222,7 +222,7 @@ class ZoneManagerNodeV3(Node):
         super().__init__('zone_manager_node_v3')
 
         # ---------------- 파라미터 ----------------
-        self.declare_parameter('robot_ids', ['pinky1', 'pinky2'])
+        self.declare_parameter('robot_ids', ['pinky1', 'pinky2', 'pinky3'])
         self.declare_parameter('max_hold_sec', 120.0)
         # 대기열 (map 좌표계, m / rad)
         self.declare_parameter('queue_anchor', [0.0, 0.0, 0.0])

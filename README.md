@@ -7,7 +7,7 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
 - **원격 순찰 명령**: 관제 PC에서 `start` / `stop` / `goto` 명령을 보내고 `patrol_status`를 모니터링 (`pinky_patrol_cmd/`)
 - **Nav2 순찰 노드**: 로봇에서 waypoint를 순서대로 순찰하고 진행 상태를 JSON으로 발행 (`my_pinky_package/`)
 - **구역 상호 배제**: 위험 구역(P3~P6)에 한 대만 진입. v3는 FIFO 대기열과 대기 슬롯 좌표까지 관리 (`zone_traffic_control/`)
-- **도메인 브릿지**: 관제 PC(도메인 50)와 로봇(pinky1=20, pinky2=22) 사이에서 필요한 토픽만 중계하고 `/pinky1/...`, `/pinky2/...`로 remap (`domain_bridge/`)
+- **도메인 브릿지**: 관제 PC(도메인 100)와 로봇(pinky1=10, pinky2=20, pinky3=30) 사이에서 필요한 토픽만 중계하고 `/pinky1/...`, `/pinky2/...`, `/pinky3/...`로 remap (`domain_bridge/`)
 - **관제 웹 GUI**: 지도 위 로봇 위치·배터리, 명령 패널, 비상정지, LiDAR 오버레이, 알람바, 프로세스 시작/정지. ROS 없이 확인하는 `--mock` 모드 지원 (`pinky_web_gui/`)
 - **카메라 차선 추종**: CSI 카메라 영상 발행, YOLO 기반 차선 검출, 차선 추종 노드 (`pinky_camera/`)
 - **지도 좌표 뷰어**와 **Wi-Fi 진단 스크립트** (`map_view_pc/`, `ros2_network_test/`)
@@ -16,13 +16,15 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
 
 | 장비 | ROS_DOMAIN_ID | 실행하는 것 |
 |---|---|---|
-| 관제 PC | 50 | `domain_bridge`, `zone_manager_node`, 웹 GUI, `pinky_control_client_v2.py` |
-| pinky1 | 20 | Nav2, 순찰 노드, (카메라 사용 시) `camera_node`, `lane_detector_node` |
-| pinky2 | 22 | Nav2, 순찰 노드 |
+| 관제 PC | 100 | `domain_bridge`, `zone_manager_node`, 웹 GUI, `pinky_control_client_v2.py` |
+| pinky1 | 10 | Nav2, 순찰 노드, (카메라 사용 시) `camera_node`, `lane_detector_node` |
+| pinky2 | 20 | Nav2, 순찰 노드 |
+| pinky3 | 30 | Nav2, 순찰 노드 (`pinky_patrol_node_pinky3_v3`, 홈 지점은 임시로 pinky2 와 동일) |
 
 ```
-관제 PC(50) ──[domain_bridge]── pinky1(20)
-     │       └─[domain_bridge]── pinky2(22)
+관제 PC(100) ──[domain_bridge]── pinky1(10)
+     │        ├─[domain_bridge]── pinky2(20)
+     │        └─[domain_bridge]── pinky3(30)
      ├─ /<robot>/patrol_cmd (start/stop/goto) ──▶ 로봇
      ├─ /<robot>/patrol_status ◀────────────────  로봇
      └─ /zone_manager/* (request_entry / grant_entry / notify_exit)
@@ -68,11 +70,11 @@ python3 -m venv --system-site-packages .venv
 
 **1. 로봇**: 각 로봇에서 Nav2 bringup 실행
 
-**2. 관제 PC — 도메인 브릿지** (한 대만 띄우려면 `pinky2:=false`)
+**2. 관제 PC — 도메인 브릿지** (한 대만 띄우려면 `pinky2:=false pinky3:=false`)
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source install/setup.bash
-export ROS_DOMAIN_ID=50
+export ROS_DOMAIN_ID=100
 ros2 launch domain_bridge bridges.launch.xml
 ```
 
@@ -80,17 +82,17 @@ ros2 launch domain_bridge bridges.launch.xml
 
 ```bash
 source /opt/ros/jazzy/setup.bash && source install/setup.bash
-export ROS_DOMAIN_ID=50
+export ROS_DOMAIN_ID=100
 ros2 launch zone_traffic_control zone_manager.launch.xml
 ```
 
 **4. 로봇 — 순찰 노드** (각 로봇에서)
 
 ```bash
-# pinky1 (도메인 20)
+# pinky1 (도메인 10)
 ros2 run my_pinky_package pinky_patrol_node_pinky1_v2 --ros-args -p robot_id:=pinky1
 
-# pinky2 (도메인 22)
+# pinky2 (도메인 20)
 ros2 run my_pinky_package pinky_patrol_node_pinky2_v2 --ros-args -p robot_id:=pinky2
 ```
 
@@ -98,7 +100,7 @@ ros2 run my_pinky_package pinky_patrol_node_pinky2_v2 --ros-args -p robot_id:=pi
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-export ROS_DOMAIN_ID=50
+export ROS_DOMAIN_ID=100
 python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 monitor
 ```
 
@@ -112,7 +114,7 @@ cd pinky_web_gui
 
 # 실제 로봇 연결 (브릿지가 먼저 떠 있어야 함)
 source /opt/ros/jazzy/setup.bash
-export ROS_DOMAIN_ID=50
+export ROS_DOMAIN_ID=100
 .venv/bin/python -m backend.main
 ```
 
@@ -206,7 +208,7 @@ cd pinky_web_gui && .venv/bin/python -m pytest tests -q
 
 | 변수 | 값 | 사용처 | 설명 |
 |---|---|---|---|
-| `ROS_DOMAIN_ID` | 관제 PC `50`, pinky1 `20`, pinky2 `22` | 전체 | 장비별 ROS 도메인. 웹 GUI는 50이 아니면 시작 시 경고 |
+| `ROS_DOMAIN_ID` | 관제 PC `100`, pinky1 `10`, pinky2 `20`, pinky3 `30` | 전체 | 장비별 ROS 도메인. 웹 GUI는 100이 아니면 시작 시 경고 |
 | `ROS_LOCALHOST_ONLY` | 설정하지 않음 | 웹 GUI | `1`이면 브릿지 토픽을 못 받는다는 경고 |
 | `RMW_IMPLEMENTATION` | `rmw_cyclonedds_cpp` | 로봇 | `processes.yaml`의 `env`로 SSH 실행 시 주입. PC의 CycloneDDS와 맞춰야 함 |
 | `CYCLONEDDS_URI` | `file:///home/pinky/.ros/cyclonedds_robot.xml` | 로봇 | 위와 같음. 로봇 터미널 값과 같게 둠 |

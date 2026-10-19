@@ -17,7 +17,7 @@
 | 제어 클라이언트 | `pinky_control_client_v3.py` | 관제 PC | start·stop·monitor 명령 전송 — **[TODO] 저장소에서 이 파일을 찾지 못함** (아래 참고) |
 
 ```
-관제 PC (ROS_DOMAIN_ID=50)                      로봇 pinky1 (도메인 20)
+관제 PC (ROS_DOMAIN_ID=100)                      로봇 pinky1 (도메인 10)
   control_client ──patrol_cmd──▶ domain_bridge ──▶ patrol_node(v3, Nav2 순찰)
                  ◀─patrol_status─                         │ import
   zone_manager_v3 ◀──────── request_entry / cancel_entry / notify_exit ── ZoneGateClient
@@ -137,7 +137,7 @@ gate.notify_exit()                # 구역을 나오면 락 반납
 
 | 이름 | 설명 | 값 |
 |---|---|---|
-| `ROS_DOMAIN_ID` | ROS 2 도메인 | 구조도 기준 관제 PC 50, pinky1 20 (pinky2 는 **[TODO]**) |
+| `ROS_DOMAIN_ID` | ROS 2 도메인 | 관제 PC 100, pinky1 10, pinky2 20, pinky3 30 |
 
 ### ROS 파라미터 (`config/zone_params_v3.yaml`, 노드 `zone_manager_node_v3`)
 
@@ -187,5 +187,5 @@ cd ~/dev_ws/pinky_slam_nav/zone_traffic_control
 python3 -m pytest test/test_zone_manager_v3.py test/test_zone_gate_client_v3.py
 ```
 
-> 테스트 시 셸 기본 도메인 50 은 실제 관제 도메인이므로, ROS 통신이 필요한 검증은 `ROS_DOMAIN_ID=77` 과 `ROS_LOCALHOST_ONLY=1` 로 격리해서 하세요. (위 단위 테스트는 노드를 띄우지 않음)
+> 테스트 시 셸 기본 도메인(100) 은 실제 관제 도메인이므로, ROS 통신이 필요한 검증은 `ROS_DOMAIN_ID=77` 과 `ROS_LOCALHOST_ONLY=1` 로 격리해서 하세요. (위 단위 테스트는 노드를 띄우지 않음)
 

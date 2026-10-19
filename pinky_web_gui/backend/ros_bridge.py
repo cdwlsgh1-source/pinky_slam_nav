@@ -1,4 +1,4 @@
-"""관제 PC(ROS_DOMAIN_ID=50)의 rclpy 노드. 구독과, 로봇별 /{id}/patrol_cmd 발행(publish_cmd) 만 한다.
+"""관제 PC(ROS_DOMAIN_ID=100)의 rclpy 노드. 구독과, 로봇별 /{id}/patrol_cmd 발행(publish_cmd) 만 한다.
 
 rclpy 는 별도 스레드에서 spin 하고, 콜백은 값만 뽑아 asyncio 루프에 call_soon_threadsafe 로
 넘긴다. 상태 변경은 전부 루프 스레드에서만 일어난다.

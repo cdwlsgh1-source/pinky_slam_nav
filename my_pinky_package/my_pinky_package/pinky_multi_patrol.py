@@ -192,9 +192,9 @@ def main(args=None):
     # rclpy는 프로세스 전체에서 딱 한 번만 init
     rclpy.init()
 
-    # 관제 PC(도메인 50)에서 domain_bridge로 넘어온 네임스페이스와
+    # 관제 PC(도메인 100)에서 domain_bridge로 넘어온 네임스페이스와
     # 이름이 반드시 일치해야 함 (예: /pinky1/..., /pinky2/...)
-    robot_names = ['pinky1', 'pinky2']
+    robot_names = ['pinky1', 'pinky2', 'pinky3']
 
     for name in robot_names:
         patrol = PinkyPatrol(name)

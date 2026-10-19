@@ -245,8 +245,8 @@ def create_app(cfg: Config, mock: bool, mock_opts: dict = None, auth: Auth = Non
         else:
             from .ros_bridge import RosBridge  # rclpy 는 여기서만 import
             dom = os.environ.get('ROS_DOMAIN_ID', '(미설정=0)')
-            if dom != '50' or os.environ.get('ROS_LOCALHOST_ONLY') == '1':
-                log.warning('ROS 환경 확인: ROS_DOMAIN_ID=%s, ROS_LOCALHOST_ONLY=%s - 관제 도메인은 50 이고 localhost 전용이면 브릿지 토픽을 못 받는다',
+            if dom != '100' or os.environ.get('ROS_LOCALHOST_ONLY') == '1':
+                log.warning('ROS 환경 확인: ROS_DOMAIN_ID=%s, ROS_LOCALHOST_ONLY=%s - 관제 도메인은 100 이고 localhost 전용이면 브릿지 토픽을 못 받는다',
                             dom, os.environ.get('ROS_LOCALHOST_ONLY', '(미설정)'))
             else:
                 log.info('ROS 환경: ROS_DOMAIN_ID=%s', dom)

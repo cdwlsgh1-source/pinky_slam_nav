@@ -17,7 +17,7 @@ Pinky 로봇에서 실행하는 Nav2 순찰 노드 패키지. 개발 중인 **v3
 ## 연관 파일
 
 ```
-관제 PC(50)  pinky_control_client_v2.py ──/<robot>/patrol_cmd──▶ domain_bridge ──▶ patrol_node_v3 (로봇 20/22)
+관제 PC(100)  pinky_control_client_v2.py ──/<robot>/patrol_cmd──▶ domain_bridge ──▶ patrol_node_v3 (로봇 10/20/30)
              zone_manager_node_v3 ◀── request_entry / cancel_entry / notify_exit ── ZoneGateClient
                                   ──▶ grant_entry / queue_slot ──────────────────▶ (zone_gate_client_v3)
 ```
@@ -67,28 +67,32 @@ source install/setup.bash
 1. **로봇**: Nav2 bringup 실행
 2. **관제 PC**: 도메인 브릿지
    ```bash
-   export ROS_DOMAIN_ID=50
+   export ROS_DOMAIN_ID=100
    ros2 launch domain_bridge bridges.launch.xml
    ```
 3. **관제 PC**: zone_manager v3 (새 터미널)
    ```bash
-   export ROS_DOMAIN_ID=50
+   export ROS_DOMAIN_ID=100
    ros2 launch zone_traffic_control zone_manager_v3.launch.xml
    ```
 4. **각 로봇**: 순찰 노드
    ```bash
    # pinky1
-   export ROS_DOMAIN_ID=20
+   export ROS_DOMAIN_ID=10
    ros2 run my_pinky_package pinky_patrol_node_pinky1_v3 --ros-args -p robot_id:=pinky1
 
    # pinky2
-   export ROS_DOMAIN_ID=22
+   export ROS_DOMAIN_ID=20
    ros2 run my_pinky_package pinky_patrol_node_pinky2_v3 --ros-args -p robot_id:=pinky2
+
+   # pinky3 (홈 지점은 임시로 pinky2 와 같은 P7 - 실측 후 수정)
+   export ROS_DOMAIN_ID=30
+   ros2 run my_pinky_package pinky_patrol_node_pinky3_v3 --ros-args -p robot_id:=pinky3
    ```
 
 ## 사용 예시
 
-관제 PC(저장소 루트)에서 `ROS_DOMAIN_ID=50`으로 실행합니다.
+관제 PC(저장소 루트)에서 `ROS_DOMAIN_ID=100`으로 실행합니다.
 
 ```bash
 python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 monitor          # 상태 출력 (별도 터미널, Ctrl+C 종료)
@@ -112,7 +116,7 @@ ROS_DOMAIN_ID=77 ROS_LOCALHOST_ONLY=1 python3 -m pytest my_pinky_package/test/te
 
 | 변수 | 값 | 설명 |
 |---|---|---|
-| `ROS_DOMAIN_ID` | 관제 PC `50`, pinky1 `20`, pinky2 `22` | 장비별 도메인 (도메인 간 중계는 `domain_bridge`) |
+| `ROS_DOMAIN_ID` | 관제 PC `100`, pinky1 `10`, pinky2 `20`, pinky3 `30` | 장비별 도메인 (도메인 간 중계는 `domain_bridge`) |
 | `ROS_DOMAIN_ID=77` + `ROS_LOCALHOST_ONLY=1` | 시험용 | 통합 테스트 전용 격리 값 (아니면 통합 테스트 skip) |
 | `RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`, `ROS_AUTOMATIC_DISCOVERY_RANGE` | `rmw_cyclonedds_cpp`, `file:///home/pinky/.ros/cyclonedds_robot.xml`, `SUBNET` | 로봇 DDS 설정. 웹 GUI가 SSH로 켤 때 주입 (직접 실행 시 로봇 터미널 값 사용) |
 
