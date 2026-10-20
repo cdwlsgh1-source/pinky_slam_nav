@@ -1,7 +1,7 @@
 """
 Pinky2 순찰 노드
 
-[v3 변경점] 위험구역 진입을 "대기열 슬롯" 방식으로 처리 (zone_manager_node_v3 / zone_gate_client_v3)
+[v3 변경점] 위험구역 진입을 "대기열 슬롯" 방식으로 처리 (zone_manager_node / zone_gate_client)
   - 진입 요청을 먼저 보내고, 점유 중이면 매니저가 알려 준 슬롯에서 줄 서서 대기 (상태 QUEUEING)
   - goto 경로와 start 경로가 같은 _queue_and_enter 를 사용
   - 로봇 코드에는 대기 좌표가 없고 진입 앵커(ZONE_ENTRY)와 반납 출구(ZONE_EXIT)만 유지
@@ -49,7 +49,7 @@ from pinky_interfaces.srv import SetLed
 import json, math, os, time, threading, subprocess
 
 # zone_traffic_control 패키지가 설치되어 있어야 합니다.
-from zone_traffic_control.zone_gate_client_v3 import (ZoneGateClient,
+from zone_traffic_control.zone_gate_client import (ZoneGateClient,
                                                      choose_entry_target)
 
 
@@ -86,7 +86,7 @@ class PinkyPatrolNode(Node):
         # "ZONE_EXIT": (0.55, -0.60, 3.14),
 
         # 위험 구역 진입/반납 좌표 (두 로봇 공통)
-        #   ZONE_ENTRY: 대기열 앵커(슬롯 0). zone_params_v3.yaml 의 queue_anchor 와 같아야 함 (테스트가 검사)
+        #   ZONE_ENTRY: 대기열 앵커(슬롯 0). zone_params.yaml 의 queue_anchor 와 같아야 함 (테스트가 검사)
         #   ZONE_EXIT : 구역을 나온 뒤 락(토큰)을 반납하는 출구. yaw 3.14 = 뒤 방향(180도)
         "ZONE_ENTRY": (1.0, -0.7, 0.0),
         "ZONE_EXIT":  (0.5, -0.4, 3.14),

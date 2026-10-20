@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-zone_manager_node_v3.py  (v1 self-report 방식 + 대기열 슬롯 지정)
+zone_manager_node.py  (v1 self-report 방식 + 대기열 슬롯 지정)
 
 zone_manager_node.py(v1)를 복사해 만든 독립 파일입니다. 기존 파일은 수정하지 않았고,
-토픽 이름공간도 /zone_manager_v3/* 로 분리했으므로 v1/v2 매니저와 동시에 켜도 섞이지 않습니다.
+토픽 이름공간도 /zone_manager/* 로 분리했으므로 v1/v2 매니저와 동시에 켜도 섞이지 않습니다.
 
 [v1과의 차이]
 - v1 : 점유 중이면 대기열에 "순서"만 등록
@@ -11,12 +11,12 @@ zone_manager_node.py(v1)를 복사해 만든 독립 파일입니다. 기존 파�
        슬롯 k = 앵커 + k * 간격 * 후방벡터  (k=0 이 앵커, 줄의 맨 앞)
 
 [토픽] (모두 std_msgs/String)
-  구독  /zone_manager_v3/request_entry   "<robot_id>:<token>"
-  구독  /zone_manager_v3/notify_exit     "<robot_id>"
-  구독  /zone_manager_v3/cancel_entry    "<robot_id>"            (대기 포기)
-  발행  /zone_manager_v3/grant_entry     "<robot_id>:<token>"
-  발행  /zone_manager_v3/status          "free" | "occupied_by:<robot_id>"
-  발행  /zone_manager_v3/queue_slot      "<robot_id>:<k>:<x>,<y>,<yaw>"   (k=-1 이면 대기열 가득 참)
+  구독  /zone_manager/request_entry   "<robot_id>:<token>"
+  구독  /zone_manager/notify_exit     "<robot_id>"
+  구독  /zone_manager/cancel_entry    "<robot_id>"            (대기 포기)
+  발행  /zone_manager/grant_entry     "<robot_id>:<token>"
+  발행  /zone_manager/status          "free" | "occupied_by:<robot_id>"
+  발행  /zone_manager/queue_slot      "<robot_id>:<k>:<x>,<y>,<yaw>"   (k=-1 이면 대기열 가득 참)
 
 [전체 동작 요약]
   1) 로봇이 위험구역 앞에서 request_entry 를 보낸다 (1초마다 재전송 = "나 아직 기다리는 중").
@@ -26,7 +26,7 @@ zone_manager_node.py(v1)를 복사해 만든 독립 파일입니다. 기존 파�
 
 [구성]
   - 순수 로직 : normalize_dir / slot_pose / ZoneQueue  (ROS·락 없음, 단위 테스트 대상)
-  - ROS 노드  : ZoneManagerNodeV3  (토픽 입출력, 락, 타이머, 슬롯 발행 타이밍 제어)
+  - ROS 노드  : ZoneManagerNode  (토픽 입출력, 락, 타이머, 슬롯 발행 타이밍 제어)
 
 [안전장치]
 - max_hold_sec        : 점유자가 notify_exit 를 못 보내도 강제 해제 (v1과 동일)
@@ -204,7 +204,7 @@ class ZoneQueue:
 # ==============================================================================
 # 노드
 # ==============================================================================
-class ZoneManagerNodeV3(Node):
+class ZoneManagerNode(Node):
     """
     ZoneQueue 를 ROS 토픽/타이머에 연결하는 노드.
     ZoneQueue 의 판단 결과를 grant_entry / queue_slot / status 토픽으로 바꿔 내보내고,
@@ -219,7 +219,7 @@ class ZoneManagerNodeV3(Node):
     #        (3) 구독자 3개(request/exit/cancel), 발행자 3개(grant/status/slot) 생성
     #        (4) 주기 타이머 3개(감시 1초 / 전진 반영 0.2초 / 재발행 1초) 등록
     def __init__(self):
-        super().__init__('zone_manager_node_v3')
+        super().__init__('zone_manager_node')
 
         # ---------------- 파라미터 ----------------
         self.declare_parameter('robot_ids', ['pinky1', 'pinky2', 'pinky3'])
@@ -268,12 +268,12 @@ class ZoneManagerNodeV3(Node):
                          history=HistoryPolicy.KEEP_LAST)
 
         # 입력: 진입 요청 / 이탈 통보 / 대기 취소.  출력: 허가 / 점유 상태 / 슬롯 좌표
-        self.create_subscription(String, '/zone_manager_v3/request_entry', self._on_request, qos)
-        self.create_subscription(String, '/zone_manager_v3/notify_exit', self._on_exit, qos)
-        self.create_subscription(String, '/zone_manager_v3/cancel_entry', self._on_cancel, qos)
-        self.grant_pub = self.create_publisher(String, '/zone_manager_v3/grant_entry', qos)
-        self.status_pub = self.create_publisher(String, '/zone_manager_v3/status', qos)
-        self.slot_pub = self.create_publisher(String, '/zone_manager_v3/queue_slot', qos)
+        self.create_subscription(String, '/zone_manager/request_entry', self._on_request, qos)
+        self.create_subscription(String, '/zone_manager/notify_exit', self._on_exit, qos)
+        self.create_subscription(String, '/zone_manager/cancel_entry', self._on_cancel, qos)
+        self.grant_pub = self.create_publisher(String, '/zone_manager/grant_entry', qos)
+        self.status_pub = self.create_publisher(String, '/zone_manager/status', qos)
+        self.slot_pub = self.create_publisher(String, '/zone_manager/queue_slot', qos)
 
         # 타이머 3개: 감시(1초) / 보류된 전진 반영(0.2초) / 슬롯 재발행(1초)
         self.create_timer(1.0, self._check_timeout)      # 점유 시간 / stale 감시
@@ -466,7 +466,7 @@ class ZoneManagerNodeV3(Node):
 #        Ctrl+C 또는 종료 시 노드 정리 및 rclpy shutdown.
 def main():
     rclpy.init()
-    node = ZoneManagerNodeV3()
+    node = ZoneManagerNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

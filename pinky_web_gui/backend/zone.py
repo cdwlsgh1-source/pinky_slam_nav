@@ -1,7 +1,7 @@
 """구역 점유 상태(`/zone_manager/status`) 해석과 점유 시간 추적. rclpy 에 의존하지 않고, 시계는 주입받는다.
 
-현재 구성의 zone_manager_node(접미사 없음)는 `free` 또는 `occupied_by:<id>` 를 발행한다.
-사용하지 않는 `_v2` 매니저는 `occupied_by:<id>:<token>` 형식이라, 나중에 전환해도 되도록 둘 다 해석한다.
+zone_manager_node 는 `free` 또는 `occupied_by:<id>` 를 발행한다.
+과거 v2 매니저(`v2-final` 태그)는 `occupied_by:<id>:<token>` 형식이었으므로 둘 다 해석한다.
 """
 import logging
 import time

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1360" height="760" viewBox="0 0 680 380" role="img">
-<title>zone_manager_node(v1), zone_manager_node_v3, zone_gate_client_v3, pinky_patrol_node_pinky1_v3 관계도</title>
+<title>zone_manager_node(v1), zone_manager_node, zone_gate_client, pinky_patrol_node_pinky1 관계도</title>
 <defs>
 <marker id="arrow-coral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="m-coral" d="M2 1L8 5L2 9" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 <marker id="arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="m-gray" d="M2 1L8 5L2 9" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
@@ -55,8 +55,8 @@ text { font-family: "Noto Sans CJK KR", "Noto Sans KR", "Malgun Gothic", "Apple 
 <text class="ts gray-s" x="130" y="111" text-anchor="middle" dominant-baseline="central">v1 · /zone_manager/*</text>
 
 <rect class="box-coral" x="35" y="225" width="190" height="56" rx="8"/>
-<text class="th coral-t" x="130" y="243" text-anchor="middle" dominant-baseline="central">zone_manager_node_v3</text>
-<text class="ts coral-s" x="130" y="261" text-anchor="middle" dominant-baseline="central">/zone_manager_v3/*</text>
+<text class="th coral-t" x="130" y="243" text-anchor="middle" dominant-baseline="central">zone_manager_node</text>
+<text class="ts coral-s" x="130" y="261" text-anchor="middle" dominant-baseline="central">/zone_manager/*</text>
 
 <rect class="box-teal" x="455" y="75" width="190" height="56" rx="8"/>
 <text class="th teal-t" x="550" y="93" text-anchor="middle" dominant-baseline="central">patrol_node_pinky1_v3</text>
@@ -64,7 +64,7 @@ text { font-family: "Noto Sans CJK KR", "Noto Sans KR", "Malgun Gothic", "Apple 
 
 <rect class="box-coral" x="455" y="225" width="190" height="56" rx="8"/>
 <text class="th coral-t" x="550" y="243" text-anchor="middle" dominant-baseline="central">ZoneGateClient</text>
-<text class="ts coral-s" x="550" y="261" text-anchor="middle" dominant-baseline="central">zone_gate_client_v3</text>
+<text class="ts coral-s" x="550" y="261" text-anchor="middle" dominant-baseline="central">zone_gate_client</text>
 
 <line class="ln-red" x1="227" y1="103" x2="453" y2="103"/>
 <text class="ts red-s" x="290" y="90" text-anchor="middle" dominant-baseline="central">통신 안 됨</text>

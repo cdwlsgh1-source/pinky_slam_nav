@@ -1,6 +1,6 @@
-"""pinky_patrol_node_pinky{1,2}_v3 의 대기열 진입 흐름 테스트.
+"""pinky_patrol_node_pinky{1,2} 의 대기열 진입 흐름 테스트.
 
-- Nav2 / 실로봇 없이 가짜 navigator 를 쓰고, 매니저는 실제 zone_manager_node_v3 를 띄운다.
+- Nav2 / 실로봇 없이 가짜 navigator 를 쓰고, 매니저는 실제 zone_manager_node 를 띄운다.
 - ROS_DOMAIN_ID=77 + ROS_LOCALHOST_ONLY=1 이 아니면 통합 테스트는 건너뜀 (실제 관제 도메인 보호).
 - 이 PC 에는 pinky_interfaces(로봇 전용)가 없으므로 SetLed 를 스텁으로 대체한다.
 """
@@ -31,9 +31,8 @@ if 'pinky_interfaces' not in sys.modules:
     sys.modules['pinky_interfaces'] = _pi
     sys.modules['pinky_interfaces.srv'] = _srv
 
-MODS = {1: 'my_pinky_package.pinky_patrol_node_pinky1_v3',
-        2: 'my_pinky_package.pinky_patrol_node_pinky2_v3'}
-V2_PINKY2 = 'my_pinky_package.pinky_patrol_node_pinky2_v2'
+MODS = {1: 'my_pinky_package.pinky_patrol_node_pinky1',
+        2: 'my_pinky_package.pinky_patrol_node_pinky2'}
 
 ISOLATED = (os.environ.get('ROS_DOMAIN_ID') == '77'
             and os.environ.get('ROS_LOCALHOST_ONLY') == '1')
@@ -50,12 +49,6 @@ def test_waypoint_indexes_match_door_names(n):
     assert cls.WAYPOINTS[cls.ZONE_EXIT_INDEX] == cls.POINTS[cls.ZONE_EXIT_NAME]
 
 
-def test_v2_pinky2_index_mismatch_is_documented():
-    """v2 의 불일치(RED2IN 이 0번인데 ENTRY_INDEX=1)를 v3 가 정정했음을 고정해 둔다."""
-    v2 = importlib.import_module(V2_PINKY2).PinkyPatrolNode
-    assert v2.WAYPOINTS[v2.ZONE_ENTRY_INDEX] != v2.POINTS[v2.ZONE_ENTRY_NAME]
-
-
 @pytest.mark.parametrize('n', [1, 2])
 def test_no_hardcoded_queue_coordinates(n):
     """로봇 코드에는 슬롯 좌표가 없다: POINTS 에 RED*/WAIT*/QUEUE* 항목이 없어야 한다 (슬롯은 매니저가 줌)."""
@@ -63,15 +56,15 @@ def test_no_hardcoded_queue_coordinates(n):
     extra = [k for k in pts if k.startswith(('RED', 'WAIT', 'QUEUE'))]
     assert extra == []
     src = Path(importlib.import_module(MODS[n]).__file__).read_text(encoding='utf-8')
-    assert 'zone_gate_client import' not in src.replace('zone_gate_client_v3', '')
+    assert 'zone_gate_client import' not in src.replace('zone_gate_client', '')
 
 
 @pytest.mark.parametrize('n', [1, 2])
 def test_zone_entry_matches_yaml_anchor(n):
     """로봇의 ZONE_ENTRY 는 매니저 yaml 의 queue_anchor 와 같아야 한다 (앵커를 바꾸면 여기서 실패)."""
     import yaml
-    prm = yaml.safe_load((ZONE_PKG / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
-    anchor = tuple(prm['zone_manager_node_v3']['ros__parameters']['queue_anchor'])
+    prm = yaml.safe_load((ZONE_PKG / 'config/zone_params.yaml').read_text(encoding='utf-8'))
+    anchor = tuple(prm['zone_manager_node']['ros__parameters']['queue_anchor'])
     entry = importlib.import_module(MODS[n]).PinkyPatrolNode.POINTS['ZONE_ENTRY']
     assert entry == pytest.approx(anchor)
 
@@ -110,11 +103,11 @@ def env():
     from rclpy.node import Node
     from std_msgs.msg import String
     from nav2_simple_commander.robot_navigator import TaskResult
-    from zone_traffic_control.zone_gate_client_v3 import ZoneGateClient
+    from zone_traffic_control.zone_gate_client import ZoneGateClient
 
     mgr = subprocess.Popen(
-        [sys.executable, '-m', 'zone_traffic_control.zone_manager_node_v3',
-         '--ros-args', '--params-file', str(ZONE_PKG / 'config/zone_params_v3.yaml')],
+        [sys.executable, '-m', 'zone_traffic_control.zone_manager_node',
+         '--ros-args', '--params-file', str(ZONE_PKG / 'config/zone_params.yaml')],
         cwd=str(ZONE_PKG), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     rclpy.init()
 
@@ -163,7 +156,7 @@ def env():
     ex = SingleThreadedExecutor()
     ex.add_node(other)
     status = {'v': None}
-    other.create_subscription(String, '/zone_manager_v3/status',
+    other.create_subscription(String, '/zone_manager/status',
                               lambda m: status.__setitem__('v', m.data), 10)
 
     def pump(cond, timeout=8.0):
@@ -183,7 +176,7 @@ def env():
         warm.resend_if_due()
         ex.spin_once(timeout_sec=0.05)
         ok = warm.granted(tok)
-    assert ok, 'zone_manager_node_v3 가 응답하지 않음'
+    assert ok, 'zone_manager_node 가 응답하지 않음'
     warm.notify_exit()
     pump(lambda: status['v'] == 'free', 3.0)
 
@@ -244,11 +237,11 @@ _POINTS = importlib.import_module(MODS[1]).PinkyPatrolNode.POINTS
 DOOR1 = tuple(_POINTS['ZONE_ENTRY'])   # 앵커 (순찰 노드 상수, yaml queue_anchor 와 같은지는 별도 테스트가 검사)
 EXIT = tuple(_POINTS['ZONE_EXIT'])     # 락 반납 출구
 def _slot(k):
-    """zone_params_v3.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 를 계산 (매니저가 발행하는 값과 같은 규칙)."""
+    """zone_params.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 를 계산 (매니저가 발행하는 값과 같은 규칙)."""
     import yaml
-    from zone_traffic_control.zone_manager_node_v3 import normalize_dir, slot_pose
-    prm = yaml.safe_load((ZONE_PKG / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
-    prm = prm['zone_manager_node_v3']['ros__parameters']
+    from zone_traffic_control.zone_manager_node import normalize_dir, slot_pose
+    prm = yaml.safe_load((ZONE_PKG / 'config/zone_params.yaml').read_text(encoding='utf-8'))
+    prm = prm['zone_manager_node']['ros__parameters']
     x, y, yaw = slot_pose(k, prm['queue_anchor'], normalize_dir(prm['queue_back_dir']),
                           prm['queue_spacing'])
     return (round(x, 3), round(y, 3), round(yaw, 2))   # FakeNavigator 가 기록하는 형식과 동일
@@ -389,7 +382,7 @@ def test_grant_returns_immediately_without_going_to_anchor(env):
 
 
 def test_pinky2_start_path_uses_corrected_indexes(env):
-    """pinky2_v3 start 경로: ZONE_ENTRY(0번) 에서 진입 절차 -> P3 -> P6 -> ZONE_EXIT 에서 락 반납 -> P7."""
+    """pinky2 start 경로: ZONE_ENTRY(0번) 에서 진입 절차 -> P3 -> P6 -> ZONE_EXIT 에서 락 반납 -> P7."""
     r = make_robot(env, 2, 'pinky2')
     t, out = run_in_thread(r._run_patrol)
     assert env.pump(lambda: not t.is_alive(), 15)

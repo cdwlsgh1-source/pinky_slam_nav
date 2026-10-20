@@ -440,7 +440,7 @@ def test_default_config_processes():
     assert (b1.ssh_host, b1.ssh_user, b1.domain) == ('192.168.45.20', 'pinky', 20) and b1.cwd == m1.cwd
     assert b1.source[-1] == '/home/pinky/pinky_slam_nav/install/setup.bash' and b1.source[0].startswith('/opt/ros/') and b1.cwd == '/home/pinky'
     pt = by['patrol_pinky1']
-    assert pt.command == 'ros2 run my_pinky_package pinky_patrol_node_pinky1_v2' and pt.cwd == '/home/pinky/pinky_slam_nav'
+    assert pt.command == 'ros2 run my_pinky_package pinky_patrol_node_pinky1' and pt.cwd == '/home/pinky/pinky_slam_nav'
     assert pt.source[-1] == './install/setup.bash' and pt.domain == 20 and pt.confirm_stop and pt.stop_on_exit
     ids = [p.id for p in cfg.processes]
     assert ids.index('bringup_pinky1') < ids.index('map_pinky1') < ids.index('patrol_pinky1')   # 전체 시작 순서

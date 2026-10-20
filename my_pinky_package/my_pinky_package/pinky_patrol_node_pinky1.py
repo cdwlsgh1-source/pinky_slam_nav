@@ -1,7 +1,7 @@
 """
-Pinky3 순찰 노드
+Pinky 순찰 노드
 
-[v3 변경점] 위험구역 진입을 "대기열 슬롯" 방식으로 처리 (zone_manager_node_v3 / zone_gate_client_v3)
+[v3 변경점] 위험구역 진입을 "대기열 슬롯" 방식으로 처리 (zone_manager_node / zone_gate_client)
   - 진입 요청을 먼저 보내고, 점유 중이면 매니저가 알려 준 슬롯에서 줄 서서 대기 (상태 QUEUEING)
   - goto 경로와 start 경로가 같은 _queue_and_enter 를 사용
   - 로봇 코드에는 대기 좌표가 없고 진입 앵커(ZONE_ENTRY)와 반납 출구(ZONE_EXIT)만 유지
@@ -49,7 +49,7 @@ from pinky_interfaces.srv import SetLed
 import json, math, os, time, threading, subprocess
 
 # zone_traffic_control 패키지가 설치되어 있어야 합니다.
-from zone_traffic_control.zone_gate_client_v3 import (ZoneGateClient,
+from zone_traffic_control.zone_gate_client import (ZoneGateClient,
                                                      choose_entry_target)
 
 
@@ -86,7 +86,7 @@ class PinkyPatrolNode(Node):
         # "ZONE_EXIT": (0.55, -0.60, 3.14),
 
         # 위험 구역 진입/반납 좌표 (두 로봇 공통)
-        #   ZONE_ENTRY: 대기열 앵커(슬롯 0). zone_params_v3.yaml 의 queue_anchor 와 같아야 함 (테스트가 검사)
+        #   ZONE_ENTRY: 대기열 앵커(슬롯 0). zone_params.yaml 의 queue_anchor 와 같아야 함 (테스트가 검사)
         #   ZONE_EXIT : 구역을 나온 뒤 락(토큰)을 반납하는 출구. yaw 3.14 = 뒤 방향(180도)
         "ZONE_ENTRY": (1.0, -0.7, 0.0),
         "ZONE_EXIT":  (0.5, -0.4, 3.14),
@@ -97,11 +97,12 @@ class PinkyPatrolNode(Node):
 
     # start 명령의 순찰 경로: P2 -> ZONE_ENTRY -> P3 -> P6 -> ZONE_EXIT -> P1
     WAYPOINTS = [
-        POINTS["ZONE_ENTRY"],   # 0: 앵커 (요청 -> 슬롯 대기 -> 허가 -> 진입. _queue_and_enter)
-        POINTS["P3"],       # 1: 우측 아래 끝 (위험 구역 안)
-        POINTS["P6"],       # 2: 우측 위 끝   (위험 구역 안)
-        POINTS["ZONE_EXIT"],  # 3: 출구 (도착 시 락 반납)
-        POINTS["P7"],       # 4: 시작점으로 복귀
+        POINTS["P2"],       # 0: 중간 경유점
+        POINTS["ZONE_ENTRY"],   # 1: 앵커 (도착 후 진입 허가 요청)
+        POINTS["P3"],       # 2: 우측 아래 끝 (위험 구역 안)
+        POINTS["P6"],       # 3: 우측 위 끝   (위험 구역 안)
+        POINTS["ZONE_EXIT"],  # 4: 출구 (도착 시 락 반납)
+        POINTS["P1"],       # 5: 시작점 복귀
     ]
 
     # ==========================================================================
@@ -110,19 +111,19 @@ class PinkyPatrolNode(Node):
     # [순찰(start)용] WAYPOINTS 리스트의 "순번(index)"이며 좌표 값이 아닙니다.
     #   ZONE_ENTRY_INDEX: 이 waypoint 도착 직후, 다음으로 출발하기 전에 진입 허가 요청
     #   ZONE_EXIT_INDEX : 이 waypoint 도착 시 구역을 벗어난 것으로 보고 락 반납
-    ZONE_ENTRY_INDEX = 0   # WAYPOINTS[0] = ZONE_ENTRY  (v2 는 1 로 어긋나 있었음 -> v3 에서 정정)
-    ZONE_EXIT_INDEX = 3    # WAYPOINTS[3] = ZONE_EXIT (v2 는 4 로 어긋나 있었음 -> v3 에서 정정)
+    ZONE_ENTRY_INDEX = 1   # WAYPOINTS[1] = ZONE_ENTRY
+    ZONE_EXIT_INDEX = 4    # WAYPOINTS[4] = ZONE_EXIT
 
     # [goto용] POINTS의 키 이름 기준
     ZONE_ENTRY_NAME = 'ZONE_ENTRY'                       # 허가 요청 지점
-    STOP_EXIT_NAME = 'ZONE_STOP_EXIT'                   # stop 퇴장 후 락 반납 지점
-    ZONE_EXIT_NAME = 'ZONE_EXIT'                       # 락 반납 지점
-    ZONE_POINTS = {'P3', 'P4', 'P5', 'P6'}           # 위험 구역 안 포인트
+    STOP_EXIT_NAME = 'ZONE_STOP_EXIT'                    # stop 퇴장 후 락 반납 지점
+    ZONE_EXIT_NAME = 'ZONE_EXIT'                         # 락 반납 지점
+    ZONE_POINTS = {'P3', 'P4', 'P5', 'P6'}               # 위험 구역 안 포인트
 
     # ==========================================================================
     # 4. goto 상수
     # ==========================================================================
-    HOME_NAME = 'P7'                                  # TODO(pinky3): 임시로 pinky2 와 같은 홈. 실측 후 pinky3 전용 지점으로 수정 (홈이 겹치면 충돌)
+    HOME_NAME = 'P1'                                  # 경로 완료 후 복귀할 초기 위치
     GOTO_WAIT_SEC = 10.0                              # 지점 도착 후 대기 시간(초)
     WAIT_EVERY_POINT = True                           # True: 모든 지점에서 대기 / False: 마지막 지점에서만
     NAV_RETRIES = 3                                   # 진입 절차 중 한 목표에 대한 이동 최대 시도 횟수
@@ -140,9 +141,9 @@ class PinkyPatrolNode(Node):
     def __init__(self):
         super().__init__('pinky_patrol_node')
 
-        # 실행 시 --ros-args -p robot_id:=pinky3
+        # 실행 시 --ros-args -p robot_id:=pinky1
         # zone_manager_node의 robot_ids 파라미터 값과 정확히 같아야 함
-        self.declare_parameter('robot_id', 'pinky3')
+        self.declare_parameter('robot_id', 'pinky1')
         self.robot_id = self.get_parameter('robot_id').value
 
         # Nav2 액션 클라이언트 + 퍼블리셔 생성 헬퍼 역할 겸용
@@ -193,7 +194,7 @@ class PinkyPatrolNode(Node):
                 self._led_proc = subprocess.Popen(
                     ['ros2', 'run', 'pinky_led', 'led_server',
                      '--ros-args', '--log-level', 'warn'],
-                    start_new_session=True)
+                    start_new_session=True)    # ros2 run pinky_led led_server --ros-args --log-level warn 을 실행 시킨 결과와 같다
             if not self.led_cli.wait_for_service(timeout_sec=10.0):
                 self.get_logger().warn('/set_led 서비스 없음 - LED 설정 생략')
                 return

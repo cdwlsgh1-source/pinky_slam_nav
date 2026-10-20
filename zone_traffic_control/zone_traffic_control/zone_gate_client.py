@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-zone_gate_client_v3.py  (주석 정리본 - 로직은 원본과 동일)
+zone_gate_client.py  (주석 정리본 - 로직은 원본과 동일)
 
 ==================== 한눈에 보는 전체 그림 ====================
 비유: 이 파일은 "식당 입구의 번호표 기계 + 안내 직원"과 로봇 사이의 소통 창구입니다.
 
-  로봇(patrol 노드)  <-->  ZoneGateClient  <-->  zone_manager_node_v3 (구역 관리자)
+  로봇(patrol 노드)  <-->  ZoneGateClient  <-->  zone_manager_node (구역 관리자)
 
   [로봇이 하고 싶은 일]            [이 파일의 담당 함수]
   1) "들어가도 되나요?" 요청       -> send_request()
@@ -28,8 +28,8 @@ import rclpy
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 
-# 토픽 이름 앞에 붙는 공통 접두사 (이름공간). 예: '/zone_manager_v3/request_entry'
-NS = '/zone_manager_v3'
+# 토픽 이름 앞에 붙는 공통 접두사 (이름공간). 예: '/zone_manager/request_entry'
+NS = '/zone_manager'
 
 # 슬롯 번호 k가 -1이면 "대기열이 가득 찼다"는 약속된 신호
 QUEUE_FULL_K = -1
@@ -127,7 +127,7 @@ class RetryTimer:
 # =====================================================================
 class ZoneGateClient:
     """
-    로봇 1대가 zone_manager_node_v3 와 주고받는 창구. 역할은 세 가지:
+    로봇 1대가 zone_manager_node 와 주고받는 창구. 역할은 세 가지:
       1) 요청/재전송/취소 : request_entry, cancel_entry 발행
                             (매니저는 재전송이 끊기면 '죽은 로봇(stale)'으로 보고 제거)
       2) 응답 수신       : grant_entry(허가 토큰), queue_slot(내 대기 슬롯) 보관

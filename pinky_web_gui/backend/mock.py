@@ -1,7 +1,7 @@
 """--mock 용 순찰 노드 시뮬레이터. ROS 없이 실제 노드와 같은 이벤트를 같은 큐로 흘려 보낸다.
 
 로봇은 홈 지점에서 IDLE 로 정지해 있다가 publish_cmd 로 받은 명령(`start`, `stop`, `goto:...`)대로 움직인다.
-`pinky_patrol_node_pinky1_v2.py` 의 `_cmd_cb`, `_run_patrol`, `_run_route` 동작을 따른다:
+`pinky_patrol_node_pinky1.py` 의 `_cmd_cb`, `_run_patrol`, `_run_route` 동작을 따른다:
   - 작업 중에 오는 start/goto 는 조용히 무시 (상태 발행 없음), 작업 중이 아닐 때의 stop 도 무시
   - goto 입력 검증(`no point given`/`unknown point`/`not allowed`)은 작업 중 확인보다 먼저 한다
   - 노드를 켠 뒤 첫 작업은 초기 위치 보정(제자리 회전)으로 STARTING 이 길고 그 동안 stop 을 확인하지 않는다

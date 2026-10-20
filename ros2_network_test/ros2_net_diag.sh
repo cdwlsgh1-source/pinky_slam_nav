@@ -1,13 +1,13 @@
 #!/bin/bash
-# ros2_net_diag_v2.sh
+# ros2_net_diag.sh
 # 관제PC에서 실행: 가벼운 부하 + 실제 bringup 토픽까지 함께 모니터링하며
 # 네트워크/디스커버리/시스템 자원 지표를 동시에 로깅합니다.
 #
 # 사용법:
-#   ./ros2_net_diag_v2.sh <핑키IP> [부하_Hz] [지속시간_분] [무선인터페이스명] [감시할_토픽,쉼표구분]
+#   ./ros2_net_diag.sh <핑키IP> [부하_Hz] [지속시간_분] [무선인터페이스명] [감시할_토픽,쉼표구분]
 #
 # 예시:
-#   ./ros2_net_diag_v2.sh 192.168.0.101 0.1 30 wlan0 "/scan,/tf,/map,/odom"
+#   ./ros2_net_diag.sh 192.168.0.101 0.1 30 wlan0 "/scan,/tf,/map,/odom"
 #
 # 종료: Ctrl+C 또는 지정한 시간이 지나면 자동 종료됩니다.
 #
@@ -15,7 +15,7 @@
 
 set -u
 
-TARGET_IP=${1:?"핑키 IP를 입력하세요. 예: ./ros2_net_diag_v2.sh 192.168.0.101"}
+TARGET_IP=${1:?"핑키 IP를 입력하세요. 예: ./ros2_net_diag.sh 192.168.0.101"}
 RATE=${2:-0.1}
 DURATION_MIN=${3:-30}
 IFACE=${4:-wlan0}
