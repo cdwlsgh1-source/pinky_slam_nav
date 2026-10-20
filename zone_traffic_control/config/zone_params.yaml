@@ -1,6 +1,0 @@
-zone_manager_node:
-  ros__parameters:
-    # zone_gate_client를 쓰는 로봇들의 robot_id 목록 (patrol 노드의 robot_id 파라미터와 일치해야 함)
-    robot_ids: ["pinky1", "pinky2"]
-    # 로봇이 notify_exit를 못 보내는 비상 상황(크래시 등)에 대비한 강제 해제 시간(초)
-    max_hold_sec: 120.0
