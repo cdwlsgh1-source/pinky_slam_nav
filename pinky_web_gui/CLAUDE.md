@@ -37,10 +37,10 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
 
 | 폴더 | 역할 |
 |---|---|
-| `my_pinky_package/` | 로봇에서 실행하는 순찰 노드. GUI 가 맞춘 것은 `pinky_patrol_node_pinky{1,2}_v2.py` (`start`/`stop`/`goto`). `_v3` 는 대기열 버전 |
-| `zone_traffic_control/` | 구역 상호 배제 패키지. 관제 PC의 `zone_manager_node`(`_v3` 는 대기열), 로봇이 import하는 `zone_gate_client` |
+| `my_pinky_package/` | 로봇에서 실행하는 순찰 노드. GUI 가 맞춘 것은 `pinky_patrol_node_pinky{1,2,3}.py` (`start`/`stop`/`goto`, 대기열 방식) |
+| `zone_traffic_control/` | 구역 상호 배제 패키지. 관제 PC의 `zone_manager_node`(대기열), 로봇이 import하는 `zone_gate_client` |
 | `domain_bridge/` | upstream 소스에 `launch/bridges.launch.xml`(브리지 3개 실행, `pinky2:=false` 처럼 일부만 가능), `config/pinky_bridge_pinky{1,2,3}.yaml`(직접 작성)을 추가한 패키지. 나머지는 수정 금지 |
-| `pinky_patrol_cmd/` | 관제 PC용 CLI 클라이언트 `pinky_control_client_v2.py` (`start`/`stop`/`goto`/`monitor`) |
+| `pinky_patrol_cmd/` | 관제 PC용 CLI 클라이언트 `pinky_control_client.py` (`start`/`stop`/`goto`/`monitor`) |
 | `pinky_camera/` | `camera_node`, `lane_detector_node`(로봇), `lane_follower_node`(관제 PC), 모델 `best.pt`, `lane_seg_best.pt` |
 | `map_view_pc/` | 지도 `my_pinky_map10.yaml/.pgm`, 좌표 뷰어 `pinky_map_viewer.html` |
 | `ros2_network_test/` | Wi-Fi 진단 스크립트 |
@@ -55,23 +55,23 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
 1. **로봇**: Nav2 bringup (각 로봇의 `ROS_DOMAIN_ID` 설정)
 2. **관제 PC**: 브리지 `ros2 launch domain_bridge bridges.launch.xml`
 3. **관제 PC**: `ros2 launch zone_traffic_control zone_manager.launch.xml`
-4. **로봇**: `ros2 run my_pinky_package pinky_patrol_node_pinky1_v2 --ros-args -p robot_id:=pinky1` (pinky2도 동일, `my_pinky_package/setup.py:33-34`)
-5. **관제 PC**: `python3 pinky_patrol_cmd/pinky_control_client_v2.py <pinky1|pinky2> <start|stop|monitor|goto P2 P3 ...>` 또는 웹 GUI
+4. **로봇**: `ros2 run my_pinky_package pinky_patrol_node_pinky1 --ros-args -p robot_id:=pinky1` (pinky2도 동일, `my_pinky_package/setup.py:33-34`)
+5. **관제 PC**: `python3 pinky_patrol_cmd/pinky_control_client.py <pinky1|pinky2> <start|stop|monitor|goto P2 P3 ...>` 또는 웹 GUI
 
 웹 GUI 시스템 패널의 **전체 시작** 순서는 위와 다르다: 도메인 브릿지 → bringup → map → zone_manager → 순찰 노드 (이유: `docs/reference/decisions.md`).
 
 (`README.md:183-189` 기준. `robot_id`는 `zone_traffic_control/config/zone_params.yaml:4`의 `robot_ids`와 같아야 한다.)
 
-**v3(대기열)** 는 문(RED*)이 없고 `/zone_manager_v3/*` 를 쓴다. **GUI 는 v2 기준**이니 `processes.yaml` 을 v3 로 바꾸기 전에 `docs/reference/decisions.md` 를 읽는다.
+순찰 노드는 문(RED*)이 없는 대기열 방식이다. 이전 세대(문 방식, `_v2`)는 git 태그 `v2-final` 에 있다. GUI 문서 일부(`docs/interfaces.md`, `docs/reference/`)는 아직 문 방식 기준이니 코드와 다르면 코드를 믿는다.
 
-**`start` 명령이 로봇까지 가는 경로**: 관제 PC가 `/pinky1/patrol_cmd`(String `"start"`)를 발행(도메인 100) → `domain_bridge`가 100→10으로 중계하며 `/patrol_cmd`로 remap (`pinky_bridge_pinky1.yaml:9-13`) → 로봇의 `PinkyPatrolNode._cmd_cb`(`pinky_patrol_node_pinky1_v2.py:242`)가 작업 스레드를 시작 → 상태는 `/patrol_status`(로봇) → 브리지 → `/pinky1/patrol_status`(관제 PC)로 돌아온다 (`:15-19`).
+**`start` 명령이 로봇까지 가는 경로**: 관제 PC가 `/pinky1/patrol_cmd`(String `"start"`)를 발행(도메인 100) → `domain_bridge`가 100→10으로 중계하며 `/patrol_cmd`로 remap (`pinky_bridge_pinky1.yaml:9-13`) → 로봇의 `PinkyPatrolNode._cmd_cb`(`pinky_patrol_node_pinky1.py:242`)가 작업 스레드를 시작 → 상태는 `/patrol_status`(로봇) → 브리지 → `/pinky1/patrol_status`(관제 PC)로 돌아온다 (`:15-19`).
 
 ## 6. 코딩 규칙
 
 - 주석과 docstring은 **한국어**로 쓴다. 기존 파일처럼 "왜 이렇게 했는지"를 적는다.
 - 주변 코드의 스타일을 따른다. 순찰 노드는 `# ====` 섹션 배너로 구역을 나눈다.
 - **기존 파일은 수정하지 않는다.** (예외: 브리지 yaml 토픽 블록 추가, `setup.py` entry point.) 대상: `my_pinky_package/`, `zone_traffic_control/`, `domain_bridge/`, `pinky_camera/`, `pinky_patrol_cmd/`, `map_view_pc/`, `ros2_network_test/`, 루트 `README.md`. 새 코드는 `pinky_web_gui/`에만 만든다.
-- `_v2` 순찰·zone 파일은 수정·삭제하지 않는다 (v3 에서 문제가 나면 v2 로 복구한다). 미커밋 `zone_*_v3` 변경은 사용자 작업이니 되돌리거나 커밋하지 않는다.
+- 파일 이름에 `_v2`, `_v3` 같은 버전을 붙이지 않는다. 버전은 git 태그·브랜치로 관리한다 (이전 세대는 태그 `v2-final`). 미커밋 변경은 사용자 작업이니 되돌리거나 커밋하지 않는다.
 - 로봇 이름(`pinky1`, `pinky2`)을 코드에 하드코딩하지 않는다. 설정 파일(`pinky_web_gui/config/robots.yaml`)에서 읽는다.
 - 로봇으로 나가는 명령은 허용 목록(`start`, `stop`, `goto:<허용 포인트>`)만 통과시킨다. 허용 포인트는 `docs/interfaces.md` 참고.
 - 실제 로봇 연결 테스트는 사용자가 직접 한다. mock 모드로 먼저 확인한다.

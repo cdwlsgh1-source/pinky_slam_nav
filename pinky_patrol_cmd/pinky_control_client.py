@@ -50,13 +50,13 @@ class PatrolClient(Node):
 
 def main():
     # [인자 개수 확인]
-    # 실행 형식: python3 pinky_control_client_v3.py <pinky1|pinky2> <start|stop|emergency_stop|monitor|goto> [포인트...]
+    # 실행 형식: python3 pinky_control_client.py <pinky1|pinky2> <start|stop|emergency_stop|monitor|goto> [포인트...]
     # sys.argv[0]=파일명, [1]=로봇 이름, [2]=동작, [3:]=포인트들
     # → 최소 3개(파일명, 로봇, 동작)가 없으면 사용법 출력 후 종료
     if len(sys.argv) < 3:
-        print('사용법: python3 pinky_control_client_v3.py <pinky1|pinky2> <start|stop|emergency_stop|monitor|goto> [포인트]')
-        print('예시  : python3 pinky_control_client_v3.py pinky1 goto P2')
-        print('        python3 pinky_control_client_v3.py pinky1 emergency_stop')
+        print('사용법: python3 pinky_control_client.py <pinky1|pinky2> <start|stop|emergency_stop|monitor|goto> [포인트]')
+        print('예시  : python3 pinky_control_client.py pinky1 goto P2')
+        print('        python3 pinky_control_client.py pinky1 emergency_stop')
         return
 
     namespace = sys.argv[1]   # 예) 'pinky1'
@@ -77,7 +77,7 @@ def main():
     elif action == 'goto':
         if len(sys.argv) < 4:
             # 포인트가 하나도 없는 경우
-            print('포인트가 필요합니다. 예: python3 pinky_control_client_v3.py pinky1 goto P2 P3 P6')
+            print('포인트가 필요합니다. 예: python3 pinky_control_client.py pinky1 goto P2 P3 P6')
         else:
             # sys.argv[3:] = ['p2', 'P3', 'p6'] (포인트 목록)
             # p.upper()    = 대문자로 통일 ('p2' → 'P2')

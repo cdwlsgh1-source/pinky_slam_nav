@@ -4,10 +4,9 @@
 
 | 파일 | 설명 |
 |------|------|
-| `ros2_net_diag.sh` | 기본 진단 (부하 토픽, 핑, 인터페이스 에러/드랍) |
-| `ros2_net_diag_v2.sh` | v2: 기본 기능 + 실제 토픽 대역폭, 노드 수, discovery 캡처, WiFi 품질, CPU/메모리 |
+| `ros2_net_diag.sh` | 부하 토픽, 핑, 인터페이스 에러/드랍 + 실제 토픽 대역폭, 노드 수, discovery 캡처, WiFi 품질, CPU/메모리 |
 
-이 문서는 **`ros2_net_diag_v2.sh`** 의 실행 방법을 설명합니다.
+이 문서는 **`ros2_net_diag.sh`** 의 실행 방법을 설명합니다.
 
 ---
 
@@ -25,7 +24,7 @@
 - 관제 PC와 Pinky가 **같은 `ROS_DOMAIN_ID`** 를 사용하고, 같은 네트워크에 연결되어 있어야 합니다.
 - 실행 권한 (처음 한 번만)
   ```bash
-  chmod +x ros2_net_diag_v2.sh
+  chmod +x ros2_net_diag.sh
   ```
 - (선택) `iw`, `tcpdump` 설치 — 없으면 해당 항목만 건너뛰거나 `NA`로 기록됩니다.
   ```bash
@@ -35,7 +34,7 @@
 ## 3. 사용법
 
 ```bash
-./ros2_net_diag_v2.sh <핑키IP> [부하_Hz] [지속시간_분] [무선인터페이스명] [감시할_토픽,쉼표구분]
+./ros2_net_diag.sh <핑키IP> [부하_Hz] [지속시간_분] [무선인터페이스명] [감시할_토픽,쉼표구분]
 ```
 
 | 순서 | 인자 | 필수 | 기본값 | 설명 |
@@ -52,13 +51,13 @@
 
 ```bash
 # 최소 실행 (기본값 사용: 0.1Hz, 30분, wlan0)
-./ros2_net_diag_v2.sh 192.168.0.101
+./ros2_net_diag.sh 192.168.0.101
 
 # 전체 옵션 지정
-./ros2_net_diag_v2.sh 192.168.0.101 0.1 30 wlan0 "/scan,/tf,/map,/odom"
+./ros2_net_diag.sh 192.168.0.101 0.1 30 wlan0 "/scan,/tf,/map,/odom"
 
 # 10분만, 무선 인터페이스가 wlp2s0 인 경우
-./ros2_net_diag_v2.sh 192.168.0.101 0.1 10 wlp2s0
+./ros2_net_diag.sh 192.168.0.101 0.1 10 wlp2s0
 ```
 
 무선 인터페이스 이름은 아래 명령으로 확인할 수 있습니다.
@@ -73,7 +72,7 @@ tcpdump 캡처는 **비밀번호 없이 sudo가 가능할 때만** 실행됩니�
 
 ```bash
 sudo -v                                  # 비밀번호 입력 (인증 캐시)
-./ros2_net_diag_v2.sh 192.168.0.101
+./ros2_net_diag.sh 192.168.0.101
 ```
 
 sudo를 쓰지 않으면 이 캡처만 건너뛰고 나머지는 정상 진행됩니다. 수동 캡처가 필요하면:

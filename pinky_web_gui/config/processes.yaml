@@ -149,8 +149,8 @@ processes:
     cwd: /home/pinky/pinky_slam_nav
     env: *pinky1_env
     source: ["/opt/ros/jazzy/setup.bash", "./install/setup.bash"]
-    command: "ros2 run my_pinky_package pinky_patrol_node_pinky1_v2"
-    detect: "pinky_patrol_node_pinky1_v2"
+    command: "ros2 run my_pinky_package pinky_patrol_node_pinky1"
+    detect: "pinky_patrol_node_pinky1"
 
   # pinky2 순찰 노드: pinky2 의 Nav2(map)가 올라온 뒤에 켠다. 로봇의 폴더와 ROS 경로는 pinky1 과 같다고 가정했다 (다르면 cwd/source 수정).
   - id: patrol_pinky2
@@ -163,5 +163,5 @@ processes:
     cwd: /home/pinky/pinky_slam_nav
     env: *pinky2_env
     source: ["/opt/ros/jazzy/setup.bash", "./install/setup.bash"]
-    command: "ros2 run my_pinky_package pinky_patrol_node_pinky2_v2"
-    detect: "pinky_patrol_node_pinky2_v2"
+    command: "ros2 run my_pinky_package pinky_patrol_node_pinky2"
+    detect: "pinky_patrol_node_pinky2"

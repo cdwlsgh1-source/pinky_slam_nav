@@ -4,11 +4,11 @@ mock 으로는 `tests/verify_step3_mock.py`, `tests/verify_step3_ui.py`, `pytest
 통과/실패와 이상한 화면 캡처, 백엔드 로그(`logging` 의 `backend`, `backend.ros`)를 알려 주면 된다.
 
 ## 사전 조건
-- [ ] 로봇: Nav2 bringup, `pinky_patrol_node_pinky1_v2` (pinky2 도 쓰면 `..._pinky2_v2`) 실행. 주변을 비운다.
+- [ ] 로봇: Nav2 bringup, `pinky_patrol_node_pinky1` (pinky2 도 쓰면 `..._pinky2_v2`) 실행. 주변을 비운다.
 - [ ] 관제 PC: 브리지(`ros2 launch domain_bridge bridges.launch.xml`)를 **재시작**한다 (배터리 토픽이 추가된 YAML). `zone_manager_node` 실행.
 - [ ] 관제 PC: `export ROS_DOMAIN_ID=50` 후 `.venv/bin/python -m backend.main` (**`--mock` 없이**). 브라우저 `http://localhost:8000/`.
 - [ ] `config/robots.yaml` 의 `robot_settings` 가 노드 상수와 같다 (`goto_allowed` = 노드 `GOTO_ALLOWED`, `home` = `HOME_NAME`, `goto_wait_sec` = `GOTO_WAIT_SEC`, `start_route` = `WAYPOINTS`).
-- [ ] **pinky2 주의**: `pinky_patrol_node_pinky2_v2.py` 의 `ZONE_ENTRY_INDEX/ZONE_EXIT_INDEX` 가 1/4 로 남아 있으면 start 의 구역 진입·이탈 시점이 틀린다 (`CLAUDE.md` 7절). 구역 항목은 pinky1 단독으로 먼저 확인하고, pinky2 는 0/3 으로 고친 뒤 확인한다.
+- [ ] **pinky2 주의**: `pinky_patrol_node_pinky2.py` 의 `ZONE_ENTRY_INDEX/ZONE_EXIT_INDEX` 가 1/4 로 남아 있으면 start 의 구역 진입·이탈 시점이 틀린다 (`CLAUDE.md` 7절). 구역 항목은 pinky1 단독으로 먼저 확인하고, pinky2 는 0/3 으로 고친 뒤 확인한다.
 
 ## A. 안전한 항목부터 (로봇이 움직이지 않음)
 
@@ -27,7 +27,7 @@ mock 으로는 `tests/verify_step3_mock.py`, `tests/verify_step3_ui.py`, `pytest
 | 6 | 전달된 문자열 | 터미널 A: `ros2 topic echo /pinky1/patrol_cmd` (도메인 50), 터미널 B: 도메인 20 에서 `ros2 topic echo /patrol_cmd`. 화면에서 P2, P3, P6 를 클릭하고 `경로 이동` → 팝업 확인 | 양쪽 모두 `goto:P2,P3,P6`. 팝업 요약이 "pinky1: P2 → P3 → P6 → 홈(P1), 지점마다 10초 대기" | |
 | 7 | goto 진행 | 위 이어서 지켜본다 | 카드 진행 문구 "지점 1/3 · P2 이동 중" → 도착 대기 → 구역 진입 시 "구역 문 이동 중" → "지점 2/3 · P3" … → "홈(P1) 복귀 중" → "완료 (홈 복귀)". 배지 색: 이동 초록, 도착 대기 노랑 | |
 | 8 | 첫 작업 STARTING | 노드를 막 켠 직후 첫 작업 (`~/.pinky_last_pose.json` 이 있을 때) | STARTING 이 5초를 넘으면 "시작 준비 중 (첫 작업은 초기 위치 보정으로 …)" 안내. 로봇이 제자리에서 회전 | |
-| 9 | start 동등성 | 화면 `순찰 시작` (팝업 확인) 과, 같은 상태에서 `python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 start` | 두 방식이 같은 동작 (경로, 상태 순서) | |
+| 9 | start 동등성 | 화면 `순찰 시작` (팝업 확인) 과, 같은 상태에서 `python3 pinky_patrol_cmd/pinky_control_client.py pinky1 start` | 두 방식이 같은 동작 (경로, 상태 순서) | |
 | 10 | 작업 중 start | 순찰 중에 `curl ... -d '{"cmd":"start"}'` (화면 버튼은 비활성이라 API 로) | 200 이지만 5초 뒤 카드와 이력에 "응답 없음". 순찰은 영향 없음 (노드가 무시) | |
 | 11 | stop | 이동 중에 `정지` | 상태 STOPPED (알람 바에 표시). 구역 안에서 멈췄다면 구역 칩이 `max_hold_sec`(기본 120초) 동안 점유로 남을 수 있음 | |
 | 12 | 보정 중 stop | 노드 재시작 직후 첫 작업의 회전 중에 `정지` | 회전이 끝날 때까지 반영 안 됨 → 이력에 "응답 없음" 이 먼저 나올 수 있음 (노드 동작, 알려진 함정) | |

@@ -1,7 +1,7 @@
-"""zone_gate_client_v3 테스트.
+"""zone_gate_client 테스트.
 
 1) 순수 로직(슬롯/허가 파싱, 재전송 타이밍): ROS 없이 실행.
-2) 통합: zone_manager_node_v3 를 실제로 띄워 슬롯 변경·거부·허가 수신을 확인.
+2) 통합: zone_manager_node 를 실제로 띄워 슬롯 변경·거부·허가 수신을 확인.
    ROS_DOMAIN_ID=77 + ROS_LOCALHOST_ONLY=1 이 아니면 건너뜀 (실제 관제 도메인 보호).
 """
 import os
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from zone_traffic_control.zone_gate_client_v3 import (RetryTimer,
+from zone_traffic_control.zone_gate_client import (RetryTimer,
                                                       choose_entry_target,
                                                       parse_grant_msg,
                                                       parse_slot_msg)
@@ -22,8 +22,8 @@ PKG_ROOT = Path(__file__).resolve().parents[1]
 
 def _params():
     import yaml
-    prm = yaml.safe_load((PKG_ROOT / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
-    return prm['zone_manager_node_v3']['ros__parameters']
+    prm = yaml.safe_load((PKG_ROOT / 'config/zone_params.yaml').read_text(encoding='utf-8'))
+    return prm['zone_manager_node']['ros__parameters']
 
 
 # 슬롯 전진은 queue_advance_delay_sec 뒤에 일어나므로 대기 시간을 yaml 값에서 계산 (지연을 바꿔도 테스트 유지)
@@ -31,11 +31,11 @@ ADVANCE_WAIT = 2 * _params()['queue_advance_delay_sec'] + 3.0
 
 
 def expected_slot(k):
-    """zone_params_v3.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 의 (x, y) 를 계산 (앵커가 바뀌어도 테스트 유지)."""
+    """zone_params.yaml 의 앵커/후방 벡터/간격으로 슬롯 k 의 (x, y) 를 계산 (앵커가 바뀌어도 테스트 유지)."""
     import yaml
-    from zone_traffic_control.zone_manager_node_v3 import normalize_dir, slot_pose
-    prm = yaml.safe_load((PKG_ROOT / 'config/zone_params_v3.yaml').read_text(encoding='utf-8'))
-    prm = prm['zone_manager_node_v3']['ros__parameters']
+    from zone_traffic_control.zone_manager_node import normalize_dir, slot_pose
+    prm = yaml.safe_load((PKG_ROOT / 'config/zone_params.yaml').read_text(encoding='utf-8'))
+    prm = prm['zone_manager_node']['ros__parameters']
     x, y, _ = slot_pose(k, prm['queue_anchor'], normalize_dir(prm['queue_back_dir']),
                         prm['queue_spacing'])
     return x, y
@@ -95,7 +95,7 @@ def test_choose_target_grant_beats_stale_slot_and_full():
     assert choose_entry_target(True, (-1, 0.0, 0.0, 0.0), DOOR) == ('door', DOOR)
 
 
-# ---------------- 통합 (실제 zone_manager_node_v3) ----------------
+# ---------------- 통합 (실제 zone_manager_node) ----------------
 ISOLATED = (os.environ.get('ROS_DOMAIN_ID') == '77'
             and os.environ.get('ROS_LOCALHOST_ONLY') == '1')
 
@@ -106,14 +106,14 @@ def ros_env():
         pytest.skip('ROS_DOMAIN_ID=77 + ROS_LOCALHOST_ONLY=1 에서만 실행')
     rclpy = pytest.importorskip('rclpy')
     from rclpy.node import Node
-    from zone_traffic_control.zone_gate_client_v3 import ZoneGateClient
+    from zone_traffic_control.zone_gate_client import ZoneGateClient
 
     mgr = subprocess.Popen(
-        [sys.executable, '-m', 'zone_traffic_control.zone_manager_node_v3',
-         '--ros-args', '--params-file', str(PKG_ROOT / 'config/zone_params_v3.yaml')],
+        [sys.executable, '-m', 'zone_traffic_control.zone_manager_node',
+         '--ros-args', '--params-file', str(PKG_ROOT / 'config/zone_params.yaml')],
         cwd=str(PKG_ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     rclpy.init()
-    node = Node('gate_client_v3_test')
+    node = Node('gate_client_test')
     clients = {rid: ZoneGateClient(node, rid) for rid in ('pinky1', 'pinky2', 'pinky3', 'pinky4')}
 
     def spin_until(cond, timeout=ADVANCE_WAIT):
@@ -139,7 +139,7 @@ def ros_env():
         warm.resend_if_due()
         rclpy.spin_once(node, timeout_sec=0.05)
         ok = warm.granted(tok)
-    assert ok, 'zone_manager_node_v3 가 응답하지 않음'
+    assert ok, 'zone_manager_node 가 응답하지 않음'
     warm.notify_exit()
     spin_until(lambda: False, 0.5)
     yield node, clients, spin_until
@@ -196,7 +196,7 @@ def test_integration_grant_slots_full_and_cancel(ros_env):
 def test_integration_queue_full_rejection(ros_env):
     node, c, spin_until = ros_env
     from rclpy.node import Node
-    from zone_traffic_control.zone_gate_client_v3 import ZoneGateClient
+    from zone_traffic_control.zone_gate_client import ZoneGateClient
     extra = {rid: ZoneGateClient(node, rid) for rid in ('pinky5', 'pinky6')}
     p1, p2, p3, p4 = (c[r] for r in ('pinky1', 'pinky2', 'pinky3', 'pinky4'))
     for x in (p1, p2, p3, p4, *extra.values()):

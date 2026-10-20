@@ -1,9 +1,9 @@
-"""zone_manager_node_v3 의 순수 로직 테스트 (slot_pose, normalize_dir, ZoneQueue). ROS 노드는 띄우지 않는다."""
+"""zone_manager_node 의 순수 로직 테스트 (slot_pose, normalize_dir, ZoneQueue). ROS 노드는 띄우지 않는다."""
 import math
 
 import pytest
 
-from zone_traffic_control.zone_manager_node_v3 import (ZoneQueue, normalize_dir,
+from zone_traffic_control.zone_manager_node import (ZoneQueue, normalize_dir,
                                                        slot_pose)
 
 ANCHOR = (0.30, -0.45, 0.0)

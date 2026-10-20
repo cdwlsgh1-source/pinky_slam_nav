@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="t d">
   <title id="t">순찰 명령과 구역 대기열 흐름 (v3)</title>
-  <desc id="d">관제 PC의 명령 클라이언트와 zone_manager_node_v3가 domain_bridge를 거쳐 로봇의 순찰 노드(v3), ZoneGateClient와 통신하는 구성</desc>
+  <desc id="d">관제 PC의 명령 클라이언트와 zone_manager_node가 domain_bridge를 거쳐 로봇의 순찰 노드(v3), ZoneGateClient와 통신하는 구성</desc>
   <style>
     :root {
       --text: #1f2328; --sub: #57606a;
@@ -49,10 +49,10 @@
   <text class="group" x="200" y="112" text-anchor="middle">관제 PC</text>
   <text class="meta" x="200" y="134" text-anchor="middle">ROS_DOMAIN_ID = 50</text>
   <rect class="pcn" x="65" y="160" width="270" height="90" rx="10"/>
-  <text class="node" x="200" y="198" text-anchor="middle">pinky_control_client_v2.py</text>
+  <text class="node" x="200" y="198" text-anchor="middle">pinky_control_client.py</text>
   <text class="meta" x="200" y="224" text-anchor="middle">start / stop / goto / monitor</text>
   <rect class="pcn" x="65" y="390" width="270" height="140" rx="10"/>
-  <text class="node" x="200" y="440" text-anchor="middle">zone_manager_node_v3</text>
+  <text class="node" x="200" y="440" text-anchor="middle">zone_manager_node</text>
   <text class="meta" x="200" y="466" text-anchor="middle">점유자 1명 + FIFO 대기열</text>
   <text class="meta" x="200" y="490" text-anchor="middle">허가 · 슬롯 좌표 발행</text>
 
@@ -70,7 +70,7 @@
   <text class="meta" x="1000" y="224" text-anchor="middle">pinky_patrol_node_pinky{1,2}_v3</text>
   <rect class="rbn" x="865" y="390" width="270" height="140" rx="10"/>
   <text class="node" x="1000" y="440" text-anchor="middle">ZoneGateClient</text>
-  <text class="meta" x="1000" y="466" text-anchor="middle">zone_gate_client_v3</text>
+  <text class="meta" x="1000" y="466" text-anchor="middle">zone_gate_client</text>
   <text class="meta" x="1000" y="490" text-anchor="middle">요청 · 취소 · 이탈 통보</text>
 
   <!-- 순찰 노드 -> gate client (import) -->
@@ -90,5 +90,5 @@
   <line class="a-down" x1="339" y1="505" x2="861" y2="505"/>
   <text class="lbl c-down" x="600" y="490" text-anchor="middle">grant_entry · queue_slot</text>
 
-  <text class="meta" x="600" y="600" text-anchor="middle">구역 토픽 이름공간: /zone_manager_v3/*</text>
+  <text class="meta" x="600" y="600" text-anchor="middle">구역 토픽 이름공간: /zone_manager/*</text>
 </svg>

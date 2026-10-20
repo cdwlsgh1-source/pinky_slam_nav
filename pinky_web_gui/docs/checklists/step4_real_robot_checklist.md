@@ -13,7 +13,7 @@ mock 으로는 `pytest`, `tests/verify_step4_mock.py`, `tests/verify_step4_ui.py
 - [ ] 관제 PC: 브리지 실행(`ros2 launch domain_bridge bridges.launch.xml`). **브리지 YAML 은 Step 4 에서 바꾸지 않았다** (`/{id}/scan`, `/{id}/cmd_vel` 은 이미 들어 있다). `zone_manager_node` 실행.
 - [ ] 관제 PC: `export ROS_DOMAIN_ID=50` 후 `.venv/bin/python -m backend.main` (**`--mock` 없이**). 브라우저 `http://localhost:8000/`.
 - [ ] 터미널을 하나 더 열어 `ros2 topic echo /pinky1/cmd_vel` (도메인 50), 로봇 쪽(도메인 20)에서 `ros2 topic echo /cmd_vel` 을 볼 수 있게 한다.
-- [ ] pinky2 를 쓰려면 `pinky_patrol_node_pinky2_v2.py` 의 `ZONE_ENTRY_INDEX/ZONE_EXIT_INDEX` 가 0/3 으로 고쳐졌는지 확인한다 (`CLAUDE.md` 7절). 구역 항목은 pinky1 단독으로 먼저 한다.
+- [ ] pinky2 를 쓰려면 `pinky_patrol_node_pinky2.py` 의 `ZONE_ENTRY_INDEX/ZONE_EXIT_INDEX` 가 0/3 으로 고쳐졌는지 확인한다 (`CLAUDE.md` 7절). 구역 항목은 pinky1 단독으로 먼저 한다.
 
 ## 0. 구역 영역 경계 확인 (가장 먼저, 로봇 불필요)
 
@@ -63,12 +63,12 @@ mock 으로는 `pytest`, `tests/verify_step4_mock.py`, `tests/verify_step4_ui.py
 |---|---|---|---|---|
 | 18 | 순찰 중 비상정지 | pinky1 `start` 또는 `goto P3,P6` 중에 로봇 탭의 pinky1 카드 `비상 정지` | 2초 안에 선다. 다른 로봇은 영향 없음 | |
 | 19 | 전체 비상 정지 | 두 로봇이 움직일 때 상단 `비상 정지` | 두 로봇 모두 선다 (pinky2 구역 인덱스 수정 후) | |
-| 20 | 구역 배지 vs 토픽 | CLI 로 한 대를 구역에 보낸다 (`pinky_control_client_v2.py pinky1 goto P3`). `ros2 topic echo /zone_manager/status` | 배지가 같은 값을 보여 준다. 점유 시간이 계속 오르고, 나오면 "비어 있음" | |
+| 20 | 구역 배지 vs 토픽 | CLI 로 한 대를 구역에 보낸다 (`pinky_control_client.py pinky1 goto P3`). `ros2 topic echo /zone_manager/status` | 배지가 같은 값을 보여 준다. 점유 시간이 계속 오르고, 나오면 "비어 있음" | |
 | 21 | 구역 안에서 비상정지 | 구역 안에서 비상정지 | 로봇이 서고, 구역은 노드가 `notify_exit` 를 못 보내서 `max_hold_sec`(120초)까지 점유로 남을 수 있다 (알려진 동작) | |
 | 22 | 구역 진입 대기 | pinky1 이 구역에 있을 때 pinky2 를 `goto P4` (인덱스 수정 후) | pinky2 카드에 "구역 진입 대기 (P4)", 마커에 빨간 점선 고리. 구역이 비면 이어서 진행 | |
 | 23 | 경로 선 | `start` 와 `goto` 를 각각 실행 | 선과 강조 지점(고리)이 로봇의 실제 진행과 맞는다. 문 경유(`RED*`)는 문 위치에 강조. **선은 지도의 벽을 피하는 추정 경로**라서 Nav2 가 실제로 지나간 궤적과 비교한다 (벽 모서리를 얼마나 띄워 가는지가 다를 수 있다. 크게 다르면 `planner_inflation_m` 을 조정) | |
 | 24 | `start` 의 waypoint 해석 | pinky1 `start` | 강조가 "방금 지난 지점 다음"을 가리킨다 (`MOVING` 의 `waypoint` 는 도착 후 다음 번호) | |
-| 25 | `start` 를 CLI 로 | `pinky_control_client_v2.py pinky1 start` | 경로 선이 **그려지지 않는다** (이 서버가 보낸 명령이 아니라 `last_task` 가 없음). 알려진 한계 | |
+| 25 | `start` 를 CLI 로 | `pinky_control_client.py pinky1 start` | 경로 선이 **그려지지 않는다** (이 서버가 보낸 명령이 아니라 `last_task` 가 없음). 알려진 한계 | |
 
 ## D. 첫 작업의 초기 위치 보정 회전 중 비상정지
 

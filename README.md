@@ -16,10 +16,10 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고,
 
 | 장비 | ROS_DOMAIN_ID | 실행하는 것 |
 |---|---|---|
-| 관제 PC | 100 | `domain_bridge`, `zone_manager_node`, 웹 GUI, `pinky_control_client_v2.py` |
+| 관제 PC | 100 | `domain_bridge`, `zone_manager_node`, 웹 GUI, `pinky_control_client.py` |
 | pinky1 | 10 | Nav2, 순찰 노드, (카메라 사용 시) `camera_node`, `lane_detector_node` |
 | pinky2 | 20 | Nav2, 순찰 노드 |
-| pinky3 | 30 | Nav2, 순찰 노드 (`pinky_patrol_node_pinky3_v3`, 홈 지점은 임시로 pinky2 와 동일) |
+| pinky3 | 30 | Nav2, 순찰 노드 (`pinky_patrol_node_pinky3`, 홈 지점은 임시로 pinky2 와 동일) |
 
 ```
 관제 PC(100) ──[domain_bridge]── pinky1(10)
@@ -90,10 +90,10 @@ ros2 launch zone_traffic_control zone_manager.launch.xml
 
 ```bash
 # pinky1 (도메인 10)
-ros2 run my_pinky_package pinky_patrol_node_pinky1_v2 --ros-args -p robot_id:=pinky1
+ros2 run my_pinky_package pinky_patrol_node_pinky1 --ros-args -p robot_id:=pinky1
 
 # pinky2 (도메인 20)
-ros2 run my_pinky_package pinky_patrol_node_pinky2_v2 --ros-args -p robot_id:=pinky2
+ros2 run my_pinky_package pinky_patrol_node_pinky2 --ros-args -p robot_id:=pinky2
 ```
 
 **5. 관제 PC — 명령 또는 웹 GUI**
@@ -101,7 +101,7 @@ ros2 run my_pinky_package pinky_patrol_node_pinky2_v2 --ros-args -p robot_id:=pi
 ```bash
 source /opt/ros/jazzy/setup.bash
 export ROS_DOMAIN_ID=100
-python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 monitor
+python3 pinky_patrol_cmd/pinky_control_client.py pinky1 monitor
 ```
 
 ### 웹 GUI
@@ -130,17 +130,17 @@ export ROS_DOMAIN_ID=100
 
 전체 옵션은 `.venv/bin/python -m backend.main --help` 또는 [`pinky_web_gui/docs/usage.md`](pinky_web_gui/docs/usage.md)를 참고하세요.
 
-### 대기열(v3) 구성 (선택)
+### 대기열 구성
 
-RED POINT(RED*) 대신 앵커/대기슬롯을 쓰는 버전입니다. 웹 GUI는 v2 기준이므로 GUI의 `processes.yaml`은 v3로 바꾸지 마세요 (`pinky_web_gui/docs/reference/decisions.md`).
+RED POINT(RED*) 대신 앵커/대기슬롯을 씁니다. 이전 세대(RED* 문 방식)는 git 태그 `v2-final` 에 보존되어 있습니다.
 
 ```bash
 # 관제 PC
-ros2 launch zone_traffic_control zone_manager_v3.launch.xml
+ros2 launch zone_traffic_control zone_manager.launch.xml
 
 # 로봇
-ros2 run my_pinky_package pinky_patrol_node_pinky1_v3 --ros-args -p robot_id:=pinky1
-ros2 run my_pinky_package pinky_patrol_node_pinky2_v3 --ros-args -p robot_id:=pinky2
+ros2 run my_pinky_package pinky_patrol_node_pinky1 --ros-args -p robot_id:=pinky1
+ros2 run my_pinky_package pinky_patrol_node_pinky2 --ros-args -p robot_id:=pinky2
 ```
 
 ### 카메라 / 차선 추종 (선택)
@@ -164,8 +164,8 @@ xdg-open map_view_pc/pinky_map_viewer.html
 
 # 네트워크 진단 (관제 PC): <핑키IP> [부하_Hz] [지속시간_분] [인터페이스]
 cd ros2_network_test
-chmod +x ros2_net_diag.sh ros2_net_diag_v2.sh
-./ros2_net_diag_v2.sh 192.168.0.101 0.1 30 wlan0 "/scan,/tf,/map,/odom"
+chmod +x ros2_net_diag.sh
+./ros2_net_diag.sh 192.168.0.101 0.1 30 wlan0 "/scan,/tf,/map,/odom"
 ```
 
 ## 사용 예시
@@ -173,12 +173,12 @@ chmod +x ros2_net_diag.sh ros2_net_diag_v2.sh
 **순찰 명령 (관제 PC)**
 
 ```bash
-python3 pinky_patrol_cmd/pinky_control_client_v2.py <pinky1|pinky2> <start|stop|monitor|goto 포인트...>
+python3 pinky_patrol_cmd/pinky_control_client.py <pinky1|pinky2> <start|stop|monitor|goto 포인트...>
 
-python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 start          # 순찰 시작
-python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 goto P2 P3 P6  # 지정 지점 순서대로 이동 (내부적으로 goto:P2,P3,P6)
-python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 monitor        # 상태 출력 (Ctrl+C로 종료)
-python3 pinky_patrol_cmd/pinky_control_client_v2.py pinky1 stop           # 순찰 중지
+python3 pinky_patrol_cmd/pinky_control_client.py pinky1 start          # 순찰 시작
+python3 pinky_patrol_cmd/pinky_control_client.py pinky1 goto P2 P3 P6  # 지정 지점 순서대로 이동 (내부적으로 goto:P2,P3,P6)
+python3 pinky_patrol_cmd/pinky_control_client.py pinky1 monitor        # 상태 출력 (Ctrl+C로 종료)
+python3 pinky_patrol_cmd/pinky_control_client.py pinky1 stop           # 순찰 중지
 ```
 
 **구역 점유 상태 확인**
@@ -214,7 +214,7 @@ cd pinky_web_gui && .venv/bin/python -m pytest tests -q
 | `CYCLONEDDS_URI` | `file:///home/pinky/.ros/cyclonedds_robot.xml` | 로봇 | 위와 같음. 로봇 터미널 값과 같게 둠 |
 | `ROS_AUTOMATIC_DISCOVERY_RANGE` | `SUBNET` | 로봇 | 위와 같음 |
 | `ssh.password_env`가 가리키는 변수 | 선택 | 웹 GUI | `processes.yaml` 항목에 변수 **이름**을 적으면 SSH 비밀번호로 사용 (`sshpass` 필요). 기본은 SSH 키 로그인 |
-| `ROS_DOMAIN_ID=77` + `ROS_LOCALHOST_ONLY=1` | 시험용 | 테스트 | ROS 경로 검증 테스트 전용 격리 값 (`verify_step4_ros.py`, zone/patrol v3 테스트) |
+| `ROS_DOMAIN_ID=77` + `ROS_LOCALHOST_ONLY=1` | 시험용 | 테스트 | ROS 경로 검증 테스트 전용 격리 값 (`verify_step4_ros.py`, zone/patrol 테스트) |
 | `STEP4_SERVER_LOG` | 파일 경로, 선택 | 테스트 | `verify_step4_ros.py` 디버깅용 서버 로그 파일 |
 
 > ROS 파라미터 `robot_id`(순찰 노드, `-p robot_id:=pinky1`)는 환경변수가 아닙니다. 웹 GUI의 나머지 설정은 `pinky_web_gui/config/*.yaml`에 있습니다.
@@ -226,9 +226,9 @@ pinky_slam_nav/
 ├── domain_bridge/          # ros2/domain_bridge 소스 + 직접 작성한 launch/config
 │   ├── config/             #   pinky_bridge_pinky1.yaml, pinky_bridge_pinky2.yaml
 │   └── launch/             #   bridges.launch.xml (pinky1+pinky2 브릿지 실행)
-├── my_pinky_package/       # 로봇용 순찰 노드 (pinky_patrol_node_pinky{1,2}[_v2|_v3])
-├── pinky_patrol_cmd/       # 관제 PC용 CLI (pinky_control_client_v2.py)
-├── zone_traffic_control/   # 구역 상호 배제 (zone_manager_node[_v2|_v3], zone_gate_client[_v2|_v3])
+├── my_pinky_package/       # 로봇용 순찰 노드 (pinky_patrol_node_pinky{1,2,3})
+├── pinky_patrol_cmd/       # 관제 PC용 CLI (pinky_control_client.py)
+├── zone_traffic_control/   # 구역 상호 배제 (zone_manager_node, zone_gate_client)
 ├── pinky_camera/           # camera_node, lane_detector_node, lane_follower_node, YOLO 모델(.pt)
 ├── pinky_web_gui/          # 관제 웹 GUI
 │   ├── backend/            #   FastAPI + rclpy, 인증, 알람, 프로세스 제어, mock
