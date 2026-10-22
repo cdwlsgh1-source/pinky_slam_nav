@@ -18,8 +18,19 @@ set -u
 TARGET_IP=${1:?"핑키 IP를 입력하세요. 예: ./ros2_net_diag.sh 192.168.0.101"}
 RATE=${2:-0.1}
 DURATION_MIN=${3:-30}
-IFACE=${4:-wlan0}
+IFACE=${4:-}
 WATCH_TOPICS=${5:-"/scan,/tf,/map,/odom"}
+
+# 인터페이스 미지정 시 자동 감지: 무선 인터페이스 → 핑키IP로 나가는 경로의 인터페이스 순
+if [ -z "$IFACE" ]; then
+  IFACE=$(iw dev 2>/dev/null | awk '$1=="Interface" {print $2; exit}')
+  [ -z "$IFACE" ] && IFACE=$(ip route get "$TARGET_IP" 2>/dev/null | grep -oP 'dev \K\S+' | head -1)
+  IFACE=${IFACE:-wlan0}
+  echo "[알림] 인터페이스 자동 감지: $IFACE"
+fi
+if [ ! -d "/sys/class/net/$IFACE" ]; then
+  echo "[경고] 인터페이스 '$IFACE' 가 없습니다 → iface_bw/iface/wifi 로그가 비게 됩니다. (ip link 로 확인)"
+fi
 
 LOGDIR="./ros2_net_diag_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$LOGDIR"
@@ -57,6 +68,7 @@ cleanup() {
   echo "  - discovery.pcap  : discovery 멀티캐스트(239.255.0.1, 7400-7420) 캡처 ← 신규 (sudo 필요)"
   echo "  - wifi_quality.csv: 5초 간격 WiFi 신호세기/링크품질 ← 신규"
   echo "  - cpu_load.csv    : 5초 간격 CPU/메모리 부하 (관제PC 기준) ← 신규"
+  echo "  - proto_load.csv  : 5초 간격 UDP/TCP/멀티캐스트/유니캐스트 부하 (호스트 전체 카운터) ← 신규"
   exit 0
 }
 trap cleanup INT TERM
@@ -192,6 +204,60 @@ PIDS+=($!)
     sleep 5
   done
 ) &
+PIDS+=($!)
+
+# 11) [신규] 프로토콜별 부하: UDP / TCP / 멀티캐스트 / 유니캐스트 (커널 카운터 델타, sudo 불필요)
+#     /proc/net/snmp, /proc/net/netstat(IpExt) 는 호스트 전체(loopback 포함) 기준입니다.
+python3 - "$LOGDIR/proto_load.csv" "$DURATION_SEC" <<'PYEOF' &
+import sys, time
+
+out_path, duration = sys.argv[1], int(sys.argv[2])
+INTERVAL = 5
+
+def read_counters():
+    """'Proto: k1 k2 ...' / 'Proto: v1 v2 ...' 두 줄 쌍을 {'Proto.k': v} 로 변환"""
+    c = {}
+    for path in ("/proc/net/snmp", "/proc/net/netstat"):
+        try:
+            lines = open(path).read().splitlines()
+        except OSError:
+            continue
+        for head, vals in zip(lines[0::2], lines[1::2]):
+            proto, keys = head.split(":", 1)
+            for k, v in zip(keys.split(), vals.split(":", 1)[1].split()):
+                c[f"{proto}.{k}"] = int(v)
+    return c
+
+def delta(cur, prev, key):
+    # 카운터 리셋(음수)은 0 으로 처리
+    return max(0, cur.get(key, 0) - prev.get(key, 0))
+
+cols = ("timestamp,udp_in_pps,udp_out_pps,udp_err,udp_rcvbuf_err,"
+        "tcp_in_pps,tcp_out_pps,tcp_retrans,"
+        "mcast_in_pps,mcast_out_pps,mcast_in_KBps,ucast_in_pps,ucast_in_KBps")
+with open(out_path, "w", buffering=1) as f:
+    f.write(cols + "\n")
+    prev, t_prev = read_counters(), time.monotonic()
+    t_end = t_prev + duration
+    while time.monotonic() < t_end:
+        time.sleep(INTERVAL)
+        cur, now = read_counters(), time.monotonic()
+        dt = now - t_prev
+        d = lambda k: delta(cur, prev, k)
+        mc_in, bc_in = d("IpExt.InMcastPkts"), d("IpExt.InBcastPkts")
+        mc_oct, bc_oct = d("IpExt.InMcastOctets"), d("IpExt.InBcastOctets")
+        row = [
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+            d("Udp.InDatagrams") / dt, d("Udp.OutDatagrams") / dt,
+            d("Udp.InErrors"), d("Udp.RcvbufErrors"),
+            d("Tcp.InSegs") / dt, d("Tcp.OutSegs") / dt, d("Tcp.RetransSegs"),
+            mc_in / dt, d("IpExt.OutMcastPkts") / dt, mc_oct / dt / 1024,
+            max(0, d("Ip.InReceives") - mc_in - bc_in) / dt,
+            max(0, d("IpExt.InOctets") - mc_oct - bc_oct) / dt / 1024,
+        ]
+        f.write(row[0] + "," + ",".join(f"{v:.2f}" for v in row[1:]) + "\n")
+        prev, t_prev = cur, now
+PYEOF
 PIDS+=($!)
 
 echo "실행 중... (백그라운드 PID: ${PIDS[*]})"

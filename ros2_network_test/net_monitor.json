@@ -1,0 +1,11 @@
+{
+  "ping_latency_ms": 100,
+  "wifi_signal_dbm": -75,
+  "mcast_in_pps": 200,
+  "tcp_retrans_per_interval": 20,
+  "node_drop": 1,
+  "cpu_load1": 8.0,
+  "mem_used_pct": 90,
+  "merge_gap_s": 15,
+  "stale_after_s": 30
+}
