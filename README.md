@@ -162,11 +162,17 @@ ros2 launch pinky_camera lane_follower.launch.xml namespace:=pinky1
 # 지도 좌표 뷰어: 브라우저로 열기 (서버 불필요)
 xdg-open map_view_pc/pinky_map_viewer.html
 
-# 네트워크 진단 (관제 PC): <핑키IP> [부하_Hz] [지속시간_분] [인터페이스]
+# 네트워크 진단 (관제 PC): <핑키IP> [부하_Hz] [지속시간_분] [인터페이스] [감시_토픽]
+# 인터페이스를 생략하면 무선 인터페이스를 자동 감지합니다.
 cd ros2_network_test
 chmod +x ros2_net_diag.sh
 ./ros2_net_diag.sh 192.168.0.101 0.1 30 wlan0 "/scan,/tf,/map,/odom"
+
+# 이상 이력 대시보드 (다른 터미널, ros2_network_test 폴더에서): http://localhost:8088/
+python3 net_monitor.py
 ```
+
+진단 스크립트는 핑·처리량·WiFi·토픽 대역폭과 함께 UDP/TCP/멀티캐스트/유니캐스트 부하(`proto_load.csv`)를 기록하고, `net_monitor.py`는 그 로그에서 이상 시점을 찾아 보여줍니다. 임계값은 `net_monitor.json`, 자세한 내용은 [`ros2_network_test/README.md`](ros2_network_test/README.md)를 참고하세요. 시험할 때는 실제 관제 도메인(100)과 섞이지 않도록 `ROS_DOMAIN_ID=77`, `ROS_LOCALHOST_ONLY=1`을 쓰세요.
 
 ## 사용 예시
 
@@ -237,5 +243,32 @@ pinky_slam_nav/
 │   ├── docs/               #   usage.md, interfaces.md, 체크리스트, PRD
 │   └── tests/              #   pytest, verify_*.py
 ├── map_view_pc/            # 지도(my_pinky_map10.yaml/.pgm), 좌표 뷰어 HTML
-└── ros2_network_test/      # Wi-Fi/ROS 2 네트워크 진단 스크립트
+└── ros2_network_test/      # 네트워크 진단 스크립트(ros2_net_diag.sh)와 이상 이력 대시보드(net_monitor.py)
 ```
+
+## 기여 방법
+
+저장소 이력에서 확인되는 관례입니다. 별도의 기여 가이드 문서는 없으며, 그 밖의 규칙은 **[TODO]**.
+
+1. `main`에서 기능 브랜치를 만듭니다 (예: `feature/patrol-v1.4.0`, `refactor/drop-version-suffix`).
+2. 커밋 메시지는 `패키지명: 변경 내용` 형식의 한국어 한 줄로 씁니다 (예: `my_pinky_package: v1.4.0 S1 파라미터 레이어 추가 (pinky1)`).
+3. 변경한 부분의 테스트를 실행합니다. 웹 GUI는 ROS 없이 돌아갑니다.
+   ```bash
+   cd pinky_web_gui && .venv/bin/python -m pytest tests -q
+   ```
+   ROS 경로를 검증할 때는 실제 도메인을 건드리지 않도록 `ROS_DOMAIN_ID=77`과 `ROS_LOCALHOST_ONLY=1`로 격리해서 실행하세요.
+4. GitHub에서 Pull Request를 열어 `main`에 병합합니다.
+
+`domain_bridge/`는 [ros2/domain_bridge](https://github.com/ros2/domain_bridge) 소스를 포함하므로, 이 폴더의 기여 규칙은 `domain_bridge/CONTRIBUTING.md`를 따릅니다.
+
+## 라이선스
+
+저장소 루트에는 `LICENSE` 파일이 없어 전체 라이선스는 **[TODO]** 입니다. 패키지별 `package.xml` 선언은 다음과 같습니다.
+
+| 패키지 | 라이선스 |
+|---|---|
+| `domain_bridge` | Apache 2.0 (`domain_bridge/LICENSE` 포함) |
+| `zone_traffic_control` | Apache-2.0 |
+| `pinky_camera` | Apache-2.0 |
+| `my_pinky_package` | **[TODO]** (`package.xml`에 `TODO: License declaration`로 남아 있음) |
+| `pinky_web_gui`, `pinky_patrol_cmd`, `map_view_pc`, `ros2_network_test` | **[TODO]** (선언 없음) |
