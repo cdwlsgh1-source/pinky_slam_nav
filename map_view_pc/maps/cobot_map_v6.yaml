@@ -1,0 +1,7 @@
+image: cobot_map_v6.pgm
+mode: trinary
+resolution: 0.010
+origin: [-1.490, -1.696, 0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

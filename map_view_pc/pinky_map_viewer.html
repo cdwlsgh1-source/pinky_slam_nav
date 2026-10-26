@@ -53,6 +53,11 @@
     border:1px solid var(--line); padding:7px 12px; border-radius:6px; cursor:pointer;
   }
   button:hover{border-color:var(--accent); color:var(--accent);}
+  select{
+    font-family:var(--mono); font-size:11.5px; background:var(--panel); color:var(--text);
+    border:1px solid var(--line); padding:7px 10px; border-radius:6px;
+  }
+  body.dragging .stage{outline:2px dashed var(--accent); outline-offset:-6px;}
   .points{margin-top:10px; font-size:12px;}
   .points-list{list-style:none; margin:6px 0 0; padding:0; max-height:160px; overflow:auto;}
   .points-list li{
@@ -69,7 +74,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>my_pinky_map10 — 좌표계 뷰어</h1>
+  <h1 id="title">my_pinky_map10 — 좌표계 뷰어</h1>
   <p class="sub">map.yaml 의 resolution / origin 기준으로 실제 map 좌표계(m)를 픽셀에 매핑했습니다. 지도 위에서 마우스를 움직이면 좌표가 실시간으로 표시되고, 클릭하면 점이 찍히고 목록에 기록됩니다.</p>
 
   <div class="meta" id="meta"></div>
@@ -84,9 +89,12 @@
   </div>
 
   <div class="controls">
+    <button id="openBtn">지도 불러오기</button>
+    <input type="file" id="mapFile" accept=".yaml,.yml,.pgm" multiple hidden>
     <button id="clearBtn">모든 점 지우기</button>
     <button id="gridBtn">그리드 on/off</button>
   </div>
+  <div class="sub" id="mapNote">지도 불러오기 버튼으로 .yaml + .pgm 을 함께 선택하거나, 이 화면에 끌어다 놓으세요.</div>
 
   <div class="points">
     <div id="pointsEmpty" class="empty">클릭해서 지점을 찍으면 여기에 좌표가 기록됩니다.</div>
@@ -102,7 +110,8 @@
 </div>
 
 <script>
-const META = {
+// 지도 로드 전 placeholder (실제 값은 showMap 이 기본 지도/선택한 지도로 덮어쓴다)
+let META = {
   image_w: 189,
   image_h: 120,
   resolution: 0.010,
@@ -111,27 +120,37 @@ const META = {
   occupied_thresh: 0.65,
   free_thresh: 0.196
 };
-const SCALE = 5; // display px per map px
+let SCALE = 5; // display px per map px (지도 폭에 맞춰 applyMeta 에서 재계산)
+const MAX_VIEW_W = 900;
 
 const metaEl = document.getElementById('meta');
-const xMin = META.origin[0], yMin = META.origin[1];
-const xMax = xMin + META.image_w * META.resolution;
-const yMax = yMin + META.image_h * META.resolution;
-metaEl.innerHTML = `
-  <div><b>이미지 크기</b><span>${META.image_w} × ${META.image_h} px</span></div>
-  <div><b>해상도</b><span>${META.resolution} m/px</span></div>
-  <div><b>origin (map frame)</b><span>${xMin.toFixed(3)}, ${yMin.toFixed(3)}</span></div>
-  <div><b>x 범위</b><span>${xMin.toFixed(3)} ~ ${xMax.toFixed(3)} m</span></div>
-  <div><b>y 범위</b><span>${yMin.toFixed(3)} ~ ${yMax.toFixed(3)} m</span></div>
-`;
+let xMin, yMin, xMax, yMax;
 
 const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
-cv.width = META.image_w * SCALE;
-cv.height = META.image_h * SCALE;
+const ctx = cv.getContext('2d', { willReadFrequently: true });
+
+// META 가 바뀔 때마다 범위·캔버스 크기·메타 패널을 다시 계산한다.
+function applyMeta(name){
+  SCALE = Math.max(1, Math.min(5, Math.floor(MAX_VIEW_W / META.image_w)));
+  xMin = META.origin[0]; yMin = META.origin[1];
+  xMax = xMin + META.image_w * META.resolution;
+  yMax = yMin + META.image_h * META.resolution;
+  metaEl.innerHTML = `
+    <div><b>이미지 크기</b><span>${META.image_w} × ${META.image_h} px</span></div>
+    <div><b>해상도</b><span>${META.resolution} m/px</span></div>
+    <div><b>origin (map frame)</b><span>${xMin.toFixed(3)}, ${yMin.toFixed(3)}</span></div>
+    <div><b>x 범위</b><span>${xMin.toFixed(3)} ~ ${xMax.toFixed(3)} m</span></div>
+    <div><b>y 범위</b><span>${yMin.toFixed(3)} ~ ${yMax.toFixed(3)} m</span></div>
+  `;
+  cv.width = META.image_w * SCALE;
+  cv.height = META.image_h * SCALE;
+  document.title = `${name} 좌표 뷰어`;
+  document.getElementById('title').textContent = `${name} — 좌표계 뷰어`;
+}
 
 const img = new Image();
-img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL0AAAB4CAAAAACCmazrAAABk0lEQVR4nO2cS5KDMAxEJYobzf2PkCtFszA1NanE4J9oqdJvkUUC9qNjsIkd9CGJ2dACU+wiP2iHUR7Js89tv4uIiC0u9Shvay66W6CkvvfuNlK1iX7eqPJ2M7P217WbzFvWuLY3ERF9rV3bZc63nDyoV/tqYZO11Haf/Ub2NcWAKOduUvnk13va4/hG+yhn+TdmHwXa46A9Dtqfop6FM3sctMdBexy0x+Fo79pPFTyz99dny8Hhb+/Zfph9hRt+NmH2NfzDZ/Y4Ytn3Xl1XzHguYiDIWNn3coO9Y2fL7HHEOWvVrGcOfvt7iYH1985x7EfGFTfYOw534mQ/Au1xsK/FQXsctMdBexy57R3H917Ld//haF8WILvifG/lfAQc3+OgPQ7a46A9DtrjoD0O2uOgPQ7a46A9DtrjCDLbPBhi7uxpjyNIuz/ofRxOEPuncGVXMmiPg/Y4aI+D9jhoj4P2OGiPI479yGKMtnsrFTG9Xi/xJmC1DxbRZm+iVYEzM+//Bxf7OO2nj6zehdz2mvqJwr8BGC14zxGRrwAAAABJRU5ErkJggg==';
+let mapLoaded = false; // 지도를 불러오기 전에는 좌표 계산/점 찍기를 막는다
+let mapSrc = img; // draw() 가 그리는 대상: 내장 Image 또는 선택한 지도의 canvas
 
 let showGrid = true;
 let points = []; // {px, py, x, y}
@@ -153,19 +172,21 @@ function mapToPx(x, y){
 function draw(){
   ctx.clearRect(0,0,cv.width,cv.height);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  ctx.drawImage(mapSrc, 0, 0, cv.width, cv.height);
 
   if(showGrid){
-    // minor grid 0.05m
-    ctx.strokeStyle = 'rgba(57,198,255,0.35)';
-    ctx.lineWidth = 1;
-    for(let gx = Math.ceil(xMin/0.05)*0.05; gx <= xMax; gx += 0.05){
-      const [px] = mapToPx(gx, 0);
-      ctx.beginPath(); ctx.moveTo(px*SCALE, 0); ctx.lineTo(px*SCALE, cv.height); ctx.stroke();
-    }
-    for(let gy = Math.ceil(yMin/0.05)*0.05; gy <= yMax; gy += 0.05){
-      const [,py] = mapToPx(0, gy);
-      ctx.beginPath(); ctx.moveTo(0, py*SCALE); ctx.lineTo(cv.width, py*SCALE); ctx.stroke();
+    // minor grid 0.05m — 확대가 작으면(SCALE<3) 너무 촘촘해서 생략
+    if(SCALE >= 3){
+      ctx.strokeStyle = 'rgba(57,198,255,0.35)';
+      ctx.lineWidth = 1;
+      for(let gx = Math.ceil(xMin/0.05)*0.05; gx <= xMax; gx += 0.05){
+        const [px] = mapToPx(gx, 0);
+        ctx.beginPath(); ctx.moveTo(px*SCALE, 0); ctx.lineTo(px*SCALE, cv.height); ctx.stroke();
+      }
+      for(let gy = Math.ceil(yMin/0.05)*0.05; gy <= yMax; gy += 0.05){
+        const [,py] = mapToPx(0, gy);
+        ctx.beginPath(); ctx.moveTo(0, py*SCALE); ctx.lineTo(cv.width, py*SCALE); ctx.stroke();
+      }
     }
     // major grid 0.2m
     ctx.strokeStyle = 'rgba(255,92,92,0.55)';
@@ -203,6 +224,123 @@ function draw(){
 
 img.onload = draw;
 
+// ---- 지도 선택: 사용자가 고른 .yaml + .pgm 을 읽는다 (서버 불필요) ----
+const mapNote = document.getElementById('mapNote');
+
+function parseYaml(text){
+  const get = (re) => { const m = text.match(re); return m ? m[1].trim() : null; };
+  const image = get(/^\s*image:\s*(\S+)/m);
+  const resolution = parseFloat(get(/^\s*resolution:\s*([-\d.eE+]+)/m));
+  const o = text.match(/^\s*origin:\s*\[\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\]/m);
+  const negate = parseInt(get(/^\s*negate:\s*(\d)/m) ?? '0', 10);
+  const occ = parseFloat(get(/^\s*occupied_thresh:\s*([-\d.eE+]+)/m) ?? '0.65');
+  const free = parseFloat(get(/^\s*free_thresh:\s*([-\d.eE+]+)/m) ?? '0.196');
+  if(!image || !isFinite(resolution) || !o) throw new Error('yaml 에서 image/resolution/origin 을 읽지 못했습니다');
+  return { image, resolution, origin: [+o[1], +o[2], +o[3]], negate, occupied_thresh: occ, free_thresh: free };
+}
+
+// P5(binary PGM) → 그레이스케일 canvas. 헤더의 '#' 주석 줄은 건너뛴다.
+function pgmToCanvas(buf){
+  const u8 = new Uint8Array(buf);
+  let pos = 0;
+  const token = () => {
+    for(;;){
+      while(pos < u8.length && /\s/.test(String.fromCharCode(u8[pos]))) pos++;
+      if(u8[pos] === 0x23){ while(pos < u8.length && u8[pos] !== 0x0a) pos++; continue; }
+      break;
+    }
+    let s = '';
+    while(pos < u8.length && !/\s/.test(String.fromCharCode(u8[pos]))) s += String.fromCharCode(u8[pos++]);
+    return s;
+  };
+  if(token() !== 'P5') throw new Error('P5 형식의 PGM 이 아닙니다');
+  const w = parseInt(token(), 10), h = parseInt(token(), 10), maxv = parseInt(token(), 10);
+  pos++; // maxval 뒤 공백 1바이트
+  if(maxv > 255) throw new Error('16bit PGM 은 지원하지 않습니다');
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const id = c.getContext('2d').createImageData(w, h);
+  for(let i = 0; i < w*h; i++){
+    const v = Math.round(u8[pos + i] * 255 / maxv);
+    id.data[i*4] = id.data[i*4+1] = id.data[i*4+2] = v;
+    id.data[i*4+3] = 255;
+  }
+  c.getContext('2d').putImageData(id, 0, 0);
+  return c;
+}
+
+function showMap(name, meta, canvas){
+  META = { image_w: canvas.width, image_h: canvas.height, ...meta };
+  mapSrc = canvas;
+  mapLoaded = true;
+  points = []; // 지도마다 좌표계가 다르므로 기록한 점은 초기화
+  applyMeta(name);
+  renderPointsList();
+  draw();
+}
+
+// files: File[] — .yaml 1개와 그 yaml 의 image: 가 가리키는 .pgm 이 들어 있어야 한다.
+async function loadFromFiles(files){
+  mapNote.textContent = '';
+  try{
+    const yf = files.find(f => /\.ya?ml$/i.test(f.name));
+    if(!yf) throw new Error('.yaml 파일도 함께 선택하세요');
+    const meta = parseYaml(await yf.text());
+    const base = meta.image.split('/').pop();
+    const pf = files.find(f => f.name === base);
+    if(!pf) throw new Error(`yaml 이 가리키는 이미지(${base})도 함께 선택하세요`);
+    showMap(yf.name.replace(/\.ya?ml$/i, ''), meta, pgmToCanvas(await pf.arrayBuffer()));
+  }catch(e){
+    mapNote.textContent = '지도 로드 실패: ' + e.message;
+  }
+}
+
+// 지도 불러오기: yaml + pgm 을 함께 선택한다.
+// 웹 페이지는 선택 창의 시작 폴더를 경로로 지정할 수 없다. 대신 id 를 주면 Chrome 이
+// 이 id 로 마지막에 연 폴더(예: map_view_pc/maps)를 기억해 다음부터 거기서 열어 준다.
+const fileInput = document.getElementById('mapFile');
+fileInput.onchange = async () => {
+  await loadFromFiles([...fileInput.files]);
+  fileInput.value = '';
+};
+document.getElementById('openBtn').onclick = async () => {
+  if(window.showOpenFilePicker){
+    try{
+      const handles = await window.showOpenFilePicker({
+        id: 'pinky-maps',
+        multiple: true,
+        types: [{ description: 'ROS map (.yaml, .pgm)', accept: { 'application/octet-stream': ['.yaml', '.yml', '.pgm'] } }],
+      });
+      await loadFromFiles(await Promise.all(handles.map(h => h.getFile())));
+      return;
+    }catch(e){
+      if(e.name === 'AbortError') return; // 사용자가 취소
+      // 그 외(file:// 에서 막힘 등)는 일반 파일 선택으로 대체
+    }
+  }
+  fileInput.click();
+};
+
+// 방법 2: 드래그 앤 드롭
+window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
+window.addEventListener('dragleave', (e) => { if(!e.relatedTarget) document.body.classList.remove('dragging'); });
+window.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  document.body.classList.remove('dragging');
+  await loadFromFiles([...e.dataTransfer.files]);
+});
+
+// ---- 시작 화면: 지도 없이 빈 화면으로 연다 ----
+function showEmpty(){
+  metaEl.innerHTML = '';
+  document.title = '좌표 뷰어';
+  document.getElementById('title').textContent = '좌표계 뷰어';
+  cv.width = 600; cv.height = 200;
+  ctx.fillStyle = '#7b8a96'; ctx.font = '13px monospace';
+  ctx.fillText('지도를 불러오세요. (.yaml + .pgm)', 20, 100);
+}
+showEmpty();
+
 function updateReadout(px, py){
   const [x,y] = pxToMap(px, py);
   document.getElementById('pxOut').textContent = `(${px.toFixed(0)}, ${py.toFixed(0)})`;
@@ -218,6 +356,7 @@ function updateReadout(px, py){
 }
 
 cv.addEventListener('mousemove', (e)=>{
+  if(!mapLoaded) return;
   const r = cv.getBoundingClientRect();
   const px = (e.clientX - r.left) * (cv.width / r.width) / SCALE;
   const py = (e.clientY - r.top) * (cv.height / r.height) / SCALE;
@@ -241,6 +380,7 @@ function renderPointsList(){
 }
 
 cv.addEventListener('click', (e)=>{
+  if(!mapLoaded) return;
   const r = cv.getBoundingClientRect();
   const px = (e.clientX - r.left) * (cv.width / r.width) / SCALE;
   const py = (e.clientY - r.top) * (cv.height / r.height) / SCALE;
