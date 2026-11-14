@@ -45,13 +45,13 @@ Two **Pinky** mobile robots patrol a small arena (≈1.9 × 1.15 m) with **Nav2*
 
 ## 한눈에 보기
 
-| 문제 | 접근 | 결과 |
+| 문제 | 해결 | 결과 |
 |---|---|---|
-| 좁은 맵에서 로봇 2대가 같은 구역을 공유 | 관제 PC의 `zone_manager`가 점유자 1명 + FIFO 대기열 관리 | 구역 안에는 항상 1대만 진입 |
-| 로봇을 늘릴 때마다 코드 수정 | 동일 순찰 코드 + 로봇별 `ROS_DOMAIN_ID` + `domain_bridge` | 로봇과 브릿지 설정만 추가하면 N대로 확장 |
-| 2대 연결 시 토픽이 랜덤하게 유실 | Cyclone DDS + 유니캐스트 Peer (멀티캐스트 discovery 제거) | 패킷 손실 5.3% → 0%, p95 RTT 135 → 18.8 ms |
-| Nav2 Goal이 시작하자마자 Aborted | 관제 PC를 NTP 서버(chrony)로 두고 로봇을 클라이언트로 설정 | 관제 PC ↔ 로봇 시간 오차 약 0.0007 s |
-| 좁은 맵(1.9×1.15 m)에서 U턴 실패 | 맵 해상도 1 cm/px, costmap `inflation_layer` 튜닝 (40시간+) | 부드러운 U턴, 목표 도달 오차 5 cm |
+| 좁은 구역을 로봇 2대가 공유 | 구역 관리자 + FIFO 대기열 | 구역 안에 항상 1대만 |
+| 로봇 추가 시 코드 수정 | 동일 코드 + 도메인 분리 + 브릿지 | 설정만 추가해 N대 확장 |
+| 토픽 랜덤 유실 | Cyclone DDS + 유니캐스트 | 손실 5.3% → 0% |
+| Nav2 Goal Aborted | chrony 시간 동기화 | 시간 오차 약 0.0007 s |
+| 좁은 맵에서 U턴 실패 | 1 cm/px 맵 + costmap 튜닝 | 부드러운 U턴, 오차 5 cm |
 
 ## 시스템 구조
 
@@ -116,11 +116,12 @@ python3 -m venv --system-site-packages .venv
 
 ### 1. 토픽 유실: 멀티캐스트 discovery 의존 제거
 
-| | |
-|---|---|
-| 증상 | 로봇 2대를 연결하고 주행을 시작하는 순간 토픽이 랜덤하게 끊기고 복구되지 않음. 노드 디스커버리가 영구 붕괴 |
-| 원인 (추정) | 공유기의 멀티캐스트(DDS discovery) 처리 불안정. 토픽이 늘수록 discovery 트래픽이 N²로 증가 |
-| 시도 | ① AP 교체(5 GHz, Wi-Fi 6) → 부분 완화 ② RMW를 `rmw_cyclonedds_cpp`로 전환 → 개선 ③ `AllowMulticast=false` + 고정 IP를 Peer로 직접 지정 → **해결** |
+- **증상**: 로봇 2대를 연결하고 주행을 시작하는 순간 토픽이 랜덤하게 끊기고 복구되지 않음. 노드 디스커버리가 영구 붕괴
+- **원인 (추정)**: 공유기의 멀티캐스트(DDS discovery) 처리 불안정. 토픽이 늘수록 discovery 트래픽이 N²로 증가
+- **해결 과정**
+  1. AP 교체(5 GHz, Wi-Fi 6) → 부분 완화
+  2. RMW를 `rmw_cyclonedds_cpp`로 전환 → 개선
+  3. `AllowMulticast=false` + 고정 IP를 Peer로 직접 지정 → **해결**
 
 | 측정 | FastDDS | Cyclone DDS |
 |---|---|---|
@@ -362,16 +363,14 @@ cd pinky_web_gui && .venv/bin/python -m pytest tests -q
 
 ## 환경변수
 
-| 변수 | 값 | 사용처 | 설명 |
-|---|---|---|---|
-| `ROS_DOMAIN_ID` | 관제 PC `100`, pinky1 `10`, pinky2 `20`, pinky3 `30` | 전체 | 장비별 ROS 도메인. 웹 GUI는 100이 아니면 시작 시 경고 |
-| `ROS_LOCALHOST_ONLY` | 설정하지 않음 | 웹 GUI | `1`이면 브릿지 토픽을 못 받는다는 경고 |
-| `RMW_IMPLEMENTATION` | `rmw_cyclonedds_cpp` | 로봇 | `processes.yaml`의 `env`로 SSH 실행 시 주입. PC의 CycloneDDS와 맞춰야 함 |
-| `CYCLONEDDS_URI` | `file:///home/pinky/.ros/cyclonedds_robot.xml` | 로봇 | 위와 같음. 로봇 터미널 값과 같게 둠 |
-| `ROS_AUTOMATIC_DISCOVERY_RANGE` | `SUBNET` | 로봇 | 위와 같음 |
-| `ssh.password_env`가 가리키는 변수 | 선택 | 웹 GUI | `processes.yaml` 항목에 변수 **이름**을 적으면 SSH 비밀번호로 사용 (`sshpass` 필요). 기본은 SSH 키 로그인 |
-| `ROS_DOMAIN_ID=77` + `ROS_LOCALHOST_ONLY=1` | 시험용 | 테스트 | ROS 경로 검증 테스트 전용 격리 값 (`verify_step4_ros.py`, zone/patrol 테스트) |
-| `STEP4_SERVER_LOG` | 파일 경로, 선택 | 테스트 | `verify_step4_ros.py` 디버깅용 서버 로그 파일 |
+- **`ROS_DOMAIN_ID`** (전체): 관제 PC `100`, pinky1 `10`, pinky2 `20`, pinky3 `30`. 웹 GUI는 100이 아니면 시작 시 경고합니다.
+- **`ROS_LOCALHOST_ONLY`** (웹 GUI): 설정하지 않습니다. `1`이면 브릿지 토픽을 받지 못한다는 경고가 뜹니다.
+- **`RMW_IMPLEMENTATION`** (로봇): `rmw_cyclonedds_cpp`. `processes.yaml`의 `env`로 SSH 실행 시 주입하며, PC의 CycloneDDS와 맞춰야 합니다.
+- **`CYCLONEDDS_URI`** (로봇): `file:///home/pinky/.ros/cyclonedds_robot.xml`. 로봇 터미널 값과 같게 둡니다.
+- **`ROS_AUTOMATIC_DISCOVERY_RANGE`** (로봇): `SUBNET`. 위와 같습니다.
+- **`ssh.password_env`가 가리키는 변수** (웹 GUI, 선택): `processes.yaml` 항목에 변수 **이름**을 적으면 SSH 비밀번호로 사용합니다 (`sshpass` 필요). 기본은 SSH 키 로그인입니다.
+- **`ROS_DOMAIN_ID=77` + `ROS_LOCALHOST_ONLY=1`** (시험용): ROS 경로 검증 테스트 전용 격리 값입니다 (`verify_step4_ros.py`, zone/patrol 테스트).
+- **`STEP4_SERVER_LOG`** (테스트, 선택): `verify_step4_ros.py` 디버깅용 서버 로그 파일 경로입니다.
 
 > ROS 파라미터 `robot_id`(순찰 노드, `-p robot_id:=pinky1`)는 환경변수가 아닙니다. 웹 GUI의 나머지 설정은 `pinky_web_gui/config/*.yaml`에 있습니다.
 
