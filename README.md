@@ -1,6 +1,158 @@
-# Pinky SLAM-NAV
+<h1 align="center">Pinky SLAM-NAV</h1>
 
-Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격 순찰시키고, 공유 구역(위험 구역)에는 한 번에 한 대만 들어가도록 제어하는 ROS 2 코드 모음입니다.
+<p align="center">
+  <b>Multi-robot patrol &amp; zone-access control for ROS 2 / Nav2</b><br>
+  한 번에 <b>한 대</b>만 위험구역에 들어가도록 로봇 여러 대를 관제하는 시스템
+</p>
+
+<p align="center">
+  <img alt="ROS 2 Jazzy" src="https://img.shields.io/badge/ROS%202-Jazzy-22314E?logo=ros">
+  <img alt="Ubuntu 24.04" src="https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&logoColor=white">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white">
+  <img alt="Nav2" src="https://img.shields.io/badge/Nav2-navigation-14A89A">
+  <img alt="Cyclone DDS" src="https://img.shields.io/badge/RMW-Cyclone%20DDS-2E6FD8">
+</p>
+
+<p align="center">
+  <img src="pinky_web_gui/docs/step4_screenshot.png" width="860" alt="Control web GUI: live map, robot status, and zone occupancy">
+  <br><sub>관제 웹 GUI — 지도 위 로봇 위치, 구역 점유 상태(대기/이탈), 명령 이력</sub>
+</p>
+
+<!-- TODO: 토큰 발행/반납 데모를 10~15초 GIF로 만들어 docs/demo.gif 로 추가하고, 위 스크린샷 아래에 <img src="docs/demo.gif"> 로 넣으세요. -->
+
+---
+
+## English summary
+
+Two **Pinky** mobile robots patrol a small arena (≈1.9 × 1.15 m) with **Nav2**, and a **control PC** guarantees that only **one robot is inside the shared danger zone at a time**.
+
+- **Zone mutual exclusion** — a `zone_manager` on the control PC grants entry to one robot, keeps a FIFO queue with per-slot waiting poses, and force-releases the zone on timeout. Robots only proceed while they hold a grant.
+- **Scales by adding robots, not code** — every robot runs the same patrol code. Each robot lives in its own `ROS_DOMAIN_ID`; [`domain_bridge`](https://github.com/ros2/domain_bridge) relays only the needed topics to the control PC and remaps them to `/<robot>/...`.
+- **Operator tooling** — CLI and web GUI (live map, battery, LiDAR overlay, e-stop, alarms, process start/stop, `--mock` mode that runs **without ROS or robots**).
+- **Vision (optional)** — YOLO-based lane detection and a lane-following node (`pinky_camera`).
+- **Network diagnostics** — scripts and a dashboard used to track down a multicast/DDS-discovery problem (see [Engineering notes](#engineering-notes)).
+
+> Stack: ROS 2 Jazzy · Nav2 · Cyclone DDS · domain_bridge · Python (FastAPI, rclpy) · YOLO (Ultralytics) · chrony (NTP)
+
+---
+
+## 목차
+
+- [한눈에 보기](#한눈에-보기)
+- [시스템 구조](#시스템-구조)
+- [빠른 시작 (로봇 없이 체험)](#빠른-시작-로봇-없이-체험)
+- [Engineering notes](#engineering-notes)
+- [주요 기능](#주요-기능) · [시스템 구성](#시스템-구성) · [설치 방법](#설치-방법) · [실행 방법](#실행-방법)
+- [사용 예시](#사용-예시) · [환경변수](#환경변수) · [프로젝트 구조](#프로젝트-구조) · [기여 방법](#기여-방법) · [라이선스](#라이선스)
+
+## 한눈에 보기
+
+| 문제 | 접근 | 결과 |
+|---|---|---|
+| 좁은 맵에서 로봇 2대가 같은 구역을 공유 | 관제 PC의 `zone_manager`가 점유자 1명 + FIFO 대기열 관리 | 구역 안에는 항상 1대만 진입 |
+| 로봇을 늘릴 때마다 코드 수정 | 동일 순찰 코드 + 로봇별 `ROS_DOMAIN_ID` + `domain_bridge` | 로봇과 브릿지 설정만 추가하면 N대로 확장 |
+| 2대 연결 시 토픽이 랜덤하게 유실 | Cyclone DDS + 유니캐스트 Peer (멀티캐스트 discovery 제거) | 패킷 손실 5.3% → 0%, p95 RTT 135 → 18.8 ms |
+| Nav2 Goal이 시작하자마자 Aborted | 관제 PC를 NTP 서버(chrony)로 두고 로봇을 클라이언트로 설정 | 관제 PC ↔ 로봇 시간 오차 약 0.0007 s |
+| 좁은 맵(1.9×1.15 m)에서 U턴 실패 | 맵 해상도 1 cm/px, costmap `inflation_layer` 튜닝 (40시간+) | 부드러운 U턴, 목표 도달 오차 5 cm |
+
+## 시스템 구조
+
+```mermaid
+flowchart LR
+  subgraph PC["관제 PC · ROS_DOMAIN_ID=100"]
+    direction TB
+    GUI["pinky_web_gui<br/>(FastAPI + rclpy)"]
+    CLI["pinky_control_client.py"]
+    ZM["zone_manager_node<br/>점유자 1명 + FIFO 대기열"]
+    DB["domain_bridge<br/>(topic relay + remap)"]
+    GUI --> DB
+    CLI --> DB
+    ZM <--> DB
+  end
+
+  subgraph R1["pinky1 · domain 10"]
+    direction TB
+    P1["patrol_node<br/>(Nav2)"]
+    G1["ZoneGateClient"]
+    P1 --- G1
+  end
+
+  subgraph R2["pinky2 · domain 20"]
+    direction TB
+    P2["patrol_node<br/>(Nav2)"]
+    G2["ZoneGateClient"]
+    P2 --- G2
+  end
+
+  RN["pinky N …<br/>(같은 코드, 설정만 추가)"]
+
+  DB <-->|"patrol_cmd / patrol_status"| R1
+  DB <-->|"patrol_cmd / patrol_status"| R2
+  DB -.-> RN
+  G1 -->|"request_entry / notify_exit"| ZM
+  ZM -->|"grant_entry / queue_slot / status"| G1
+  G2 -->|"request_entry / notify_exit"| ZM
+  ZM -->|"grant_entry / queue_slot / status"| G2
+```
+
+구역 관리자의 상세 동작과 토픽은 [`zone_traffic_control/README.md`](zone_traffic_control/README.md), 전체 SVG 구성도는 [`docs/pinky_architecture_adaptive.svg`](docs/pinky_architecture_adaptive.svg)를 참고하세요.
+
+## 빠른 시작 (로봇 없이 체험)
+
+ROS 2 Jazzy가 설치된 Ubuntu 24.04에서, 로봇 없이 관제 웹 GUI를 가짜 로봇 2대로 띄웁니다.
+
+```bash
+git clone https://github.com/cdwlsgh1-source/pinky_slam_nav.git
+cd pinky_slam_nav/pinky_web_gui
+
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m backend.main --mock
+```
+
+브라우저에서 <http://localhost:8000/> 을 열고 `oper` / `oper`(보기 전용) 또는 `mngr` / `mngr`(명령 가능)으로 로그인합니다. 실제 로봇을 연결하려면 아래 [설치 방법](#설치-방법)과 [실행 방법](#실행-방법)을 따르세요.
+
+## Engineering notes
+
+실제 로봇 2대를 관제하며 겪은 문제와 해결 과정입니다.
+
+### 1. 토픽 유실: 멀티캐스트 discovery 의존 제거
+
+| | |
+|---|---|
+| 증상 | 로봇 2대를 연결하고 주행을 시작하는 순간 토픽이 랜덤하게 끊기고 복구되지 않음. 노드 디스커버리가 영구 붕괴 |
+| 원인 (추정) | 공유기의 멀티캐스트(DDS discovery) 처리 불안정. 토픽이 늘수록 discovery 트래픽이 N²로 증가 |
+| 시도 | ① AP 교체(5 GHz, Wi-Fi 6) → 부분 완화 ② RMW를 `rmw_cyclonedds_cpp`로 전환 → 개선 ③ `AllowMulticast=false` + 고정 IP를 Peer로 직접 지정 → **해결** |
+
+| 측정 | FastDDS | Cyclone DDS |
+|---|---|---|
+| 패킷 손실 | 5.3 % | 0 % |
+| p95 RTT | 135 ms | 18.8 ms |
+| 노드 디스커버리 | 약 14분 후 0개로 붕괴 | 11.5분간 28개 유지 |
+
+측정 조건: FastDDS 약 43.2분(2,408 ping), Cyclone DDS 약 13.9분(805 ping). 진단에 쓴 도구는 [`ros2_network_test/`](ros2_network_test/)에 있습니다.
+
+### 2. 폐쇄망 시간 동기화
+
+- **증상**: Nav2 Goal 주행을 시작하자마자 Feedback이 Aborted (토픽은 정상)
+- **원인**: 인터넷이 끊긴 로봇의 시계가 관제 PC와 18일 어긋나, RViz2가 "시간이 맞지 않는 데이터"로 판단
+- **해결**: 관제 PC에 chrony를 설치해 NTP 서버로 두고, 로봇이 관제 PC를 서버로 지정. `chronyc`로 확인한 오차 약 0.0007 s
+
+### 3. 좁은 맵에서의 Nav2 튜닝
+
+- 저장된 이미지를 확대하지 않고 **SLAM 실행 단계에서 해상도를 1 cm/px로 높임** (5 cm → 1 cm)
+- 장애물 비용이 멀리까지 남으면 좁은 구간에서 U턴하지 못하고 멈춤 → `global_costmap.inflation_layer.cost_scaling_factor`를 1.0 → 8.0으로 올려 비용이 빠르게 감소하도록 조정 (`inflation_radius` 0.45 유지)
+- 40시간 이상의 튜닝과 테스트로 안정적인 U턴과 정밀한 goal 도달 확보
+
+### 4. 설계 원칙
+
+- **로봇은 주행, PC는 관제**: 역할을 나눠 지연과 로봇 증가에 대비
+- **동일한 주행 코드**: 로봇별 차이는 `robot_id`, 도메인, 브릿지 설정뿐
+- **안전장치**: 점유자 이탈 통보 유실 시 `max_hold_sec` 강제 해제, 대기자 재요청이 끊기면 `queue_stale_sec` 후 큐에서 제거, 이동 실패 시 재시도 후 다음 좌표로 진행
+
+**남은 과제**: 로봇 대수 확장 시 PC 부하와 통신 안정성 검증(Peer Star 전환 검토), Cyclone DDS 장시간 운용 시 CPU·메모리 추이 확인, 로봇 관제와 YOLO 통합.
+
+---
 
 ## 주요 기능
 
@@ -230,8 +382,8 @@ cd pinky_web_gui && .venv/bin/python -m pytest tests -q
 ```
 pinky_slam_nav/
 ├── domain_bridge/          # ros2/domain_bridge 소스 + 직접 작성한 launch/config
-│   ├── config/             #   pinky_bridge_pinky1.yaml, pinky_bridge_pinky2.yaml
-│   └── launch/             #   bridges.launch.xml (pinky1+pinky2 브릿지 실행)
+│   ├── config/             #   pinky_bridge_pinky{1,2,3}.yaml
+│   └── launch/             #   bridges.launch.xml (로봇별 브릿지 실행)
 ├── my_pinky_package/       # 로봇용 순찰 노드 (pinky_patrol_node_pinky{1,2,3})
 ├── pinky_patrol_cmd/       # 관제 PC용 CLI (pinky_control_client.py)
 ├── zone_traffic_control/   # 구역 상호 배제 (zone_manager_node, zone_gate_client)
