@@ -18,8 +18,6 @@
   <br><sub>관제 웹 GUI — 지도 위 로봇 위치, 구역 점유 상태(대기/이탈), 명령 이력</sub>
 </p>
 
-<!-- TODO: 토큰 발행/반납 데모를 10~15초 GIF로 만들어 docs/demo.gif 로 추가하고, 위 스크린샷 아래에 <img src="docs/demo.gif"> 로 넣으세요. -->
-
 ---
 
 ## English summary
@@ -43,7 +41,7 @@ Two **Pinky** mobile robots patrol a small arena (≈1.9 × 1.15 m) with **Nav2*
 - [빠른 시작 (로봇 없이 체험)](#빠른-시작-로봇-없이-체험)
 - [Engineering notes](#engineering-notes)
 - [주요 기능](#주요-기능) · [시스템 구성](#시스템-구성) · [설치 방법](#설치-방법) · [실행 방법](#실행-방법)
-- [사용 예시](#사용-예시) · [환경변수](#환경변수) · [프로젝트 구조](#프로젝트-구조) · [기여 방법](#기여-방법) · [라이선스](#라이선스)
+- [사용 예시](#사용-예시) · [환경변수](#환경변수) · [프로젝트 구조](#프로젝트-구조) · [기여 방법](#기여-방법)
 
 ## 한눈에 보기
 
@@ -306,7 +304,7 @@ ros2 launch pinky_camera lane_detector.launch.xml namespace:=pinky1
 ros2 launch pinky_camera lane_follower.launch.xml namespace:=pinky1
 ```
 
-> `config/lane_detector_params.yaml`의 `model_path`가 `/home/jinho/dev_ws/best.pt`로 하드코딩되어 있습니다. 실행 전에 실제 경로(저장소의 `pinky_camera/lane_seg_best.pt` 등)로 바꾸세요. 어느 모델이 최종인지는 **[TODO]**.
+> `config/lane_detector_params.yaml`의 `model_path`가 `/home/jinho/dev_ws/best.pt`로 하드코딩되어 있습니다. 실행 전에 실제 경로(저장소의 `pinky_camera/lane_seg_best.pt` 등)로 바꾸세요.
 
 ### 지도 뷰어 / 네트워크 진단
 
@@ -400,7 +398,7 @@ pinky_slam_nav/
 
 ## 기여 방법
 
-저장소 이력에서 확인되는 관례입니다. 별도의 기여 가이드 문서는 없으며, 그 밖의 규칙은 **[TODO]**.
+저장소 이력에서 확인되는 관례입니다. 별도의 기여 가이드 문서는 없습니다.
 
 1. `main`에서 기능 브랜치를 만듭니다 (예: `feature/patrol-v1.4.0`, `refactor/drop-version-suffix`).
 2. 커밋 메시지는 `패키지명: 변경 내용` 형식의 한국어 한 줄로 씁니다 (예: `my_pinky_package: v1.4.0 S1 파라미터 레이어 추가 (pinky1)`).
@@ -412,15 +410,3 @@ pinky_slam_nav/
 4. GitHub에서 Pull Request를 열어 `main`에 병합합니다.
 
 `domain_bridge/`는 [ros2/domain_bridge](https://github.com/ros2/domain_bridge) 소스를 포함하므로, 이 폴더의 기여 규칙은 `domain_bridge/CONTRIBUTING.md`를 따릅니다.
-
-## 라이선스
-
-저장소 루트에는 `LICENSE` 파일이 없어 전체 라이선스는 **[TODO]** 입니다. 패키지별 `package.xml` 선언은 다음과 같습니다.
-
-| 패키지 | 라이선스 |
-|---|---|
-| `domain_bridge` | Apache 2.0 (`domain_bridge/LICENSE` 포함) |
-| `zone_traffic_control` | Apache-2.0 |
-| `pinky_camera` | Apache-2.0 |
-| `my_pinky_package` | **[TODO]** (`package.xml`에 `TODO: License declaration`로 남아 있음) |
-| `pinky_web_gui`, `pinky_patrol_cmd`, `map_view_pc`, `ros2_network_test` | **[TODO]** (선언 없음) |
